@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> Independent fork of [ryaker/outlook-mcp](https://github.com/ryaker/outlook-mcp), maintained by Ricardo Pinto ([rafaga2469](https://github.com/rafaga2469)). Adds subfolder path resolution for `move-emails` / `create-folder`, dotenv loading in `index.js`, and a refreshed MCP Inspector.
+
 ## Development Commands
 
 - `npm install` - **ALWAYS run first** to install dependencies
@@ -29,7 +31,8 @@ Each module exports tools and handlers:
 - `auth/` - OAuth 2.0 authentication with token management (Graph + Flow)
 - `calendar/` - Calendar operations (list, create, accept, decline, delete events)
 - `email/` - Email management (list, search, read, send, mark as read)
-- `folder/` - Folder operations (list, create, move)
+  - `email/folder-utils.js` - Folder name and path resolution utilities (`getFolderIdByName`, `resolveSegmentInParent`, `resolveFolderPath`)
+- `folder/` - Folder operations (list, create, move) — relies on `email/folder-utils.js` for path resolution
 - `rules/` - Email rules management
 - `onedrive/` - OneDrive operations (list, search, download, upload, share, folder ops)
 - `power-automate/` - Flow operations (list environments, list/run/toggle flows, run history)
@@ -39,8 +42,18 @@ Each module exports tools and handlers:
 - **Token Management**: Tokens stored in `~/.outlook-mcp-tokens.json` (both Graph and Flow tokens)
 - **Graph API Client**: `utils/graph-api.js` handles Microsoft Graph API calls (Outlook, OneDrive)
 - **Flow API Client**: `power-automate/flow-api.js` handles Power Automate API calls
+- **Folder Path Resolution**: `email/folder-utils.js` resolves `Parent/Child/...` paths for `move-emails` and `create-folder`
 - **Test Mode**: Mock data responses when `USE_TEST_MODE=true`
 - **Modular Tools**: Each module exports tools array that gets combined in main server
+
+### Folder Path Resolution
+
+`move-emails` and `create-folder` accept folder paths with `/` as a separator (e.g. `Tramite/REQ-104951`).
+
+- `resolveFolderPath(path)` splits the input on `/`, then walks each segment via `resolveSegmentInParent(parentId, segmentName)`, descending into the matching child folder.
+- `getFolderIdByName(name)` handles the legacy flat-name case (top-level lookup only).
+- Backwards compatible: a single segment with no `/` is equivalent to the legacy behavior.
+- Known limitation: folder names that contain a literal `/` character are not supported, because `/` is always treated as a path separator.
 
 ## Authentication
 

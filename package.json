@@ -1,7 +1,7 @@
 {
   "name": "m365-mcp",
-  "version": "2.0.0",
-  "description": "MCP server for Claude to access Microsoft 365 (Outlook, OneDrive, Power Automate) via Microsoft Graph API",
+  "version": "2.1.0",
+  "description": "MCP server for Claude to access Microsoft 365 (Outlook, OneDrive, Power Automate) via Microsoft Graph API (maintained fork with subfolder path resolution)",
   "main": "index.js",
   "bin": {
     "m365-mcp": "./index.js",
@@ -22,9 +22,12 @@
     "microsoft-365",
     "mcp",
     "microsoft-graph",
-    "email"
+    "email",
+    "fork",
+    "subfolder",
+    "folder-resolution"
   ],
-  "author": "",
+  "author": "Ricardo Pinto <rafaga2469@gmail.com>",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
