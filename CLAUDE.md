@@ -68,6 +68,9 @@ Each module exports tools and handlers:
 4. Complete browser authentication
 5. Tokens automatically stored and refreshed
 
+### Persistent Auth
+`TokenStorage` automatically refreshes expired tokens using the refresh token. All scopes are unified in `config.js` (10 scopes including `offline_access`). Users only need to re-auth if the refresh token expires or is revoked.
+
 ### Power Automate (Optional)
 - Requires separate Flow API scope: `https://service.flow.microsoft.com//.default`
 - Flow tokens stored alongside Graph tokens in same token file
@@ -75,6 +78,9 @@ Each module exports tools and handlers:
 - Only manual trigger flows can be triggered
 
 ## Configuration
+
+### Agent Configuration
+The server works with OpenCode, Claude Desktop, Codex (OpenAI), and Pi.dev. Each uses a different config file and format — see [README.md](./README.md#agent-configuration) for detailed config examples for each agent.
 
 ### Environment Variables
 - **For .env file**: Use `MS_CLIENT_ID` and `MS_CLIENT_SECRET`

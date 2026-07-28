@@ -18,6 +18,7 @@ A comprehensive MCP (Model Context Protocol) server that connects Claude with Mi
 - [x] **dotenv support in `index.js`** — loads `.env` at server startup so credentials are picked up without extra wiring
 - [x] **MCP Inspector bumped to 0.22.0** for current inspector features
 - [x] New `email/folder-utils.js` module with `getFolderIdByName`, `resolveSegmentInParent`, `resolveFolderPath`
+- [x] **Persistent OAuth authentication** — unified scope list ensures token refresh maintains full permissions (no more re-auth every few hours)
 
 See [Credits](#credits) for the original work this builds on.
 
@@ -26,7 +27,7 @@ See [Credits](#credits) for the original work this builds on.
 1. **Install**: `npm install`
 2. **Azure setup**: Register an app in Azure Portal (see [Azure App Registration](#azure-app-registration--configuration))
 3. **Configure**: `cp .env.example .env` and fill in your Azure credentials
-4. **Wire up Claude**: Add the server to your Claude Desktop config (see [Claude Desktop Configuration](#claude-desktop-configuration))
+4. **Wire up your agent**: Add the server to your AI agent's MCP config (see [Agent Configuration](#agent-configuration))
 5. **Authenticate**: `npm run auth-server`, then use the `authenticate` tool in Claude to complete OAuth
 6. **Use it**: Access your M365 data through Claude
 
@@ -228,27 +229,111 @@ USE_TEST_MODE=false
 - For Claude Desktop config, you'll use `OUTLOOK_CLIENT_ID` and `OUTLOOK_CLIENT_SECRET`
 - Always use the client secret **VALUE**, never the Secret ID
 
-### Claude Desktop Configuration
+### Agent Configuration
 
-Add to your Claude Desktop config:
+This server works with any MCP-compatible AI coding agent. Below is a quick reference, followed by detailed config for each.
 
-```json
+| Agent | Config file | Format | MCP support |
+|-------|------------|--------|-------------|
+| OpenCode | `opencode.json` / `opencode.jsonc` | JSON | Built-in |
+| Claude Desktop | `claude_desktop_config.json` | JSON | Built-in |
+| Codex (OpenAI) | `~/.codex/config.toml` | TOML | Built-in |
+| Pi.dev | `~/.pi/agent/mcp.json` | JSON | Via plugin |
+
+> **Path tip:** Replace `/path/to/outlook-mcp/index.js` with the absolute path to your local clone (e.g. `C:\\Users\\you\\outlook-mcp\\index.js` on Windows, or `/home/you/outlook-mcp/index.js` on Linux).
+
+#### OpenCode
+
+Config file: `opencode.json` or `opencode.jsonc` in project root, or `~/.config/opencode/opencode.json` for global.
+
+```jsonc
 {
-  "mcpServers": {
-    "m365-assistant": {
-      "command": "node",
-      "args": ["/path/to/outlook-mcp/index.js"],
-      "env": {
-        "USE_TEST_MODE": "false",
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "outlook-mcp": {
+      "type": "local",
+      "command": ["node", "/path/to/outlook-mcp/index.js"],
+      "enabled": true,
+      "environment": {
         "OUTLOOK_CLIENT_ID": "your-client-id",
-        "OUTLOOK_CLIENT_SECRET": "your-client-secret"
+        "OUTLOOK_CLIENT_SECRET": "your-client-secret",
+        "MS_TENANT_ID": "your-tenant-id"
       }
     }
   }
 }
 ```
 
-> If you cloned the fork into a known location, point `args` at that path (e.g. `C:\\Users\\you\\outlook-mcp\\index.js` on Windows, or `/home/you/outlook-mcp/index.js` on Linux).
+> **Note:** `command` is an **array** where `[0]` is the executable and the rest are args. This is different from Claude/Codex which use separate `command` + `args` keys.
+
+#### Claude Desktop
+
+Config file: `claude_desktop_config.json`
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+
+Access via Claude Desktop → Settings → Developer tab → Edit Config.
+
+```json
+{
+  "mcpServers": {
+    "outlook-mcp": {
+      "command": "node",
+      "args": ["/path/to/outlook-mcp/index.js"],
+      "env": {
+        "OUTLOOK_CLIENT_ID": "your-client-id",
+        "OUTLOOK_CLIENT_SECRET": "your-client-secret",
+        "MS_TENANT_ID": "your-tenant-id"
+      }
+    }
+  }
+}
+```
+
+> **Note:** Must fully restart Claude Desktop after editing config. Uses stdio transport for local servers.
+
+#### Codex (OpenAI)
+
+Config file: `~/.codex/config.toml` (global) or `.codex/config.toml` (project-scoped).
+
+```toml
+[mcp_servers.outlook-mcp]
+command = "node"
+args = ["/path/to/outlook-mcp/index.js"]
+
+[mcp_servers.outlook-mcp.env]
+OUTLOOK_CLIENT_ID = "your-client-id"
+OUTLOOK_CLIENT_SECRET = "your-client-secret"
+MS_TENANT_ID = "your-tenant-id"
+```
+
+> **Note:** TOML format, not JSON. Supports stdio and HTTP transports. CLI alternative: `codex mcp add outlook-mcp --env OUTLOOK_CLIENT_ID=xxx -- node index.js`.
+
+#### Pi.dev
+
+Config file: `~/.pi/agent/mcp.json`
+
+```json
+{
+  "mcpServers": {
+    "outlook-mcp": {
+      "command": "node",
+      "args": ["/path/to/outlook-mcp/index.js"],
+      "env": {
+        "OUTLOOK_CLIENT_ID": "your-client-id",
+        "OUTLOOK_CLIENT_SECRET": "your-client-secret",
+        "MS_TENANT_ID": "your-tenant-id"
+      }
+    }
+  }
+}
+```
+
+> **Note:** Pi.dev supports MCP via a plugin. The config format is identical to Claude Desktop (`mcpServers` with `command` + `args`). Despite Pi's official docs stating "no MCP", the plugin ecosystem enables it. Check your Pi installation for MCP plugin availability.
+
+#### Credentials: runtime vs auth server
+
+The `OUTLOOK_CLIENT_ID` and `OUTLOOK_CLIENT_SECRET` env vars are used by the MCP server at runtime. The `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, and `MS_TENANT_ID` vars are used by the standalone auth server. Both sets must point to the same Azure app registration. You can set both in the agent config's env block, or use a `.env` file in the project root (loaded automatically by `index.js`).
 
 ## Authentication
 
@@ -258,6 +343,27 @@ Add to your Claude Desktop config:
 2. Use the `authenticate` tool in Claude
 3. Visit the provided URL and sign in
 4. Tokens saved to `~/.outlook-mcp-tokens.json`
+
+### Persistent Authentication (Token Refresh)
+
+The server automatically refreshes expired access tokens using the stored refresh token. You only need to authenticate once via the browser flow — after that, the server handles renewal transparently.
+
+**How it works:**
+1. Initial auth exchanges the authorization code for an access token + refresh token
+2. Tokens are stored in `~/.outlook-mcp-tokens.json` with restrictive permissions (0o600)
+3. When the access token expires (typically ~1 hour), `TokenStorage` automatically refreshes it using the refresh token
+4. The refreshed token is saved back to the file, extending the session indefinitely
+
+**Requirements for persistent auth:**
+- The Azure app registration must include `offline_access` permission (enables refresh tokens)
+- The `config.js` scope list includes `offline_access` — all 10 scopes are requested on both initial auth and refresh
+- If `MS_SCOPES` env var is set, it MUST include `offline_access` or the server will warn
+
+**When re-authentication is needed:**
+- First time setup (no token file exists)
+- Refresh token expires or is revoked by Microsoft (rare, typically 90 days)
+- Token file is deleted
+- Azure app permissions are changed
 
 ### Power Automate (Optional)
 
