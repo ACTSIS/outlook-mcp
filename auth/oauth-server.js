@@ -162,8 +162,11 @@ function setupOAuthRoutes(app, tokenStorage, authConfig, envPrefix = 'MS_') {
     try {
       const token = await tokenStorage.getValidAccessToken();
       if (token) {
-        const expiryDate = new Date(tokenStorage.getExpiryTime());
-        res.send(templates.tokenStatus(`Access token is valid. Expires at: ${expiryDate.toLocaleString()}`));
+        const expiry = tokenStorage.getExpiryTime();
+        const expiryStr = Number.isFinite(expiry) && expiry > 0
+          ? new Date(expiry).toLocaleString()
+          : 'Unknown';
+        res.send(templates.tokenStatus(`Access token is valid. Expires at: ${expiryStr}`));
       } else {
         res.send(templates.tokenStatus('No valid access token found. Please authenticate.'));
       }

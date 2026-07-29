@@ -156,6 +156,19 @@ describe('OAuth Server Routes', () => {
       expect(response.text).toContain(`Expires at: ${new Date(mockExpiry).toLocaleString()}`);
     });
 
+    it('should handle invalid expiry time gracefully (no Invalid Date)', async () => {
+      const mockAccessToken = 'valid_token_456';
+      mockTokenStorageInstance.getValidAccessToken.mockResolvedValue(mockAccessToken);
+      mockTokenStorageInstance.getExpiryTime.mockReturnValue(NaN);
+
+      const response = await request(app).get('/token-status');
+
+      expect(response.status).toBe(200);
+      expect(response.text).toContain('Access token is valid.');
+      expect(response.text).toContain('Expires at: Unknown');
+      expect(response.text).not.toContain('Invalid Date');
+    });
+
     it('should return "no valid token" status if token is not found', async () => {
       mockTokenStorageInstance.getValidAccessToken.mockResolvedValue(null);
 

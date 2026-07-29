@@ -1,5 +1,11 @@
 /**
- * Token management for Microsoft Graph API authentication
+ * @deprecated Use TokenStorage (auth/token-storage.js) instead.
+ * TokenStorage provides automatic refresh, unified scope management,
+ * and async file operations. This module is retained only for:
+ *   - Flow API token access (getFlowAccessToken / saveFlowTokens)
+ *   - Test mode token creation (createTestTokens)
+ *   - Backwards compatibility for legacy imports
+ * Do not add new functionality here. Migrate consumers to TokenStorage.
  */
 const fs = require('fs');
 const config = require('../config');
