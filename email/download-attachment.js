@@ -59,11 +59,8 @@ async function handleDownloadAttachment(args) {
     const accessToken = await ensureAuthenticated();
 
     const endpoint = `me/messages/${encodeURIComponent(emailId)}/attachments/${encodeURIComponent(attachmentId)}`;
-    const queryParams = {
-      $select: 'id,name,contentType,size,contentBytes',
-    };
 
-    const attachment = await callGraphAPI(accessToken, 'GET', endpoint, null, queryParams);
+    const attachment = await callGraphAPI(accessToken, 'GET', endpoint, null);
 
     if (!attachment) {
       return {

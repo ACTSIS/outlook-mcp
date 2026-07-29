@@ -20,7 +20,7 @@ describe('handleDownloadAttachment', () => {
     console.error.mockRestore();
   });
 
-  test('should call single attachment endpoint with correct $select', async () => {
+  test('should call single attachment endpoint without $select (contentBytes is on derived type)', async () => {
     ensureAuthenticated.mockResolvedValue(mockAccessToken);
     callGraphAPI.mockResolvedValue({
       id: attachmentId,
@@ -36,10 +36,7 @@ describe('handleDownloadAttachment', () => {
       mockAccessToken,
       'GET',
       `me/messages/${encodeURIComponent(emailId)}/attachments/${encodeURIComponent(attachmentId)}`,
-      null,
-      expect.objectContaining({
-        $select: 'id,name,contentType,size,contentBytes',
-      })
+      null
     );
     expect(result.content[0].text).toContain('report.pdf');
     expect(result.content[0].text).toContain('application/pdf');
