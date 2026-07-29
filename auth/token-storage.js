@@ -24,6 +24,7 @@ class TokenStorage {
       clientSecret,
       redirectUri: process.env.MS_REDIRECT_URI || 'http://localhost:3333/auth/callback',
       scopes: (process.env.MS_SCOPES || appConfig.AUTH_CONFIG.scopes.join(' ')).split(' '),
+      flowScope: appConfig.FLOW_SCOPE,
       tenantId,
       tokenEndpoint:
         process.env.MS_TOKEN_ENDPOINT || `${authorityHost}/${tenantId}/oauth2/v2.0/token`,
@@ -33,6 +34,7 @@ class TokenStorage {
     this.tokens = null;
     this._loadPromise = null;
     this._refreshPromise = null;
+    this._flowRefreshPromise = null;
 
     if (!this.config.clientId || !this.config.clientSecret) {
       console.warn(
@@ -135,8 +137,7 @@ class TokenStorage {
       ...this.tokens,
       flow_access_token: flowTokens.access_token,
       flow_refresh_token: flowTokens.refresh_token,
-      flow_expires_at:
-        flowTokens.expires_at || Date.now() + (flowTokens.expires_in || 3600) * 1000,
+      flow_expires_at: flowTokens.expires_at || Date.now() + (flowTokens.expires_in || 3600) * 1000,
     };
 
     await this._saveTokensToFile();
@@ -151,8 +152,22 @@ class TokenStorage {
     }
 
     if (this.isFlowTokenExpired()) {
-      console.log('Flow access token expired or nearing expiration. No auto-refresh in this change.');
-      return null;
+      console.log('Flow access token expired or nearing expiration. Attempting refresh.');
+      if (this.tokens.flow_refresh_token) {
+        try {
+          return await this.refreshFlowAccessToken();
+        } catch (refreshError) {
+          console.error('Failed to refresh flow access token:', refreshError);
+          // Invalidate only flow tokens; preserve Graph keys
+          this.tokens.flow_access_token = null;
+          this.tokens.flow_refresh_token = null;
+          await this._saveTokensToFile(); // Persist invalidation
+          return null;
+        }
+      } else {
+        console.warn('No flow refresh token available. Cannot refresh flow access token.');
+        return null;
+      }
     }
 
     return this.tokens.flow_access_token;
@@ -272,6 +287,105 @@ class TokenStorage {
     });
 
     return this._refreshPromise.then((tokens) => tokens.access_token);
+  }
+
+  async refreshFlowAccessToken() {
+    if (!this.tokens || !this.tokens.flow_refresh_token) {
+      throw new Error('No flow refresh token available to refresh the flow access token.');
+    }
+
+    // Prevent multiple concurrent flow refresh attempts
+    if (this._flowRefreshPromise) {
+      console.log('Flow refresh already in progress, returning existing promise.');
+      return this._flowRefreshPromise.then((tokens) => tokens.flow_access_token);
+    }
+
+    console.log('Attempting to refresh flow access token...');
+    const postData = querystring.stringify({
+      client_id: this.config.clientId,
+      client_secret: this.config.clientSecret,
+      grant_type: 'refresh_token',
+      refresh_token: this.tokens.flow_refresh_token,
+      scope: this.config.flowScope,
+    });
+
+    const requestOptions = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(postData),
+      },
+    };
+
+    this._flowRefreshPromise = new Promise((resolve, reject) => {
+      const req = https.request(this.config.tokenEndpoint, requestOptions, (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', async () => {
+          try {
+            const responseBody = JSON.parse(data);
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              this.tokens.flow_access_token = responseBody.access_token;
+              // Microsoft Flow API refresh tokens may or may not return a new refresh_token
+              if (responseBody.refresh_token) {
+                this.tokens.flow_refresh_token = responseBody.refresh_token;
+              }
+              this.tokens.flow_expires_at = Date.now() + responseBody.expires_in * 1000;
+              try {
+                await this._saveTokensToFile();
+                console.log('Flow access token refreshed and saved successfully.');
+                resolve(this.tokens);
+              } catch (saveError) {
+                console.error('Failed to save refreshed flow tokens:', saveError);
+                reject(
+                  new Error(`Flow access token refreshed but failed to save: ${saveError.message}`)
+                );
+              }
+            } else {
+              console.error('Error refreshing flow token:', responseBody);
+              // Invalidate only flow tokens; preserve Graph tokens
+              this.tokens.flow_access_token = null;
+              this.tokens.flow_refresh_token = null;
+              try {
+                await this._saveTokensToFile();
+              } catch (saveError) {
+                console.error('Failed to save invalidated flow tokens:', saveError);
+              }
+              reject(
+                new Error(
+                  responseBody.error_description ||
+                    `Flow token refresh failed with status ${res.statusCode}`
+                )
+              );
+            }
+          } catch (e) {
+            console.error('Error processing flow refresh token response or saving tokens:', e);
+            reject(e);
+          } finally {
+            this._flowRefreshPromise = null; // Clear promise after completion
+          }
+        });
+      });
+      req.on('error', async (error) => {
+        console.error('HTTP error during flow token refresh:', error);
+        // Invalidate only flow tokens on network error as well
+        if (this.tokens) {
+          this.tokens.flow_access_token = null;
+          this.tokens.flow_refresh_token = null;
+          try {
+            await this._saveTokensToFile();
+          } catch (saveError) {
+            console.error('Failed to save invalidated flow tokens:', saveError);
+          }
+        }
+        reject(error);
+        this._flowRefreshPromise = null; // Clear promise on error
+      });
+      req.write(postData);
+      req.end();
+    });
+
+    return this._flowRefreshPromise.then((tokens) => tokens.flow_access_token);
   }
 
   async exchangeCodeForTokens(authCode) {
