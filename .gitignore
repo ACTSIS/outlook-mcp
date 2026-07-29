@@ -37,3 +37,6 @@ Thumbs.db
 # Logs
 logs
 *.log
+
+# Local skill cache (gentle-ai)
+.atl/
