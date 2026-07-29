@@ -12,7 +12,11 @@
     "auth-server": "node outlook-auth-server.js",
     "test-mode": "USE_TEST_MODE=true node index.js",
     "inspect": "npx @modelcontextprotocol/inspector node index.js",
-    "test": "jest"
+    "test": "jest",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "keywords": [
     "claude",
@@ -34,8 +38,14 @@
     "dotenv": "^16.5.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@modelcontextprotocol/inspector": "^0.22.0",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.6",
+    "globals": "^17.8.0",
     "jest": "^29.7.0",
+    "prettier": "^3.9.6",
     "supertest": "^7.0.0"
   },
   "engines": {
