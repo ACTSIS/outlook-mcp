@@ -87,10 +87,11 @@ Each module exports tools and handlers:
 
 ### Power Automate (Optional)
 
-- Requires separate Flow API scope: `https://service.flow.microsoft.com//.default`
+- Requires separate Flow API scope: `https://service.flow.microsoft.com/.default`
 - Flow tokens managed by `TokenStorage` (same as Graph tokens, stored in same token file under `flow_*` keys)
 - Power Automate handlers import `tokenStorage` from `auth/index.js` and call `await tokenStorage.getValidFlowAccessToken()`
-- No Flow token auto-refresh yet — expired Flow tokens return null (re-authentication required)
+- Flow token auto-refresh: `TokenStorage.refreshFlowAccessToken()` mirrors Graph refresh with `_flowRefreshPromise` dedup. On failure, only `flow_*` keys are invalidated (Graph tokens preserved).
+- No Flow token initial acquisition flow yet — requires manual Flow auth to populate `flow_refresh_token`
 - Only solution-aware flows accessible via API
 - Only manual trigger flows can be triggered
 
