@@ -9,12 +9,12 @@ const homeDir = process.env.HOME || process.env.USERPROFILE || os.homedir() || '
 
 module.exports = {
   // Server information
-  SERVER_NAME: "m365-assistant",
-  SERVER_VERSION: "2.0.0",
-  
+  SERVER_NAME: 'm365-assistant',
+  SERVER_VERSION: '2.0.0',
+
   // Test mode setting
   USE_TEST_MODE: process.env.USE_TEST_MODE === 'true',
-  
+
   // Authentication configuration
   AUTH_CONFIG: {
     clientId: process.env.OUTLOOK_CLIENT_ID || '',
@@ -23,31 +23,37 @@ module.exports = {
     scopes: [
       'offline_access',
       'User.Read',
-      'Mail.Read', 'Mail.ReadWrite', 'Mail.Send',
-      'Calendars.Read', 'Calendars.ReadWrite',
+      'Mail.Read',
+      'Mail.ReadWrite',
+      'Mail.Send',
+      'Calendars.Read',
+      'Calendars.ReadWrite',
       'Contacts.Read',
-      'Files.Read', 'Files.ReadWrite'
+      'Files.Read',
+      'Files.ReadWrite',
     ],
     tokenStorePath: path.join(homeDir, '.outlook-mcp-tokens.json'),
-    authServerUrl: 'http://localhost:3333'
+    authServerUrl: 'http://localhost:3333',
   },
-  
+
   // Microsoft Graph API
   GRAPH_API_ENDPOINT: 'https://graph.microsoft.com/v1.0/',
-  
+
   // Calendar constants
   CALENDAR_SELECT_FIELDS: 'id,subject,start,end,location,bodyPreview,isAllDay,recurrence,attendees',
 
   // Email constants
-  EMAIL_SELECT_FIELDS: 'id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,hasAttachments,importance,isRead',
-  EMAIL_DETAIL_FIELDS: 'id,subject,from,toRecipients,ccRecipients,bccRecipients,receivedDateTime,bodyPreview,body,hasAttachments,importance,isRead,internetMessageHeaders',
-  
+  EMAIL_SELECT_FIELDS:
+    'id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,hasAttachments,importance,isRead',
+  EMAIL_DETAIL_FIELDS:
+    'id,subject,from,toRecipients,ccRecipients,bccRecipients,receivedDateTime,bodyPreview,body,hasAttachments,importance,isRead,internetMessageHeaders',
+
   // Pagination
   DEFAULT_PAGE_SIZE: 25,
   MAX_RESULT_COUNT: 50,
 
   // Timezone
-  DEFAULT_TIMEZONE: "Central European Standard Time",
+  DEFAULT_TIMEZONE: 'Central European Standard Time',
 
   // OneDrive constants
   ONEDRIVE_SELECT_FIELDS: 'id,name,size,lastModifiedDateTime,webUrl,folder,file,parentReference',

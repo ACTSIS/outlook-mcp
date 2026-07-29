@@ -7,12 +7,14 @@
 ## Scope
 
 ### In Scope
+
 - Enhance `getFolderIdByName()` in `email/folder-utils.js` to resolve path-style folder names (e.g., `"Tramite/REQ-104951"`)
 - All 4 call sites benefit automatically: `folder/move.js`, `folder/create.js` (x2), `rules/create.js`
 - New test cases in `test/email/folder-utils.test.js` for path resolution
 - Backwards compatible: flat folder names (no `/`) behave identically
 
 ### Out of Scope
+
 - `create-folder` subfolder parent support via path (deferred)
 - `rules/create.js` subfolder support for `moveToFolder` (deferred)
 - `email/search.js` / `email/list.js` subfolder support (deferred)
@@ -22,9 +24,11 @@
 ## Capabilities
 
 ### New Capabilities
+
 None — this is a behavioral enhancement to an existing utility function.
 
 ### Modified Capabilities
+
 None — no spec-level behavior changes. The `move-emails` tool contract (accepts `targetFolder` string) is unchanged. Only internal resolution logic improves.
 
 ## Approach
@@ -42,19 +46,19 @@ Follows the proven traversal pattern from `find-folder-ids.js`.
 
 ## Affected Areas
 
-| Area | Impact | Description |
-|------|--------|-------------|
-| `email/folder-utils.js` | Modified | `getFolderIdByName()` gains path-splitting logic |
-| `test/email/folder-utils.test.js` | Modified | New test cases for path resolution |
-| `utils/mock-data.js` | Modified | Mock data for child folder API responses |
+| Area                              | Impact   | Description                                      |
+| --------------------------------- | -------- | ------------------------------------------------ |
+| `email/folder-utils.js`           | Modified | `getFolderIdByName()` gains path-splitting logic |
+| `test/email/folder-utils.test.js` | Modified | New test cases for path resolution               |
+| `utils/mock-data.js`              | Modified | Mock data for child folder API responses         |
 
 ## Risks
 
-| Risk | Likelihood | Mitigation |
-|------|------------|------------|
-| Deep nesting adds latency from sequential API calls | Low | Typical mailbox depth is 2-3 levels; per-request operation |
-| Folder names with literal `/` misparsed | Low | Document as known limitation; extremely rare in practice |
-| Child folder pagination (>100 children) | Low | Use `$top=100`; pagination unlikely for mail folders |
+| Risk                                                | Likelihood | Mitigation                                                 |
+| --------------------------------------------------- | ---------- | ---------------------------------------------------------- |
+| Deep nesting adds latency from sequential API calls | Low        | Typical mailbox depth is 2-3 levels; per-request operation |
+| Folder names with literal `/` misparsed             | Low        | Document as known limitation; extremely rare in practice   |
+| Child folder pagination (>100 children)             | Low        | Use `$top=100`; pagination unlikely for mail folders       |
 
 ## Rollback Plan
 

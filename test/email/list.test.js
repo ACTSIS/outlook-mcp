@@ -16,11 +16,11 @@ describe('handleListEmails', () => {
       from: {
         emailAddress: {
           name: 'John Doe',
-          address: 'john@example.com'
-        }
+          address: 'john@example.com',
+        },
       },
       receivedDateTime: '2024-01-15T10:30:00Z',
-      isRead: false
+      isRead: false,
     },
     {
       id: 'email-2',
@@ -28,12 +28,12 @@ describe('handleListEmails', () => {
       from: {
         emailAddress: {
           name: 'Jane Smith',
-          address: 'jane@example.com'
-        }
+          address: 'jane@example.com',
+        },
       },
       receivedDateTime: '2024-01-14T15:20:00Z',
-      isRead: true
-    }
+      isRead: true,
+    },
   ];
 
   beforeEach(() => {
@@ -63,7 +63,7 @@ describe('handleListEmails', () => {
         WELL_KNOWN_FOLDERS['inbox'],
         expect.objectContaining({
           $top: 10,
-          $orderby: 'receivedDateTime desc'
+          $orderby: 'receivedDateTime desc',
         }),
         10
       );
@@ -103,7 +103,7 @@ describe('handleListEmails', () => {
         'GET',
         WELL_KNOWN_FOLDERS['inbox'],
         expect.objectContaining({
-          $top: 5
+          $top: 5,
         }),
         5
       );
@@ -127,7 +127,7 @@ describe('handleListEmails', () => {
         id: 'email-3',
         subject: 'No Sender Email',
         receivedDateTime: '2024-01-13T12:00:00Z',
-        isRead: true
+        isRead: true,
       };
 
       ensureAuthenticated.mockResolvedValue(mockAccessToken);

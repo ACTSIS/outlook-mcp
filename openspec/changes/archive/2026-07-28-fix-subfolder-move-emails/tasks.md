@@ -2,14 +2,14 @@
 
 ## Review Workload Forecast
 
-| Field | Value |
-|-------|-------|
-| Estimated changed lines | ~270 |
-| 400-line budget risk | Low |
-| Chained PRs recommended | No |
-| Suggested split | Single PR |
-| Delivery strategy | auto-chain |
-| Chain strategy | size-exception |
+| Field                   | Value          |
+| ----------------------- | -------------- |
+| Estimated changed lines | ~270           |
+| 400-line budget risk    | Low            |
+| Chained PRs recommended | No             |
+| Suggested split         | Single PR      |
+| Delivery strategy       | auto-chain     |
+| Chain strategy          | size-exception |
 
 Decision needed before apply: No
 Chained PRs recommended: No
@@ -18,9 +18,9 @@ Chain strategy: size-exception
 
 ### Suggested Work Units
 
-| Unit | Goal | Likely PR | Focused test command | Runtime harness | Rollback boundary |
-|------|------|-----------|----------------------|-----------------|-------------------|
-| 1 | Full change (RED→GREEN→REFACTOR) | PR 1 | `npm test -- test/email/folder-utils.test.js` | `npm run test-mode` + manual `move-emails` with path | Revert `email/folder-utils.js` only |
+| Unit | Goal                             | Likely PR | Focused test command                          | Runtime harness                                      | Rollback boundary                   |
+| ---- | -------------------------------- | --------- | --------------------------------------------- | ---------------------------------------------------- | ----------------------------------- |
+| 1    | Full change (RED→GREEN→REFACTOR) | PR 1      | `npm test -- test/email/folder-utils.test.js` | `npm run test-mode` + manual `move-emails` with path | Revert `email/folder-utils.js` only |
 
 ## Phase 1: RED — Write Failing Tests
 

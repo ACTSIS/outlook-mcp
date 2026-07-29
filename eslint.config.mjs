@@ -1,11 +1,11 @@
-import js from '@eslint/js'
-import prettierConfig from 'eslint-config-prettier'
-import globals from 'globals'
+import js from '@eslint/js';
+import prettierConfig from 'eslint-config-prettier';
+import globals from 'globals';
 
 export default [
   // Ignore patterns
   {
-    ignores: ['node_modules/', 'coverage/']
+    ignores: ['node_modules/', 'coverage/'],
   },
 
   // Base JS recommended rules
@@ -20,13 +20,13 @@ export default [
       ecmaVersion: 2022,
       sourceType: 'module',
       globals: {
-        ...globals.node
-      }
+        ...globals.node,
+      },
     },
     rules: {
       'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
-      'prefer-const': 'error'
-    }
+      'prefer-const': 'error',
+    },
   },
 
   // Jest test files config
@@ -34,8 +34,8 @@ export default [
     files: ['test/**/*.test.js', '**/*.test.js'],
     languageOptions: {
       globals: {
-        ...globals.jest
-      }
-    }
-  }
-]
+        ...globals.jest,
+      },
+    },
+  },
+];

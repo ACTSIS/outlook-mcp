@@ -16,13 +16,13 @@ The MCP server requires re-authentication every few hours because the OAuth toke
 
 ### Scope Inconsistency Map
 
-| Source | Scopes | Missing vs. Full Set |
-|--------|--------|---------------------|
-| **Full set needed** | `offline_access`, `User.Read`, `Mail.Read`, `Mail.ReadWrite`, `Mail.Send`, `Calendars.Read`, `Calendars.ReadWrite`, `Contacts.Read`, `Files.Read`, `Files.ReadWrite` | — |
-| `outlook-auth-server.js` (lines 46-54) | `offline_access`, `User.Read`, `Mail.Read`, `Mail.Send`, `Calendars.Read`, `Calendars.ReadWrite`, `Contacts.Read` | ❌ `Mail.ReadWrite`, `Files.Read`, `Files.ReadWrite` |
-| `auth/token-storage.js` (line 20, default) | `offline_access`, `User.Read`, `Mail.Read` | ❌ `Mail.ReadWrite`, `Mail.Send`, `Calendars.Read`, `Calendars.ReadWrite`, `Contacts.Read`, `Files.Read`, `Files.ReadWrite` |
-| `config.js` (line 23) | `Mail.Read`, `Mail.ReadWrite`, `Mail.Send`, `User.Read`, `Calendars.Read`, `Calendars.ReadWrite`, `Files.Read`, `Files.ReadWrite` | ❌ `offline_access`, `Contacts.Read` |
-| `auth/oauth-server.js` (default) | `offline_access`, `User.Read`, `Mail.Read` | ❌ `Mail.ReadWrite`, `Mail.Send`, `Calendars.Read`, `Calendars.ReadWrite`, `Contacts.Read`, `Files.Read`, `Files.ReadWrite` |
+| Source                                     | Scopes                                                                                                                                                               | Missing vs. Full Set                                                                                                        |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| **Full set needed**                        | `offline_access`, `User.Read`, `Mail.Read`, `Mail.ReadWrite`, `Mail.Send`, `Calendars.Read`, `Calendars.ReadWrite`, `Contacts.Read`, `Files.Read`, `Files.ReadWrite` | —                                                                                                                           |
+| `outlook-auth-server.js` (lines 46-54)     | `offline_access`, `User.Read`, `Mail.Read`, `Mail.Send`, `Calendars.Read`, `Calendars.ReadWrite`, `Contacts.Read`                                                    | ❌ `Mail.ReadWrite`, `Files.Read`, `Files.ReadWrite`                                                                        |
+| `auth/token-storage.js` (line 20, default) | `offline_access`, `User.Read`, `Mail.Read`                                                                                                                           | ❌ `Mail.ReadWrite`, `Mail.Send`, `Calendars.Read`, `Calendars.ReadWrite`, `Contacts.Read`, `Files.Read`, `Files.ReadWrite` |
+| `config.js` (line 23)                      | `Mail.Read`, `Mail.ReadWrite`, `Mail.Send`, `User.Read`, `Calendars.Read`, `Calendars.ReadWrite`, `Files.Read`, `Files.ReadWrite`                                    | ❌ `offline_access`, `Contacts.Read`                                                                                        |
+| `auth/oauth-server.js` (default)           | `offline_access`, `User.Read`, `Mail.Read`                                                                                                                           | ❌ `Mail.ReadWrite`, `Mail.Send`, `Calendars.Read`, `Calendars.ReadWrite`, `Contacts.Read`, `Files.Read`, `Files.ReadWrite` |
 
 ### Root Cause Analysis
 
@@ -77,12 +77,14 @@ The MCP server requires re-authentication every few hours because the OAuth toke
 **Approach 1 + 4 combined: Unify scopes in `config.js` AND migrate `token-manager.js` consumers to `token-storage.js`.**
 
 Rationale:
+
 - The scope mismatch is the PRIMARY root cause. Fixing it in one place prevents future drift.
 - `config.js` is the natural home for configuration — it already has the most complete scope list.
 - `token-manager.js` is dead code for refresh purposes. Its consumers (`check-auth-status`, `authenticate`) should use `token-storage` which actually refreshes.
 - Flow tokens are a separate concern and can remain in `token-manager.js` for now.
 
 Concrete changes needed:
+
 1. **`config.js`**: Add `offline_access` and `Contacts.Read` to `AUTH_CONFIG.scopes`
 2. **`outlook-auth-server.js`**: Import scopes from `config.js` instead of its own hardcoded list (or at minimum add `Mail.ReadWrite`, `Files.Read`, `Files.ReadWrite`)
 3. **`auth/token-storage.js`**: Remove hardcoded default scopes; import from `config.js` (or use `MS_SCOPES` env var as override)
@@ -102,6 +104,7 @@ Concrete changes needed:
 **Yes.** The root cause is clear — scope mismatch between the auth server and the token refresh mechanism. The fix is well-understood and low-effort. Proceed with `sdd-propose` for the `fix-persistent-auth` change.
 
 Key points to tell the user:
+
 - The primary fix is unifying scope lists so refresh requests the same permissions as the original token
 - `config.js` should become the single source of truth for scopes
 - `token-manager.js` consumers should migrate to `token-storage.js` for accurate auth status

@@ -11,10 +11,12 @@ const TokenStorage = require('./token-storage');
  */
 async function handleAbout() {
   return {
-    content: [{
-      type: "text",
-      text: `M365 Assistant MCP Server v${config.SERVER_VERSION}\n\nProvides access to Microsoft 365 services through Microsoft Graph API:\n- Outlook (email, calendar, folders, rules)\n- OneDrive (files, folders, sharing)\n- Power Automate (flows, environments, runs)\n\nModular architecture for improved maintainability.`
-    }]
+    content: [
+      {
+        type: 'text',
+        text: `M365 Assistant MCP Server v${config.SERVER_VERSION}\n\nProvides access to Microsoft 365 services through Microsoft Graph API:\n- Outlook (email, calendar, folders, rules)\n- OneDrive (files, folders, sharing)\n- Power Automate (flows, environments, runs)\n\nModular architecture for improved maintainability.`,
+      },
+    ],
   };
 }
 
@@ -23,30 +25,32 @@ async function handleAbout() {
  * @param {object} args - Tool arguments
  * @returns {object} - MCP response
  */
-async function handleAuthenticate(args) {
-  const force = args && args.force === true;
-  
+async function handleAuthenticate(_args) {
   // For test mode, create a test token
   if (config.USE_TEST_MODE) {
     // Create a test token with a 1-hour expiry
     tokenManager.createTestTokens();
-    
+
     return {
-      content: [{
-        type: "text",
-        text: 'Successfully authenticated with Microsoft Graph API (test mode)'
-      }]
+      content: [
+        {
+          type: 'text',
+          text: 'Successfully authenticated with Microsoft Graph API (test mode)',
+        },
+      ],
     };
   }
-  
+
   // For real authentication, generate an auth URL and instruct the user to visit it
   const authUrl = `${config.AUTH_CONFIG.authServerUrl}/auth?client_id=${config.AUTH_CONFIG.clientId}`;
-  
+
   return {
-    content: [{
-      type: "text",
-      text: `Authentication required. Please visit the following URL to authenticate with Microsoft: ${authUrl}\n\nAfter authentication, you will be redirected back to this application.`
-    }]
+    content: [
+      {
+        type: 'text',
+        text: `Authentication required. Please visit the following URL to authenticate with Microsoft: ${authUrl}\n\nAfter authentication, you will be redirected back to this application.`,
+      },
+    ],
   };
 }
 
@@ -64,57 +68,57 @@ async function handleCheckAuthStatus() {
 
   if (!accessToken) {
     return {
-      content: [{ type: "text", text: "Not authenticated" }]
+      content: [{ type: 'text', text: 'Not authenticated' }],
     };
   }
 
   return {
-    content: [{ type: "text", text: "Authenticated and ready" }]
+    content: [{ type: 'text', text: 'Authenticated and ready' }],
   };
 }
 
 // Tool definitions
 const authTools = [
   {
-    name: "about",
-    description: "Returns information about this M365 Assistant server",
+    name: 'about',
+    description: 'Returns information about this M365 Assistant server',
     inputSchema: {
-      type: "object",
+      type: 'object',
       properties: {},
-      required: []
+      required: [],
     },
-    handler: handleAbout
+    handler: handleAbout,
   },
   {
-    name: "authenticate",
-    description: "Authenticate with Microsoft Graph API to access Outlook data",
+    name: 'authenticate',
+    description: 'Authenticate with Microsoft Graph API to access Outlook data',
     inputSchema: {
-      type: "object",
+      type: 'object',
       properties: {
         force: {
-          type: "boolean",
-          description: "Force re-authentication even if already authenticated"
-        }
+          type: 'boolean',
+          description: 'Force re-authentication even if already authenticated',
+        },
       },
-      required: []
+      required: [],
     },
-    handler: handleAuthenticate
+    handler: handleAuthenticate,
   },
   {
-    name: "check-auth-status",
-    description: "Check the current authentication status with Microsoft Graph API",
+    name: 'check-auth-status',
+    description: 'Check the current authentication status with Microsoft Graph API',
     inputSchema: {
-      type: "object",
+      type: 'object',
       properties: {},
-      required: []
+      required: [],
     },
-    handler: handleCheckAuthStatus
-  }
+    handler: handleCheckAuthStatus,
+  },
 ];
 
 module.exports = {
   authTools,
   handleAbout,
   handleAuthenticate,
-  handleCheckAuthStatus
+  handleCheckAuthStatus,
 };

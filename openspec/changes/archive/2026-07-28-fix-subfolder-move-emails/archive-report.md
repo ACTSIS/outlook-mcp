@@ -6,34 +6,34 @@
 
 ## Verdict
 
-| Metric | Value |
-|--------|-------|
-| Verdict | **PASS** |
-| Blockers | 0 |
-| Critical findings | 0 |
-| Requirements compliant | 6/6 |
-| Scenarios compliant | 8/8 |
-| Tests passing | 142/142 |
-| Tasks complete | 8/8 |
+| Metric                 | Value    |
+| ---------------------- | -------- |
+| Verdict                | **PASS** |
+| Blockers               | 0        |
+| Critical findings      | 0        |
+| Requirements compliant | 6/6      |
+| Scenarios compliant    | 8/8      |
+| Tests passing          | 142/142  |
+| Tasks complete         | 8/8      |
 
 ## Artifact Lineage (Engram Observation IDs)
 
-| Artifact | Engram ID | Sync ID |
-|----------|-----------|---------|
-| Exploration | #1866 | `obs-8564a2e4f3c46b78` |
-| Proposal | #1868 | `obs-f5c33f9ac81cc17c` |
-| Spec (delta) | #1869 | `obs-0e54b0741a45483f` |
-| Design | #1870 | `obs-29b8b4c300451763` |
-| Tasks | #1871 | `obs-94dec7d0626df1c1` |
-| Apply progress | #1872 | `obs-9cb00a6a6ebb2b91` |
-| Verify report | #1874 | `obs-edb037256de98ec5` |
-| Archive report | — | — |
+| Artifact       | Engram ID | Sync ID                |
+| -------------- | --------- | ---------------------- |
+| Exploration    | #1866     | `obs-8564a2e4f3c46b78` |
+| Proposal       | #1868     | `obs-f5c33f9ac81cc17c` |
+| Spec (delta)   | #1869     | `obs-0e54b0741a45483f` |
+| Design         | #1870     | `obs-29b8b4c300451763` |
+| Tasks          | #1871     | `obs-94dec7d0626df1c1` |
+| Apply progress | #1872     | `obs-9cb00a6a6ebb2b91` |
+| Verify report  | #1874     | `obs-edb037256de98ec5` |
+| Archive report | —         | —                      |
 
 ## Specs Synced
 
-| Domain | Action | Details |
-|--------|--------|---------|
-| email | Created (new main spec) | 7 requirements, 8 scenarios — delta spec copied as full main spec since `openspec/specs/email/spec.md` did not exist |
+| Domain | Action                  | Details                                                                                                              |
+| ------ | ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| email  | Created (new main spec) | 7 requirements, 8 scenarios — delta spec copied as full main spec since `openspec/specs/email/spec.md` did not exist |
 
 ## Summary
 

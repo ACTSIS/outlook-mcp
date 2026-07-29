@@ -15,10 +15,12 @@ async function handleDownload(args) {
 
   if (!itemId && !path) {
     return {
-      content: [{
-        type: "text",
-        text: "Either itemId or path is required."
-      }]
+      content: [
+        {
+          type: 'text',
+          text: 'Either itemId or path is required.',
+        },
+      ],
     };
   }
 
@@ -36,17 +38,19 @@ async function handleDownload(args) {
 
     // Get item metadata with download URL
     const queryParams = {
-      $select: 'id,name,size,@microsoft.graph.downloadUrl'
+      $select: 'id,name,size,@microsoft.graph.downloadUrl',
     };
 
     const response = await callGraphAPI(accessToken, 'GET', endpoint, null, queryParams);
 
     if (!response) {
       return {
-        content: [{
-          type: "text",
-          text: "File not found."
-        }]
+        content: [
+          {
+            type: 'text',
+            text: 'File not found.',
+          },
+        ],
       };
     }
 
@@ -56,42 +60,52 @@ async function handleDownload(args) {
       // If no direct download URL, this might be a folder
       if (response.folder) {
         return {
-          content: [{
-            type: "text",
-            text: `"${response.name}" is a folder and cannot be downloaded directly.`
-          }]
+          content: [
+            {
+              type: 'text',
+              text: `"${response.name}" is a folder and cannot be downloaded directly.`,
+            },
+          ],
         };
       }
 
       return {
-        content: [{
-          type: "text",
-          text: "Could not get download URL for this item."
-        }]
+        content: [
+          {
+            type: 'text',
+            text: 'Could not get download URL for this item.',
+          },
+        ],
       };
     }
 
     return {
-      content: [{
-        type: "text",
-        text: `Download URL for "${response.name}" (${formatSize(response.size)}):\n\n${downloadUrl}\n\nNote: This URL is pre-authenticated and expires after a short time.`
-      }]
+      content: [
+        {
+          type: 'text',
+          text: `Download URL for "${response.name}" (${formatSize(response.size)}):\n\n${downloadUrl}\n\nNote: This URL is pre-authenticated and expires after a short time.`,
+        },
+      ],
     };
   } catch (error) {
     if (error.message === 'Authentication required') {
       return {
-        content: [{
-          type: "text",
-          text: "Authentication required. Please use the 'authenticate' tool first."
-        }]
+        content: [
+          {
+            type: 'text',
+            text: "Authentication required. Please use the 'authenticate' tool first.",
+          },
+        ],
       };
     }
 
     return {
-      content: [{
-        type: "text",
-        text: `Error getting download URL: ${error.message}`
-      }]
+      content: [
+        {
+          type: 'text',
+          text: `Error getting download URL: ${error.message}`,
+        },
+      ],
     };
   }
 }

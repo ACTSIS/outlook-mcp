@@ -32,5 +32,5 @@ async function ensureAuthenticated(forceNew = false) {
 module.exports = {
   tokenManager,
   authTools,
-  ensureAuthenticated
+  ensureAuthenticated,
 };

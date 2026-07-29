@@ -32,9 +32,9 @@ async function callFlowAPI(accessToken, method, path, data = null) {
       path: urlObj.pathname + urlObj.search,
       method: method,
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      }
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
     };
 
     const req = https.request(options, (res) => {
@@ -54,7 +54,11 @@ async function callFlowAPI(accessToken, method, path, data = null) {
         } else if (res.statusCode === 401) {
           reject(new Error('FLOW_UNAUTHORIZED'));
         } else if (res.statusCode === 403) {
-          reject(new Error('Access denied. Ensure your account has Power Automate access and the flow is solution-aware.'));
+          reject(
+            new Error(
+              'Access denied. Ensure your account has Power Automate access and the flow is solution-aware.'
+            )
+          );
         } else {
           reject(new Error(`Flow API call failed with status ${res.statusCode}: ${responseData}`));
         }
@@ -84,10 +88,10 @@ function simulateFlowResponse(method, path) {
           name: 'Default-12345',
           properties: {
             displayName: 'Default Environment',
-            isDefault: true
-          }
-        }
-      ]
+            isDefault: true,
+          },
+        },
+      ],
     };
   }
 
@@ -99,10 +103,10 @@ function simulateFlowResponse(method, path) {
           properties: {
             displayName: 'Test Flow',
             state: 'Started',
-            createdTime: new Date().toISOString()
-          }
-        }
-      ]
+            createdTime: new Date().toISOString(),
+          },
+        },
+      ],
     };
   }
 
@@ -113,10 +117,10 @@ function simulateFlowResponse(method, path) {
           name: 'run-123',
           properties: {
             status: 'Succeeded',
-            startTime: new Date().toISOString()
-          }
-        }
-      ]
+            startTime: new Date().toISOString(),
+          },
+        },
+      ],
     };
   }
 
@@ -124,5 +128,5 @@ function simulateFlowResponse(method, path) {
 }
 
 module.exports = {
-  callFlowAPI
+  callFlowAPI,
 };

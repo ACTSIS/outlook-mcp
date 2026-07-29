@@ -10,99 +10,100 @@ const handleToggleFlow = require('./toggle-flow');
 // Power Automate tool definitions
 const powerAutomateTools = [
   {
-    name: "flow-list-environments",
-    description: "List available Power Platform environments",
+    name: 'flow-list-environments',
+    description: 'List available Power Platform environments',
     inputSchema: {
-      type: "object",
+      type: 'object',
       properties: {},
-      required: []
+      required: [],
     },
-    handler: handleListEnvironments
+    handler: handleListEnvironments,
   },
   {
-    name: "flow-list",
-    description: "List flows in a Power Platform environment",
+    name: 'flow-list',
+    description: 'List flows in a Power Platform environment',
     inputSchema: {
-      type: "object",
+      type: 'object',
       properties: {
         environmentId: {
-          type: "string",
-          description: "The environment ID (e.g., 'Default-12345'). Use 'flow-list-environments' to find available environments."
-        }
+          type: 'string',
+          description:
+            "The environment ID (e.g., 'Default-12345'). Use 'flow-list-environments' to find available environments.",
+        },
       },
-      required: ["environmentId"]
+      required: ['environmentId'],
     },
-    handler: handleListFlows
+    handler: handleListFlows,
   },
   {
-    name: "flow-run",
-    description: "Trigger a manual flow run",
+    name: 'flow-run',
+    description: 'Trigger a manual flow run',
     inputSchema: {
-      type: "object",
+      type: 'object',
       properties: {
         environmentId: {
-          type: "string",
-          description: "The environment ID"
+          type: 'string',
+          description: 'The environment ID',
         },
         flowId: {
-          type: "string",
-          description: "The flow ID to trigger"
+          type: 'string',
+          description: 'The flow ID to trigger',
         },
         inputs: {
-          type: "string",
-          description: "Optional JSON string of input parameters for the flow"
-        }
+          type: 'string',
+          description: 'Optional JSON string of input parameters for the flow',
+        },
       },
-      required: ["environmentId", "flowId"]
+      required: ['environmentId', 'flowId'],
     },
-    handler: handleRunFlow
+    handler: handleRunFlow,
   },
   {
-    name: "flow-list-runs",
-    description: "Get run history for a flow",
+    name: 'flow-list-runs',
+    description: 'Get run history for a flow',
     inputSchema: {
-      type: "object",
+      type: 'object',
       properties: {
         environmentId: {
-          type: "string",
-          description: "The environment ID"
+          type: 'string',
+          description: 'The environment ID',
         },
         flowId: {
-          type: "string",
-          description: "The flow ID to get runs for"
+          type: 'string',
+          description: 'The flow ID to get runs for',
         },
         count: {
-          type: "number",
-          description: "Number of runs to retrieve (default: 10)"
-        }
+          type: 'number',
+          description: 'Number of runs to retrieve (default: 10)',
+        },
       },
-      required: ["environmentId", "flowId"]
+      required: ['environmentId', 'flowId'],
     },
-    handler: handleListRuns
+    handler: handleListRuns,
   },
   {
-    name: "flow-toggle",
-    description: "Enable or disable a flow",
+    name: 'flow-toggle',
+    description: 'Enable or disable a flow',
     inputSchema: {
-      type: "object",
+      type: 'object',
       properties: {
         environmentId: {
-          type: "string",
-          description: "The environment ID"
+          type: 'string',
+          description: 'The environment ID',
         },
         flowId: {
-          type: "string",
-          description: "The flow ID to toggle"
+          type: 'string',
+          description: 'The flow ID to toggle',
         },
         enable: {
-          type: "boolean",
-          description: "Set to true to enable, false to disable (default: true)"
-        }
+          type: 'boolean',
+          description: 'Set to true to enable, false to disable (default: true)',
+        },
       },
-      required: ["environmentId", "flowId"]
+      required: ['environmentId', 'flowId'],
     },
-    handler: handleToggleFlow
-  }
+    handler: handleToggleFlow,
+  },
 ];
 
 module.exports = {
@@ -111,5 +112,5 @@ module.exports = {
   handleListFlows,
   handleRunFlow,
   handleListRuns,
-  handleToggleFlow
+  handleToggleFlow,
 };

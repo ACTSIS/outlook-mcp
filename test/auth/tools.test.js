@@ -11,7 +11,7 @@ describe('auth/tools', () => {
   describe('handleCheckAuthStatus', () => {
     it('returns "Authenticated and ready" when getValidAccessToken returns a token', async () => {
       const mockInstance = {
-        getValidAccessToken: jest.fn().mockResolvedValue('valid_access_token')
+        getValidAccessToken: jest.fn().mockResolvedValue('valid_access_token'),
       };
       TokenStorage.mockImplementation(() => mockInstance);
 
@@ -20,13 +20,13 @@ describe('auth/tools', () => {
       expect(TokenStorage).toHaveBeenCalledTimes(1);
       expect(mockInstance.getValidAccessToken).toHaveBeenCalledTimes(1);
       expect(result).toEqual({
-        content: [{ type: 'text', text: 'Authenticated and ready' }]
+        content: [{ type: 'text', text: 'Authenticated and ready' }],
       });
     });
 
     it('returns "Not authenticated" when getValidAccessToken returns null', async () => {
       const mockInstance = {
-        getValidAccessToken: jest.fn().mockResolvedValue(null)
+        getValidAccessToken: jest.fn().mockResolvedValue(null),
       };
       TokenStorage.mockImplementation(() => mockInstance);
 
@@ -35,7 +35,7 @@ describe('auth/tools', () => {
       expect(TokenStorage).toHaveBeenCalledTimes(1);
       expect(mockInstance.getValidAccessToken).toHaveBeenCalledTimes(1);
       expect(result).toEqual({
-        content: [{ type: 'text', text: 'Not authenticated' }]
+        content: [{ type: 'text', text: 'Not authenticated' }],
       });
     });
   });

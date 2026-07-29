@@ -125,7 +125,7 @@ function saveFlowTokens(flowTokens) {
       ...existingTokens,
       flow_access_token: flowTokens.access_token,
       flow_refresh_token: flowTokens.refresh_token,
-      flow_expires_at: flowTokens.expires_at || (Date.now() + (flowTokens.expires_in || 3600) * 1000)
+      flow_expires_at: flowTokens.expires_at || Date.now() + (flowTokens.expires_in || 3600) * 1000,
     };
 
     fs.writeFileSync(tokenPath, JSON.stringify(mergedTokens, null, 2), { mode: 0o600 });
@@ -146,11 +146,11 @@ function saveFlowTokens(flowTokens) {
  */
 function createTestTokens() {
   const testTokens = {
-    access_token: "test_access_token_" + Date.now(),
-    refresh_token: "test_refresh_token_" + Date.now(),
-    expires_at: Date.now() + (3600 * 1000) // 1 hour
+    access_token: 'test_access_token_' + Date.now(),
+    refresh_token: 'test_refresh_token_' + Date.now(),
+    expires_at: Date.now() + 3600 * 1000, // 1 hour
   };
-  
+
   saveTokenCache(testTokens);
   return testTokens;
 }
@@ -161,5 +161,5 @@ module.exports = {
   getAccessToken,
   getFlowAccessToken,
   saveFlowTokens,
-  createTestTokens
+  createTestTokens,
 };

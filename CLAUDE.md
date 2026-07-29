@@ -17,17 +17,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Architecture Overview
 
 This is a modular MCP (Model Context Protocol) server that provides Claude with access to Microsoft 365 services:
+
 - **Outlook** - Email, calendar, folders, rules
 - **OneDrive** - Files, folders, sharing
 - **Power Automate** - Flows, environments, runs
 
 ### Core Structure
+
 - `index.js` - Main entry point that combines all module tools and handles MCP protocol
 - `config.js` - Centralized configuration (API endpoints, scopes, field selections)
 - `outlook-auth-server.js` - Standalone OAuth server for authentication flow
 
 ### Modules
+
 Each module exports tools and handlers:
+
 - `auth/` - OAuth 2.0 authentication with token management (Graph + Flow)
 - `calendar/` - Calendar operations (list, create, accept, decline, delete events)
 - `email/` - Email management (list, search, read, send, mark as read)
@@ -39,6 +43,7 @@ Each module exports tools and handlers:
 - `utils/` - Shared utilities including Graph API client and OData helpers
 
 ### Key Components
+
 - **Token Management**: Tokens stored in `~/.outlook-mcp-tokens.json` (both Graph and Flow tokens)
 - **Graph API Client**: `utils/graph-api.js` handles Microsoft Graph API calls (Outlook, OneDrive)
 - **Flow API Client**: `power-automate/flow-api.js` handles Power Automate API calls
@@ -58,6 +63,7 @@ Each module exports tools and handlers:
 ## Authentication
 
 ### Graph API (Outlook + OneDrive)
+
 1. Azure app registration required with permissions:
    - `Mail.Read`, `Mail.ReadWrite`, `Mail.Send`
    - `Calendars.Read`, `Calendars.ReadWrite`
@@ -69,9 +75,11 @@ Each module exports tools and handlers:
 5. Tokens automatically stored and refreshed
 
 ### Persistent Auth
+
 `TokenStorage` automatically refreshes expired tokens using the refresh token. All scopes are unified in `config.js` (10 scopes including `offline_access`). Users only need to re-auth if the refresh token expires or is revoked.
 
 ### Power Automate (Optional)
+
 - Requires separate Flow API scope: `https://service.flow.microsoft.com//.default`
 - Flow tokens stored alongside Graph tokens in same token file
 - Only solution-aware flows accessible via API
@@ -80,20 +88,24 @@ Each module exports tools and handlers:
 ## Configuration
 
 ### Agent Configuration
+
 The server works with OpenCode, Claude Desktop, Codex (OpenAI), and Pi.dev. Each uses a different config file and format — see [README.md](./README.md#agent-configuration) for detailed config examples for each agent.
 
 ### Environment Variables
+
 - **For .env file**: Use `MS_CLIENT_ID` and `MS_CLIENT_SECRET`
 - **For Claude Desktop config**: Use `OUTLOOK_CLIENT_ID` and `OUTLOOK_CLIENT_SECRET`
 - **Important**: Always use the client secret VALUE from Azure, not the Secret ID
 
 ### Config Constants
+
 - `GRAPH_API_ENDPOINT`: `https://graph.microsoft.com/v1.0/`
 - `FLOW_API_ENDPOINT`: `https://api.flow.microsoft.com`
 - `ONEDRIVE_UPLOAD_THRESHOLD`: 4MB (files larger need chunked upload)
 - Default page size: 25, max results: 50
 
 ### Common Setup Issues
+
 1. **Missing dependencies**: Always run `npm install` first
 2. **Wrong secret**: Use Azure secret VALUE, not ID (AADSTS7000215 error)
 3. **Auth server not running**: Start `npm run auth-server` before authenticating
@@ -102,6 +114,7 @@ The server works with OpenCode, Claude Desktop, Codex (OpenAI), and Pi.dev. Each
 ## Test Mode
 
 Set `USE_TEST_MODE=true` to use mock data instead of real API calls. Mock responses defined in:
+
 - `utils/mock-data.js` - Graph API mocks
 - `power-automate/flow-api.js` - Flow API mocks (inline)
 

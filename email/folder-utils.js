@@ -4,21 +4,15 @@
 const { callGraphAPI } = require('../utils/graph-api');
 
 /**
- * Cache of folder information to reduce API calls
- * Format: { userId: { folderName: { id, path } } }
- */
-const folderCache = {};
-
-/**
  * Well-known folder names and their endpoints
  */
 const WELL_KNOWN_FOLDERS = {
-  'inbox': 'me/mailFolders/inbox/messages',
-  'drafts': 'me/mailFolders/drafts/messages',
-  'sent': 'me/mailFolders/sentItems/messages',
-  'deleted': 'me/mailFolders/deletedItems/messages',
-  'junk': 'me/mailFolders/junkemail/messages',
-  'archive': 'me/mailFolders/archive/messages'
+  inbox: 'me/mailFolders/inbox/messages',
+  drafts: 'me/mailFolders/drafts/messages',
+  sent: 'me/mailFolders/sentItems/messages',
+  deleted: 'me/mailFolders/deletedItems/messages',
+  junk: 'me/mailFolders/junkemail/messages',
+  archive: 'me/mailFolders/archive/messages',
 };
 
 /**
@@ -28,7 +22,6 @@ const WELL_KNOWN_FOLDERS = {
  * @returns {Promise<string>} - Resolved endpoint path
  */
 async function resolveFolderPath(accessToken, folderName) {
-
   // Default to inbox if no folder specified
   if (!folderName) {
     return WELL_KNOWN_FOLDERS['inbox'];
@@ -70,31 +63,21 @@ async function resolveSegmentInParent(accessToken, parentId, segment) {
   const base = parentId ? `me/mailFolders/${parentId}/childFolders` : 'me/mailFolders';
 
   // First try with exact match filter
-  const response = await callGraphAPI(
-    accessToken,
-    'GET',
-    base,
-    null,
-    { $filter: `displayName eq '${segment}'` }
-  );
+  const response = await callGraphAPI(accessToken, 'GET', base, null, {
+    $filter: `displayName eq '${segment}'`,
+  });
 
   if (response.value && response.value.length > 0) {
     return response.value[0].id;
   }
 
   // If exact match fails, try to get all folders and do a case-insensitive comparison
-  const allFoldersResponse = await callGraphAPI(
-    accessToken,
-    'GET',
-    base,
-    null,
-    { $top: 100 }
-  );
+  const allFoldersResponse = await callGraphAPI(accessToken, 'GET', base, null, { $top: 100 });
 
   if (allFoldersResponse.value) {
     const lowerSegment = segment.toLowerCase();
     const matchingFolder = allFoldersResponse.value.find(
-      folder => folder.displayName.toLowerCase() === lowerSegment
+      (folder) => folder.displayName.toLowerCase() === lowerSegment
     );
 
     if (matchingFolder) {
@@ -112,7 +95,10 @@ async function resolveSegmentInParent(accessToken, parentId, segment) {
  * @returns {Promise<string|null>} - Folder ID or null if not found
  */
 async function getFolderIdByName(accessToken, folderName) {
-  const segments = folderName.split('/').map(s => s.trim()).filter(Boolean);
+  const segments = folderName
+    .split('/')
+    .map((s) => s.trim())
+    .filter(Boolean);
   if (segments.length === 0) {
     return null;
   }
@@ -140,24 +126,18 @@ async function getFolderIdByName(accessToken, folderName) {
 async function getAllFolders(accessToken) {
   try {
     // Get top-level folders
-    const response = await callGraphAPI(
-      accessToken,
-      'GET',
-      'me/mailFolders',
-      null,
-      { 
-        $top: 100,
-        $select: 'id,displayName,parentFolderId,childFolderCount,totalItemCount,unreadItemCount'
-      }
-    );
-    
+    const response = await callGraphAPI(accessToken, 'GET', 'me/mailFolders', null, {
+      $top: 100,
+      $select: 'id,displayName,parentFolderId,childFolderCount,totalItemCount,unreadItemCount',
+    });
+
     if (!response.value) {
       return [];
     }
-    
+
     // Get child folders for folders with children
-    const foldersWithChildren = response.value.filter(f => f.childFolderCount > 0);
-    
+    const foldersWithChildren = response.value.filter((f) => f.childFolderCount > 0);
+
     const childFolderPromises = foldersWithChildren.map(async (folder) => {
       try {
         const childResponse = await callGraphAPI(
@@ -165,20 +145,21 @@ async function getAllFolders(accessToken) {
           'GET',
           `me/mailFolders/${folder.id}/childFolders`,
           null,
-          { 
-            $select: 'id,displayName,parentFolderId,childFolderCount,totalItemCount,unreadItemCount'
+          {
+            $select:
+              'id,displayName,parentFolderId,childFolderCount,totalItemCount,unreadItemCount',
           }
         );
-        
+
         return childResponse.value || [];
       } catch (error) {
         console.error(`Error getting child folders for "${folder.displayName}": ${error.message}`);
         return [];
       }
     });
-    
+
     const childFolders = await Promise.all(childFolderPromises);
-    
+
     // Combine top-level folders and all child folders
     return [...response.value, ...childFolders.flat()];
   } catch (error) {
@@ -192,5 +173,5 @@ module.exports = {
   resolveFolderPath,
   resolveSegmentInParent,
   getFolderIdByName,
-  getAllFolders
+  getAllFolders,
 };

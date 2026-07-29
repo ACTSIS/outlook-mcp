@@ -7,7 +7,7 @@
 const config = require('../config');
 const { callGraphAPI } = require('../utils/graph-api');
 const { ensureAuthenticated } = require('../auth');
-const { processHtmlEmail, sanitizeHtmlToText } = require('../utils/html-sanitizer');
+const { processHtmlEmail } = require('../utils/html-sanitizer');
 
 /**
  * Read email handler
@@ -22,10 +22,12 @@ async function handleReadEmail(args) {
 
   if (!emailId) {
     return {
-      content: [{
-        type: "text",
-        text: "Email ID is required."
-      }]
+      content: [
+        {
+          type: 'text',
+          text: 'Email ID is required.',
+        },
+      ],
     };
   }
 
@@ -36,7 +38,7 @@ async function handleReadEmail(args) {
     // Make API call to get email details
     const endpoint = `me/messages/${encodeURIComponent(emailId)}`;
     const queryParams = {
-      $select: config.EMAIL_DETAIL_FIELDS
+      $select: config.EMAIL_DETAIL_FIELDS,
     };
 
     try {
@@ -46,19 +48,35 @@ async function handleReadEmail(args) {
         return {
           content: [
             {
-              type: "text",
-              text: `Email with ID ${emailId} not found.`
-            }
-          ]
+              type: 'text',
+              text: `Email with ID ${emailId} not found.`,
+            },
+          ],
         };
       }
 
       // Format sender, recipients, etc.
-      const sender = email.from ? `${email.from.emailAddress.name} (${email.from.emailAddress.address})` : 'Unknown';
+      const sender = email.from
+        ? `${email.from.emailAddress.name} (${email.from.emailAddress.address})`
+        : 'Unknown';
       const senderAddress = email.from?.emailAddress?.address || 'unknown';
-      const to = email.toRecipients ? email.toRecipients.map(r => `${r.emailAddress.name} (${r.emailAddress.address})`).join(", ") : 'None';
-      const cc = email.ccRecipients && email.ccRecipients.length > 0 ? email.ccRecipients.map(r => `${r.emailAddress.name} (${r.emailAddress.address})`).join(", ") : 'None';
-      const bcc = email.bccRecipients && email.bccRecipients.length > 0 ? email.bccRecipients.map(r => `${r.emailAddress.name} (${r.emailAddress.address})`).join(", ") : 'None';
+      const to = email.toRecipients
+        ? email.toRecipients
+            .map((r) => `${r.emailAddress.name} (${r.emailAddress.address})`)
+            .join(', ')
+        : 'None';
+      const cc =
+        email.ccRecipients && email.ccRecipients.length > 0
+          ? email.ccRecipients
+              .map((r) => `${r.emailAddress.name} (${r.emailAddress.address})`)
+              .join(', ')
+          : 'None';
+      const bcc =
+        email.bccRecipients && email.bccRecipients.length > 0
+          ? email.bccRecipients
+              .map((r) => `${r.emailAddress.name} (${r.emailAddress.address})`)
+              .join(', ')
+          : 'None';
       const date = new Date(email.receivedDateTime).toLocaleString();
 
       // Extract and sanitize body content
@@ -74,8 +92,8 @@ async function handleReadEmail(args) {
             metadata: {
               from: senderAddress,
               subject: email.subject,
-              date: date
-            }
+              date: date,
+            },
           });
           bodyNote = '\n[HTML email - sanitized for security, hidden content removed]\n';
         } else {
@@ -85,8 +103,8 @@ async function handleReadEmail(args) {
             metadata: {
               from: senderAddress,
               subject: email.subject,
-              date: date
-            }
+              date: date,
+            },
           });
         }
       } else {
@@ -112,50 +130,54 @@ ${body}`;
       return {
         content: [
           {
-            type: "text",
-            text: formattedEmail + rawHtmlSection
-          }
-        ]
+            type: 'text',
+            text: formattedEmail + rawHtmlSection,
+          },
+        ],
       };
     } catch (error) {
       console.error(`Error reading email: ${error.message}`);
-      
+
       // Improved error handling with more specific messages
       if (error.message.includes("doesn't belong to the targeted mailbox")) {
         return {
           content: [
             {
-              type: "text",
-              text: `The email ID seems invalid or doesn't belong to your mailbox. Please try with a different email ID.`
-            }
-          ]
+              type: 'text',
+              text: `The email ID seems invalid or doesn't belong to your mailbox. Please try with a different email ID.`,
+            },
+          ],
         };
       } else {
         return {
           content: [
             {
-              type: "text",
-              text: `Failed to read email: ${error.message}`
-            }
-          ]
+              type: 'text',
+              text: `Failed to read email: ${error.message}`,
+            },
+          ],
         };
       }
     }
   } catch (error) {
     if (error.message === 'Authentication required') {
       return {
-        content: [{ 
-          type: "text", 
-          text: "Authentication required. Please use the 'authenticate' tool first."
-        }]
+        content: [
+          {
+            type: 'text',
+            text: "Authentication required. Please use the 'authenticate' tool first.",
+          },
+        ],
       };
     }
-    
+
     return {
-      content: [{ 
-        type: "text", 
-        text: `Error accessing email: ${error.message}`
-      }]
+      content: [
+        {
+          type: 'text',
+          text: `Error accessing email: ${error.message}`,
+        },
+      ],
     };
   }
 }

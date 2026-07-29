@@ -16,10 +16,12 @@ async function handleToggleFlow(args) {
 
   if (!environmentId || !flowId) {
     return {
-      content: [{
-        type: "text",
-        text: "Both environmentId and flowId are required."
-      }]
+      content: [
+        {
+          type: 'text',
+          text: 'Both environmentId and flowId are required.',
+        },
+      ],
     };
   }
 
@@ -28,10 +30,12 @@ async function handleToggleFlow(args) {
 
     if (!accessToken) {
       return {
-        content: [{
-          type: "text",
-          text: "Power Automate authentication required. Please authenticate with Flow scope first."
-        }]
+        content: [
+          {
+            type: 'text',
+            text: 'Power Automate authentication required. Please authenticate with Flow scope first.',
+          },
+        ],
       };
     }
 
@@ -44,35 +48,43 @@ async function handleToggleFlow(args) {
     const actionText = enable ? 'enabled' : 'disabled';
 
     return {
-      content: [{
-        type: "text",
-        text: `Flow successfully ${actionText}.\n\nFlow ID: ${flowId}\nNew State: ${enable ? 'Started' : 'Stopped'}`
-      }]
+      content: [
+        {
+          type: 'text',
+          text: `Flow successfully ${actionText}.\n\nFlow ID: ${flowId}\nNew State: ${enable ? 'Started' : 'Stopped'}`,
+        },
+      ],
     };
   } catch (error) {
     if (error.message === 'FLOW_UNAUTHORIZED') {
       return {
-        content: [{
-          type: "text",
-          text: "Power Automate authentication expired. Please re-authenticate with Flow scope."
-        }]
+        content: [
+          {
+            type: 'text',
+            text: 'Power Automate authentication expired. Please re-authenticate with Flow scope.',
+          },
+        ],
       };
     }
 
     if (error.message.includes('403')) {
       return {
-        content: [{
-          type: "text",
-          text: "Cannot modify this flow. Ensure you have owner or editor permissions."
-        }]
+        content: [
+          {
+            type: 'text',
+            text: 'Cannot modify this flow. Ensure you have owner or editor permissions.',
+          },
+        ],
       };
     }
 
     return {
-      content: [{
-        type: "text",
-        text: `Error toggling flow: ${error.message}`
-      }]
+      content: [
+        {
+          type: 'text',
+          text: `Error toggling flow: ${error.message}`,
+        },
+      ],
     };
   }
 }

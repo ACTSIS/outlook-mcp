@@ -46,7 +46,7 @@ rules:
     test_command: npm test
   verify:
     test_command: npm test
-    build_command: ""
+    build_command: ''
     coverage_threshold: 0
   archive:
     - Warn before merging destructive deltas

@@ -30,50 +30,60 @@ async function handleListFiles(args) {
     const queryParams = {
       $top: Math.min(50, count),
       $select: config.ONEDRIVE_SELECT_FIELDS,
-      $orderby: 'name'
+      $orderby: 'name',
     };
 
     const response = await callGraphAPI(accessToken, 'GET', endpoint, null, queryParams);
 
     if (!response.value || response.value.length === 0) {
       return {
-        content: [{
-          type: "text",
-          text: `No files found in ${path || 'root'}.`
-        }]
+        content: [
+          {
+            type: 'text',
+            text: `No files found in ${path || 'root'}.`,
+          },
+        ],
       };
     }
 
     // Format results
-    const fileList = response.value.map((item, index) => {
-      const isFolder = item.folder ? '[FOLDER]' : '[FILE]';
-      const size = item.size ? formatSize(item.size) : '';
-      const modified = new Date(item.lastModifiedDateTime).toLocaleString();
+    const fileList = response.value
+      .map((item, index) => {
+        const isFolder = item.folder ? '[FOLDER]' : '[FILE]';
+        const size = item.size ? formatSize(item.size) : '';
+        const modified = new Date(item.lastModifiedDateTime).toLocaleString();
 
-      return `${index + 1}. ${isFolder} ${item.name}${size ? ` (${size})` : ''}\n   Modified: ${modified}\n   ID: ${item.id}`;
-    }).join("\n\n");
+        return `${index + 1}. ${isFolder} ${item.name}${size ? ` (${size})` : ''}\n   Modified: ${modified}\n   ID: ${item.id}`;
+      })
+      .join('\n\n');
 
     return {
-      content: [{
-        type: "text",
-        text: `Found ${response.value.length} items in ${path || 'root'}:\n\n${fileList}`
-      }]
+      content: [
+        {
+          type: 'text',
+          text: `Found ${response.value.length} items in ${path || 'root'}:\n\n${fileList}`,
+        },
+      ],
     };
   } catch (error) {
     if (error.message === 'Authentication required') {
       return {
-        content: [{
-          type: "text",
-          text: "Authentication required. Please use the 'authenticate' tool first."
-        }]
+        content: [
+          {
+            type: 'text',
+            text: "Authentication required. Please use the 'authenticate' tool first.",
+          },
+        ],
       };
     }
 
     return {
-      content: [{
-        type: "text",
-        text: `Error listing files: ${error.message}`
-      }]
+      content: [
+        {
+          type: 'text',
+          text: `Error listing files: ${error.message}`,
+        },
+      ],
     };
   }
 }

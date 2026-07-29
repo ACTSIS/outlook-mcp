@@ -2,14 +2,14 @@
 
 ## Review Workload Forecast
 
-| Field | Value |
-|-------|-------|
-| Estimated changed lines | ~185 |
-| 400-line budget risk | Low |
-| Chained PRs recommended | No |
-| Suggested split | Single PR |
-| Delivery strategy | auto-chain |
-| Chain strategy | size-exception |
+| Field                   | Value          |
+| ----------------------- | -------------- |
+| Estimated changed lines | ~185           |
+| 400-line budget risk    | Low            |
+| Chained PRs recommended | No             |
+| Suggested split         | Single PR      |
+| Delivery strategy       | auto-chain     |
+| Chain strategy          | size-exception |
 
 Decision needed before apply: No
 Chained PRs recommended: No
@@ -18,9 +18,9 @@ Chain strategy: size-exception
 
 ### Suggested Work Units
 
-| Unit | Goal | Likely PR | Focused test command | Runtime harness | Rollback boundary |
-|------|------|-----------|----------------------|-----------------|-------------------|
-| 1 | Scope unification + refresh fix + auth status | Single PR | `npm test` | N/A — all changes are unit-testable; no runtime auth flow needed | Revert config.js, token-storage.js, outlook-auth-server.js, tools.js, test files |
+| Unit | Goal                                          | Likely PR | Focused test command | Runtime harness                                                  | Rollback boundary                                                                |
+| ---- | --------------------------------------------- | --------- | -------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| 1    | Scope unification + refresh fix + auth status | Single PR | `npm test`           | N/A — all changes are unit-testable; no runtime auth flow needed | Revert config.js, token-storage.js, outlook-auth-server.js, tools.js, test files |
 
 ## Phase 1: RED — Write Failing Tests
 

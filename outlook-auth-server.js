@@ -5,7 +5,6 @@ const querystring = require('querystring');
 const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
-const path = require('path');
 
 // Load environment variables from .env file
 require('dotenv').config();
@@ -29,12 +28,15 @@ const pendingStates = new Map();
 const TEN_MINUTES = 10 * 60 * 1000;
 
 // Periodically clean up expired CSRF states to prevent memory leaks
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, timestamp] of pendingStates.entries()) {
-    if (now - timestamp > TEN_MINUTES) pendingStates.delete(key);
-  }
-}, 5 * 60 * 1000).unref(); // unref so the timer doesn't prevent process exit
+setInterval(
+  () => {
+    const now = Date.now();
+    for (const [key, timestamp] of pendingStates.entries()) {
+      if (now - timestamp > TEN_MINUTES) pendingStates.delete(key);
+    }
+  },
+  5 * 60 * 1000
+).unref(); // unref so the timer doesn't prevent process exit
 
 // Authentication configuration
 const config = require('./config');
@@ -43,19 +45,22 @@ const AUTH_CONFIG = {
   clientId: process.env.MS_CLIENT_ID || '', // Set your client ID as an environment variable
   clientSecret: process.env.MS_CLIENT_SECRET || '', // Set your client secret as an environment variable
   tenantId: process.env.MS_TENANT_ID || 'common',
-  authorityHost: (process.env.MS_AUTHORITY_HOST || 'https://login.microsoftonline.com').replace(/\/+$/, ''),
+  authorityHost: (process.env.MS_AUTHORITY_HOST || 'https://login.microsoftonline.com').replace(
+    /\/+$/,
+    ''
+  ),
   redirectUri: config.AUTH_CONFIG.redirectUri,
   scopes: config.AUTH_CONFIG.scopes,
-  tokenStorePath: config.AUTH_CONFIG.tokenStorePath
+  tokenStorePath: config.AUTH_CONFIG.tokenStorePath,
 };
 
 // Create HTTP server
 const server = http.createServer((req, res) => {
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
-  
+
   console.log(`Request received: ${pathname}`);
-  
+
   if (pathname === '/auth/callback') {
     const query = parsedUrl.query;
 
@@ -103,7 +108,7 @@ const server = http.createServer((req, res) => {
 
       // Exchange code for tokens
       exchangeCodeForTokens(query.code)
-        .then((tokens) => {
+        .then((_tokens) => {
           console.log('Token exchange successful');
           res.writeHead(200, { 'Content-Type': 'text/html' });
           res.end(`
@@ -176,7 +181,7 @@ const server = http.createServer((req, res) => {
   } else if (pathname === '/auth') {
     // Handle the /auth route - redirect to Microsoft's OAuth authorization endpoint
     console.log('Auth request received, redirecting to Microsoft login...');
-    
+
     // Verify credentials are set
     if (!AUTH_CONFIG.clientId || !AUTH_CONFIG.clientSecret) {
       res.writeHead(500, { 'Content-Type': 'text/html' });
@@ -205,7 +210,7 @@ const server = http.createServer((req, res) => {
       `);
       return;
     }
-    
+
     // Generate cryptographically secure state parameter for CSRF protection
     const state = crypto.randomBytes(32).toString('hex');
     pendingStates.set(state, Date.now());
@@ -217,14 +222,14 @@ const server = http.createServer((req, res) => {
       redirect_uri: AUTH_CONFIG.redirectUri,
       scope: AUTH_CONFIG.scopes.join(' '),
       response_mode: 'query',
-      state
+      state,
     };
-    
+
     const authUrl = `${AUTH_CONFIG.authorityHost}/${AUTH_CONFIG.tenantId}/oauth2/v2.0/authorize?${querystring.stringify(authParams)}`;
     console.log(`Redirecting to: ${authUrl}`);
-    
+
     // Redirect to Microsoft's login page
-    res.writeHead(302, { 'Location': authUrl });
+    res.writeHead(302, { Location: authUrl });
     res.end();
   } else if (pathname === '/') {
     // Root path - provide instructions
@@ -266,41 +271,44 @@ function exchangeCodeForTokens(code) {
       code: code,
       redirect_uri: AUTH_CONFIG.redirectUri,
       grant_type: 'authorization_code',
-      scope: AUTH_CONFIG.scopes.join(' ')
+      scope: AUTH_CONFIG.scopes.join(' '),
     });
-    
+
     const options = {
       hostname: AUTH_CONFIG.authorityHost.replace(/^https?:\/\//, '').split('/')[0],
       path: `/${AUTH_CONFIG.tenantId}/oauth2/v2.0/token`,
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': Buffer.byteLength(postData)
-      }
+        'Content-Length': Buffer.byteLength(postData),
+      },
     };
-    
+
     const req = https.request(options, (res) => {
       let data = '';
-      
+
       res.on('data', (chunk) => {
         data += chunk;
       });
-      
+
       res.on('end', () => {
         if (res.statusCode >= 200 && res.statusCode < 300) {
           try {
             const tokenResponse = JSON.parse(data);
-            
+
             // Calculate expiration time (current time + expires_in seconds)
-            const expiresAt = Date.now() + (tokenResponse.expires_in * 1000);
-            
+            const expiresAt = Date.now() + tokenResponse.expires_in * 1000;
+
             // Add expires_at for easier expiration checking
             tokenResponse.expires_at = expiresAt;
-            
+
             // Save tokens to file with restrictive permissions
-            fs.writeFileSync(AUTH_CONFIG.tokenStorePath, JSON.stringify(tokenResponse, null, 2), { encoding: 'utf8', mode: 0o600 });
+            fs.writeFileSync(AUTH_CONFIG.tokenStorePath, JSON.stringify(tokenResponse, null, 2), {
+              encoding: 'utf8',
+              mode: 0o600,
+            });
             console.log(`Tokens saved to ${AUTH_CONFIG.tokenStorePath}`);
-            
+
             resolve(tokenResponse);
           } catch (error) {
             reject(new Error(`Error parsing token response: ${error.message}`));
@@ -310,11 +318,11 @@ function exchangeCodeForTokens(code) {
         }
       });
     });
-    
+
     req.on('error', (error) => {
       reject(error);
     });
-    
+
     req.write(postData);
     req.end();
   });
@@ -326,7 +334,7 @@ server.listen(PORT, () => {
   console.log(`Authentication server running at http://localhost:${PORT}`);
   console.log(`Waiting for authentication callback at ${AUTH_CONFIG.redirectUri}`);
   console.log(`Token will be stored at: ${AUTH_CONFIG.tokenStorePath}`);
-  
+
   if (!AUTH_CONFIG.clientId || !AUTH_CONFIG.clientSecret) {
     console.log('\n⚠️  WARNING: Microsoft Graph API credentials are not set.');
     console.log('   Please set the MS_CLIENT_ID and MS_CLIENT_SECRET environment variables.');

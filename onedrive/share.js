@@ -17,10 +17,12 @@ async function handleShare(args) {
 
   if (!itemId && !path) {
     return {
-      content: [{
-        type: "text",
-        text: "Either itemId or path is required."
-      }]
+      content: [
+        {
+          type: 'text',
+          text: 'Either itemId or path is required.',
+        },
+      ],
     };
   }
 
@@ -38,10 +40,12 @@ async function handleShare(args) {
 
       if (!itemResponse || !itemResponse.id) {
         return {
-          content: [{
-            type: "text",
-            text: `File not found at path: ${path}`
-          }]
+          content: [
+            {
+              type: 'text',
+              text: `File not found at path: ${path}`,
+            },
+          ],
         };
       }
 
@@ -53,17 +57,19 @@ async function handleShare(args) {
     const endpoint = `me/drive/items/${resolvedItemId}/createLink`;
     const body = {
       type: type,
-      scope: scope
+      scope: scope,
     };
 
     const response = await callGraphAPI(accessToken, 'POST', endpoint, body);
 
     if (!response || !response.link) {
       return {
-        content: [{
-          type: "text",
-          text: "Failed to create sharing link."
-        }]
+        content: [
+          {
+            type: 'text',
+            text: 'Failed to create sharing link.',
+          },
+        ],
       };
     }
 
@@ -73,26 +79,32 @@ async function handleShare(args) {
       : `Sharing link created:`;
 
     return {
-      content: [{
-        type: "text",
-        text: `${shareText}\n\nLink: ${linkInfo.webUrl}\nType: ${type}\nScope: ${scope}\n\nNote: ${scope === 'anonymous' ? 'Anyone with this link can access the file.' : 'Only people in your organization can access.'}`
-      }]
+      content: [
+        {
+          type: 'text',
+          text: `${shareText}\n\nLink: ${linkInfo.webUrl}\nType: ${type}\nScope: ${scope}\n\nNote: ${scope === 'anonymous' ? 'Anyone with this link can access the file.' : 'Only people in your organization can access.'}`,
+        },
+      ],
     };
   } catch (error) {
     if (error.message === 'Authentication required') {
       return {
-        content: [{
-          type: "text",
-          text: "Authentication required. Please use the 'authenticate' tool first."
-        }]
+        content: [
+          {
+            type: 'text',
+            text: "Authentication required. Please use the 'authenticate' tool first.",
+          },
+        ],
       };
     }
 
     return {
-      content: [{
-        type: "text",
-        text: `Error creating sharing link: ${error.message}`
-      }]
+      content: [
+        {
+          type: 'text',
+          text: `Error creating sharing link: ${error.message}`,
+        },
+      ],
     };
   }
 }

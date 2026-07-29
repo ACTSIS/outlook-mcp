@@ -7,6 +7,7 @@
 The same `getFolderIdByName()` is used by **four call sites**: `folder/move.js`, `folder/create.js` (twice, for existence check and parent lookup), and `rules/create.js`. None of them currently support subfolder paths.
 
 Helper functions already exist for hierarchy traversal:
+
 - `getAllFolders()` in `email/folder-utils.js` (lines 120-168) fetches top-level folders + one level of `childFolders`, but it returns a **flat list** with no path structure, and only goes **one level deep**.
 - `getAllFoldersHierarchy()` in `folder/list.js` (lines 65-129) does the same one-level fetch with additional formatting.
 - `create-folder` already has a `parentFolder` parameter and resolves it via `getFolderIdByName(accessToken, parentFolderName)` at `folder/create.js:79` — but **same limitation**: parentFolder must be top-level.
@@ -51,6 +52,7 @@ The `find-folder-ids.js` utility script (lines 29-82) demonstrates the correct G
 **Approach 1: Enhance `getFolderIdByName()` with path splitting.**
 
 Rationale:
+
 - Straightforward implementation: split input on `/`, trim segments, traverse `childFolders` level by level using the Graph API `me/mailFolders/{parentId}/childFolders` endpoint
 - Backwards compatible: if input has no `/`, behavior is identical to today (exact match via `$filter`, fallback to case-insensitive)
 - All four call sites benefit automatically
@@ -58,6 +60,7 @@ Rationale:
 - The `getAllFolders()` and `getAllFoldersHierarchy()` functions already prove the `childFolders` endpoint works
 
 The implementation would:
+
 1. Check if `folderName` contains `/`; if not, use existing logic (zero blast radius)
 2. Split on `/`, trim each segment
 3. Resolve the first segment via existing top-level lookup (`$filter` on `displayName`)
@@ -77,6 +80,7 @@ The implementation would:
 **Yes.** The problem is well-understood, the fix is scoped, and Approach 1 is the clearest path forward. The orchestrator should proceed with `sdd-propose` for the `fix-subfolder-move-emails` change.
 
 Key points to tell the user:
+
 - Only `email/folder-utils.js` needs substantive changes
 - No schema changes to `move-emails` tool definition
 - All existing callers work unchanged (backwards compatible)

@@ -16,10 +16,12 @@ async function handleListRuns(args) {
 
   if (!environmentId || !flowId) {
     return {
-      content: [{
-        type: "text",
-        text: "Both environmentId and flowId are required."
-      }]
+      content: [
+        {
+          type: 'text',
+          text: 'Both environmentId and flowId are required.',
+        },
+      ],
     };
   }
 
@@ -28,10 +30,12 @@ async function handleListRuns(args) {
 
     if (!accessToken) {
       return {
-        content: [{
-          type: "text",
-          text: "Power Automate authentication required. Please authenticate with Flow scope first."
-        }]
+        content: [
+          {
+            type: 'text',
+            text: 'Power Automate authentication required. Please authenticate with Flow scope first.',
+          },
+        ],
       };
     }
 
@@ -40,50 +44,60 @@ async function handleListRuns(args) {
 
     if (!response.value || response.value.length === 0) {
       return {
-        content: [{
-          type: "text",
-          text: "No run history found for this flow."
-        }]
+        content: [
+          {
+            type: 'text',
+            text: 'No run history found for this flow.',
+          },
+        ],
       };
     }
 
     // Limit to requested count
     const runs = response.value.slice(0, count);
 
-    const runList = runs.map((run, index) => {
-      const props = run.properties || {};
-      const status = props.status || 'Unknown';
-      const statusIcon = getStatusIcon(status);
-      const startTime = props.startTime ? new Date(props.startTime).toLocaleString() : 'Unknown';
-      const endTime = props.endTime ? new Date(props.endTime).toLocaleString() : 'Running...';
-      const duration = props.startTime && props.endTime
-        ? formatDuration(new Date(props.endTime) - new Date(props.startTime))
-        : 'N/A';
+    const runList = runs
+      .map((run, index) => {
+        const props = run.properties || {};
+        const status = props.status || 'Unknown';
+        const statusIcon = getStatusIcon(status);
+        const startTime = props.startTime ? new Date(props.startTime).toLocaleString() : 'Unknown';
+        const duration =
+          props.startTime && props.endTime
+            ? formatDuration(new Date(props.endTime) - new Date(props.startTime))
+            : 'N/A';
 
-      return `${index + 1}. ${statusIcon} ${status}\n   Run ID: ${run.name}\n   Started: ${startTime}\n   Duration: ${duration}`;
-    }).join("\n\n");
+        return `${index + 1}. ${statusIcon} ${status}\n   Run ID: ${run.name}\n   Started: ${startTime}\n   Duration: ${duration}`;
+      })
+      .join('\n\n');
 
     return {
-      content: [{
-        type: "text",
-        text: `Recent ${runs.length} run(s) for this flow:\n\n${runList}`
-      }]
+      content: [
+        {
+          type: 'text',
+          text: `Recent ${runs.length} run(s) for this flow:\n\n${runList}`,
+        },
+      ],
     };
   } catch (error) {
     if (error.message === 'FLOW_UNAUTHORIZED') {
       return {
-        content: [{
-          type: "text",
-          text: "Power Automate authentication expired. Please re-authenticate with Flow scope."
-        }]
+        content: [
+          {
+            type: 'text',
+            text: 'Power Automate authentication expired. Please re-authenticate with Flow scope.',
+          },
+        ],
       };
     }
 
     return {
-      content: [{
-        type: "text",
-        text: `Error listing flow runs: ${error.message}`
-      }]
+      content: [
+        {
+          type: 'text',
+          text: `Error listing flow runs: ${error.message}`,
+        },
+      ],
     };
   }
 }
@@ -93,11 +107,11 @@ async function handleListRuns(args) {
  */
 function getStatusIcon(status) {
   const icons = {
-    'Succeeded': '[OK]',
-    'Failed': '[FAIL]',
-    'Running': '[...]',
-    'Cancelled': '[X]',
-    'TimedOut': '[TIMEOUT]'
+    Succeeded: '[OK]',
+    Failed: '[FAIL]',
+    Running: '[...]',
+    Cancelled: '[X]',
+    TimedOut: '[TIMEOUT]',
   };
   return icons[status] || '[?]';
 }

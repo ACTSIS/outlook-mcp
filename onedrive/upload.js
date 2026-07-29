@@ -17,19 +17,23 @@ async function handleUpload(args) {
 
   if (!path) {
     return {
-      content: [{
-        type: "text",
-        text: "Path is required (e.g., '/Documents/myfile.txt')."
-      }]
+      content: [
+        {
+          type: 'text',
+          text: "Path is required (e.g., '/Documents/myfile.txt').",
+        },
+      ],
     };
   }
 
   if (!content) {
     return {
-      content: [{
-        type: "text",
-        text: "Content is required."
-      }]
+      content: [
+        {
+          type: 'text',
+          text: 'Content is required.',
+        },
+      ],
     };
   }
 
@@ -37,10 +41,12 @@ async function handleUpload(args) {
   const contentSize = Buffer.byteLength(content, 'utf8');
   if (contentSize > config.ONEDRIVE_UPLOAD_THRESHOLD) {
     return {
-      content: [{
-        type: "text",
-        text: `File is too large for simple upload (${formatSize(contentSize)}). Use onedrive-upload-large for files over 4MB.`
-      }]
+      content: [
+        {
+          type: 'text',
+          text: `File is too large for simple upload (${formatSize(contentSize)}). Use onedrive-upload-large for files over 4MB.`,
+        },
+      ],
     };
   }
 
@@ -53,41 +59,49 @@ async function handleUpload(args) {
 
     // Add conflict behavior query param
     const queryParams = {
-      '@microsoft.graph.conflictBehavior': conflictBehavior
+      '@microsoft.graph.conflictBehavior': conflictBehavior,
     };
 
     const response = await callGraphAPI(accessToken, 'PUT', endpoint, content, queryParams);
 
     if (!response || !response.id) {
       return {
-        content: [{
-          type: "text",
-          text: "Upload failed - no response from server."
-        }]
+        content: [
+          {
+            type: 'text',
+            text: 'Upload failed - no response from server.',
+          },
+        ],
       };
     }
 
     return {
-      content: [{
-        type: "text",
-        text: `Successfully uploaded "${response.name}" (${formatSize(response.size)})\n\nID: ${response.id}\nWeb URL: ${response.webUrl}`
-      }]
+      content: [
+        {
+          type: 'text',
+          text: `Successfully uploaded "${response.name}" (${formatSize(response.size)})\n\nID: ${response.id}\nWeb URL: ${response.webUrl}`,
+        },
+      ],
     };
   } catch (error) {
     if (error.message === 'Authentication required') {
       return {
-        content: [{
-          type: "text",
-          text: "Authentication required. Please use the 'authenticate' tool first."
-        }]
+        content: [
+          {
+            type: 'text',
+            text: "Authentication required. Please use the 'authenticate' tool first.",
+          },
+        ],
       };
     }
 
     return {
-      content: [{
-        type: "text",
-        text: `Error uploading file: ${error.message}`
-      }]
+      content: [
+        {
+          type: 'text',
+          text: `Error uploading file: ${error.message}`,
+        },
+      ],
     };
   }
 }

@@ -1,18 +1,15 @@
-const express = require('express');
 const querystring = require('querystring');
-const https = require('https');
-const fs = require('fs');
 const crypto = require('crypto'); // Added for generating random string
 const TokenStorage = require('./token-storage'); // Assuming TokenStorage is in the same directory
 
 // HTML templates
 function escapeHtml(unsafe) {
   return unsafe
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 const templates = {
@@ -48,12 +45,14 @@ const templates = {
         <h1>🔐 Token Status</h1>
         <p>${escapeHtml(status)}</p>
       </body>
-    </html>`
+    </html>`,
 };
 
 function createAuthConfig(envPrefix = 'MS_') {
   const tenantId = process.env[`${envPrefix}TENANT_ID`] || 'common';
-  const authorityHost = (process.env[`${envPrefix}AUTHORITY_HOST`] || 'https://login.microsoftonline.com').replace(/\/+$/, '');
+  const authorityHost = (
+    process.env[`${envPrefix}AUTHORITY_HOST`] || 'https://login.microsoftonline.com'
+  ).replace(/\/+$/, '');
 
   return {
     clientId: process.env[`${envPrefix}CLIENT_ID`] || '',
@@ -61,8 +60,11 @@ function createAuthConfig(envPrefix = 'MS_') {
     redirectUri: process.env[`${envPrefix}REDIRECT_URI`] || 'http://localhost:3333/auth/callback',
     scopes: (process.env[`${envPrefix}SCOPES`] || 'offline_access User.Read Mail.Read').split(' '),
     tenantId,
-    tokenEndpoint: process.env[`${envPrefix}TOKEN_ENDPOINT`] || `${authorityHost}/${tenantId}/oauth2/v2.0/token`,
-    authEndpoint: process.env[`${envPrefix}AUTH_ENDPOINT`] || `${authorityHost}/${tenantId}/oauth2/v2.0/authorize`
+    tokenEndpoint:
+      process.env[`${envPrefix}TOKEN_ENDPOINT`] || `${authorityHost}/${tenantId}/oauth2/v2.0/token`,
+    authEndpoint:
+      process.env[`${envPrefix}AUTH_ENDPOINT`] ||
+      `${authorityHost}/${tenantId}/oauth2/v2.0/authorize`,
   };
 }
 
@@ -72,15 +74,18 @@ function setupOAuthRoutes(app, tokenStorage, authConfig, envPrefix = 'MS_') {
   }
 
   if (!(tokenStorage instanceof TokenStorage)) {
-    console.error("Error: tokenStorage is not an instance of TokenStorage. OAuth routes will not function correctly.");
+    console.error(
+      'Error: tokenStorage is not an instance of TokenStorage. OAuth routes will not function correctly.'
+    );
     // Optionally, you could throw an error here or disable the routes
     // throw new Error("Invalid tokenStorage provided to setupOAuthRoutes");
   }
 
-
   app.get('/auth', (req, res) => {
     if (!authConfig.clientId) {
-      return res.status(500).send(templates.authError('Configuration Error', 'Client ID is not configured.'));
+      return res
+        .status(500)
+        .send(templates.authError('Configuration Error', 'Client ID is not configured.'));
     }
     const state = crypto.randomBytes(16).toString('hex'); // Generate a random 16-byte string
     // Store state in session or similar mechanism if available.
@@ -91,14 +96,15 @@ function setupOAuthRoutes(app, tokenStorage, authConfig, envPrefix = 'MS_') {
     // Since this is a module, actual session handling is outside its direct scope,
     // but it's crucial for the consuming application to handle state verification.
 
-    const authorizationUrl = `${authConfig.authEndpoint}?` +
+    const authorizationUrl =
+      `${authConfig.authEndpoint}?` +
       querystring.stringify({
         client_id: authConfig.clientId,
         response_type: 'code',
         redirect_uri: authConfig.redirectUri,
         scope: authConfig.scopes.join(' '),
         response_mode: 'query',
-        state: state
+        state: state,
       });
     res.redirect(authorizationUrl);
   });
@@ -130,8 +136,17 @@ function setupOAuthRoutes(app, tokenStorage, authConfig, envPrefix = 'MS_') {
     // The new sse-server.js also doesn't show session management for state.
     // So, we will make the check for presence mandatory as per Gemini's suggestion.
     if (!state) {
-        console.error("OAuth callback received without a 'state' parameter. Rejecting request to prevent potential CSRF attack.");
-        return res.status(400).send(templates.authError('Missing State Parameter', 'The state parameter was missing from the OAuth callback. This is a security risk. Please try authenticating again.'));
+      console.error(
+        "OAuth callback received without a 'state' parameter. Rejecting request to prevent potential CSRF attack."
+      );
+      return res
+        .status(400)
+        .send(
+          templates.authError(
+            'Missing State Parameter',
+            'The state parameter was missing from the OAuth callback. This is a security risk. Please try authenticating again.'
+          )
+        );
     }
     // Further validation of the state's VALUE (e.g., req.session.oauthState === state) is the responsibility
     // of the application integrating this module, as session management is outside this module's scope.
@@ -140,13 +155,19 @@ function setupOAuthRoutes(app, tokenStorage, authConfig, envPrefix = 'MS_') {
     // }
     // if (req.session) delete req.session.oauthState;
 
-
     if (error) {
       return res.status(400).send(templates.authError(error, error_description));
     }
 
     if (!code) {
-      return res.status(400).send(templates.authError('Missing Authorization Code', 'No authorization code was provided in the callback.'));
+      return res
+        .status(400)
+        .send(
+          templates.authError(
+            'Missing Authorization Code',
+            'No authorization code was provided in the callback.'
+          )
+        );
     }
 
     try {
@@ -163,9 +184,8 @@ function setupOAuthRoutes(app, tokenStorage, authConfig, envPrefix = 'MS_') {
       const token = await tokenStorage.getValidAccessToken();
       if (token) {
         const expiry = tokenStorage.getExpiryTime();
-        const expiryStr = Number.isFinite(expiry) && expiry > 0
-          ? new Date(expiry).toLocaleString()
-          : 'Unknown';
+        const expiryStr =
+          Number.isFinite(expiry) && expiry > 0 ? new Date(expiry).toLocaleString() : 'Unknown';
         res.send(templates.tokenStatus(`Access token is valid. Expires at: ${expiryStr}`));
       } else {
         res.send(templates.tokenStatus('No valid access token found. Please authenticate.'));

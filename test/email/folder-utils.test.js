@@ -2,7 +2,7 @@ const {
   WELL_KNOWN_FOLDERS,
   resolveFolderPath,
   getFolderIdByName,
-  resolveSegmentInParent
+  resolveSegmentInParent,
 } = require('../../email/folder-utils');
 const { callGraphAPI } = require('../../utils/graph-api');
 
@@ -64,19 +64,15 @@ describe('resolveFolderPath', () => {
       const customFolderName = 'MyCustomFolder';
 
       callGraphAPI.mockResolvedValueOnce({
-        value: [{ id: customFolderId, displayName: customFolderName }]
+        value: [{ id: customFolderId, displayName: customFolderName }],
       });
 
       const result = await resolveFolderPath(mockAccessToken, customFolderName);
 
       expect(result).toBe(`me/mailFolders/${customFolderId}/messages`);
-      expect(callGraphAPI).toHaveBeenCalledWith(
-        mockAccessToken,
-        'GET',
-        'me/mailFolders',
-        null,
-        { $filter: `displayName eq '${customFolderName}'` }
-      );
+      expect(callGraphAPI).toHaveBeenCalledWith(mockAccessToken, 'GET', 'me/mailFolders', null, {
+        $filter: `displayName eq '${customFolderName}'`,
+      });
     });
 
     test('should try case-insensitive search when exact match fails', async () => {
@@ -90,8 +86,8 @@ describe('resolveFolderPath', () => {
       callGraphAPI.mockResolvedValueOnce({
         value: [
           { id: 'other-id', displayName: 'OtherFolder' },
-          { id: customFolderId, displayName: 'projectalpha' }
-        ]
+          { id: customFolderId, displayName: 'projectalpha' },
+        ],
       });
 
       const result = await resolveFolderPath(mockAccessToken, customFolderName);
@@ -110,8 +106,8 @@ describe('resolveFolderPath', () => {
       callGraphAPI.mockResolvedValueOnce({
         value: [
           { id: 'id1', displayName: 'Folder1' },
-          { id: 'id2', displayName: 'Folder2' }
-        ]
+          { id: 'id2', displayName: 'Folder2' },
+        ],
       });
 
       const result = await resolveFolderPath(mockAccessToken, nonExistentFolder);
@@ -150,19 +146,15 @@ describe('getFolderIdByName', () => {
     const folderName = 'TestFolder';
 
     callGraphAPI.mockResolvedValueOnce({
-      value: [{ id: folderId, displayName: folderName }]
+      value: [{ id: folderId, displayName: folderName }],
     });
 
     const result = await getFolderIdByName(mockAccessToken, folderName);
 
     expect(result).toBe(folderId);
-    expect(callGraphAPI).toHaveBeenCalledWith(
-      mockAccessToken,
-      'GET',
-      'me/mailFolders',
-      null,
-      { $filter: `displayName eq '${folderName}'` }
-    );
+    expect(callGraphAPI).toHaveBeenCalledWith(mockAccessToken, 'GET', 'me/mailFolders', null, {
+      $filter: `displayName eq '${folderName}'`,
+    });
   });
 
   test('should return folder ID when case-insensitive match is found', async () => {
@@ -174,9 +166,7 @@ describe('getFolderIdByName', () => {
 
     // Second call returns folders with case-insensitive match
     callGraphAPI.mockResolvedValueOnce({
-      value: [
-        { id: folderId, displayName: 'testfolder' }
-      ]
+      value: [{ id: folderId, displayName: 'testfolder' }],
     });
 
     const result = await getFolderIdByName(mockAccessToken, folderName);
@@ -193,9 +183,7 @@ describe('getFolderIdByName', () => {
 
     // Second call returns folders without a match
     callGraphAPI.mockResolvedValueOnce({
-      value: [
-        { id: 'id1', displayName: 'OtherFolder' }
-      ]
+      value: [{ id: 'id1', displayName: 'OtherFolder' }],
     });
 
     const result = await getFolderIdByName(mockAccessToken, folderName);
@@ -274,13 +262,9 @@ describe('getFolderIdByName', () => {
 
       expect(result).toBe('inbox-id');
       expect(callGraphAPI).toHaveBeenCalledTimes(1);
-      expect(callGraphAPI).toHaveBeenCalledWith(
-        mockAccessToken,
-        'GET',
-        'me/mailFolders',
-        null,
-        { $filter: "displayName eq 'Inbox'" }
-      );
+      expect(callGraphAPI).toHaveBeenCalledWith(mockAccessToken, 'GET', 'me/mailFolders', null, {
+        $filter: "displayName eq 'Inbox'",
+      });
     });
 
     test('case-insensitive segments resolve via fallback', async () => {
@@ -372,13 +356,9 @@ describe('getFolderIdByName', () => {
       const result = await resolveSegmentInParent(mockAccessToken, null, 'TopFolder');
 
       expect(result).toBe('top-id');
-      expect(callGraphAPI).toHaveBeenCalledWith(
-        mockAccessToken,
-        'GET',
-        'me/mailFolders',
-        null,
-        { $filter: "displayName eq 'TopFolder'" }
-      );
+      expect(callGraphAPI).toHaveBeenCalledWith(mockAccessToken, 'GET', 'me/mailFolders', null, {
+        $filter: "displayName eq 'TopFolder'",
+      });
     });
 
     test('resolveSegmentInParent case-insensitive fallback at child level', async () => {

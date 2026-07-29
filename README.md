@@ -6,10 +6,10 @@ A comprehensive MCP (Model Context Protocol) server that connects Claude with Mi
 
 ## Supported Services
 
-| Service | Capabilities |
-|---------|--------------|
-| **Outlook** | Email, calendar, folders, rules |
-| **OneDrive** | Files, folders, search, sharing |
+| Service            | Capabilities                     |
+| ------------------ | -------------------------------- |
+| **Outlook**        | Email, calendar, folders, rules  |
+| **OneDrive**       | Files, folders, search, sharing  |
 | **Power Automate** | Flows, environments, run history |
 
 ## What's different in this fork
@@ -34,44 +34,47 @@ See [Credits](#credits) for the original work this builds on.
 ## Available Tools
 
 ### Outlook (Email & Calendar)
-| Tool | Description |
-|------|-------------|
-| `list-emails` | List recent emails from inbox |
-| `search-emails` | Search emails with filters |
-| `read-email` | Read email content |
-| `send-email` | Send a new email |
-| `mark-as-read` | Mark email as read/unread |
-| `list-events` | List calendar events |
-| `create-event` | Create calendar event |
-| `accept-event` | Accept event invitation |
-| `decline-event` | Decline event invitation |
-| `delete-event` | Delete calendar event |
-| `list-folders` | List mail folders |
-| `create-folder` | Create mail folder (supports nested paths like `Parent/Child`) |
-| `move-emails` | Move emails between folders (supports nested paths like `Tramite/REQ-104951`) |
-| `list-rules` | List inbox rules |
-| `create-rule` | Create inbox rule |
+
+| Tool            | Description                                                                   |
+| --------------- | ----------------------------------------------------------------------------- |
+| `list-emails`   | List recent emails from inbox                                                 |
+| `search-emails` | Search emails with filters                                                    |
+| `read-email`    | Read email content                                                            |
+| `send-email`    | Send a new email                                                              |
+| `mark-as-read`  | Mark email as read/unread                                                     |
+| `list-events`   | List calendar events                                                          |
+| `create-event`  | Create calendar event                                                         |
+| `accept-event`  | Accept event invitation                                                       |
+| `decline-event` | Decline event invitation                                                      |
+| `delete-event`  | Delete calendar event                                                         |
+| `list-folders`  | List mail folders                                                             |
+| `create-folder` | Create mail folder (supports nested paths like `Parent/Child`)                |
+| `move-emails`   | Move emails between folders (supports nested paths like `Tramite/REQ-104951`) |
+| `list-rules`    | List inbox rules                                                              |
+| `create-rule`   | Create inbox rule                                                             |
 
 ### OneDrive
-| Tool | Description |
-|------|-------------|
-| `onedrive-list` | List files in a path |
-| `onedrive-search` | Search files by query |
-| `onedrive-download` | Get download URL |
-| `onedrive-upload` | Upload small file (<4MB) |
-| `onedrive-upload-large` | Chunked upload (>4MB) |
-| `onedrive-share` | Create sharing link |
-| `onedrive-create-folder` | Create folder |
-| `onedrive-delete` | Delete file or folder |
+
+| Tool                     | Description              |
+| ------------------------ | ------------------------ |
+| `onedrive-list`          | List files in a path     |
+| `onedrive-search`        | Search files by query    |
+| `onedrive-download`      | Get download URL         |
+| `onedrive-upload`        | Upload small file (<4MB) |
+| `onedrive-upload-large`  | Chunked upload (>4MB)    |
+| `onedrive-share`         | Create sharing link      |
+| `onedrive-create-folder` | Create folder            |
+| `onedrive-delete`        | Delete file or folder    |
 
 ### Power Automate
-| Tool | Description |
-|------|-------------|
+
+| Tool                     | Description                      |
+| ------------------------ | -------------------------------- |
 | `flow-list-environments` | List Power Platform environments |
-| `flow-list` | List flows in environment |
-| `flow-run` | Trigger a manual flow |
-| `flow-list-runs` | Get flow run history |
-| `flow-toggle` | Enable/disable a flow |
+| `flow-list`              | List flows in environment        |
+| `flow-run`               | Trigger a manual flow            |
+| `flow-list-runs`         | Get flow run history             |
+| `flow-toggle`            | Enable/disable a flow            |
 
 ## Folder Path Resolution
 
@@ -82,11 +85,11 @@ See [Credits](#credits) for the original work this builds on.
 - **Resolution helper**: `email/folder-utils.js` exposes `resolveFolderPath(path)` → splits on `/` and walks each segment via `resolveSegmentInParent(parentId, name)`.
 - **Known limitation**: folder names that contain a literal `/` character are **not supported** — the character is always treated as a path separator.
 
-| Input | Behavior |
-|-------|----------|
-| `Inbox` | Top-level folder lookup (legacy) |
-| `Tramite/REQ-104951` | Find `Tramite`, then `REQ-104951` under it |
-| `A/B/C` | Walk A → B → C, fail if any segment is missing |
+| Input                | Behavior                                       |
+| -------------------- | ---------------------------------------------- |
+| `Inbox`              | Top-level folder lookup (legacy)               |
+| `Tramite/REQ-104951` | Find `Tramite`, then `REQ-104951` under it     |
+| `A/B/C`              | Walk A → B → C, fail if any segment is missing |
 
 ## Directory Structure
 
@@ -158,6 +161,7 @@ See [Credits](#credits) for the original work this builds on.
 ## Installation
 
 ### Prerequisites
+
 - Node.js 14.0.0 or higher
 - npm or yarn package manager
 - Azure account for app registration
@@ -196,6 +200,7 @@ npm install
 4. Click "Add permissions"
 
 **For Power Automate** (optional):
+
 - Requires additional Azure AD configuration with Flow API scope
 - See Power Automate section below for details
 
@@ -215,6 +220,7 @@ cp .env.example .env
 ```
 
 Edit `.env`:
+
 ```bash
 # Get these values from Azure Portal > App Registrations > Your App
 MS_CLIENT_ID=your-application-client-id-here
@@ -224,6 +230,7 @@ USE_TEST_MODE=false
 ```
 
 **Important Notes:**
+
 - Use `MS_CLIENT_ID` and `MS_CLIENT_SECRET` in the `.env` file
 - Set `MS_TENANT_ID` for single-tenant apps to avoid `/common` endpoint errors
 - For Claude Desktop config, you'll use `OUTLOOK_CLIENT_ID` and `OUTLOOK_CLIENT_SECRET`
@@ -233,12 +240,12 @@ USE_TEST_MODE=false
 
 This server works with any MCP-compatible AI coding agent. Below is a quick reference, followed by detailed config for each.
 
-| Agent | Config file | Format | MCP support |
-|-------|------------|--------|-------------|
-| OpenCode | `opencode.json` / `opencode.jsonc` | JSON | Built-in |
-| Claude Desktop | `claude_desktop_config.json` | JSON | Built-in |
-| Codex (OpenAI) | `~/.codex/config.toml` | TOML | Built-in |
-| Pi.dev | `~/.pi/agent/mcp.json` | JSON | Via plugin |
+| Agent          | Config file                        | Format | MCP support |
+| -------------- | ---------------------------------- | ------ | ----------- |
+| OpenCode       | `opencode.json` / `opencode.jsonc` | JSON   | Built-in    |
+| Claude Desktop | `claude_desktop_config.json`       | JSON   | Built-in    |
+| Codex (OpenAI) | `~/.codex/config.toml`             | TOML   | Built-in    |
+| Pi.dev         | `~/.pi/agent/mcp.json`             | JSON   | Via plugin  |
 
 > **Path tip:** Replace `/path/to/outlook-mcp/index.js` with the absolute path to your local clone (e.g. `C:\\Users\\you\\outlook-mcp\\index.js` on Windows, or `/home/you/outlook-mcp/index.js` on Linux).
 
@@ -257,10 +264,10 @@ Config file: `opencode.json` or `opencode.jsonc` in project root, or `~/.config/
       "environment": {
         "OUTLOOK_CLIENT_ID": "your-client-id",
         "OUTLOOK_CLIENT_SECRET": "your-client-secret",
-        "MS_TENANT_ID": "your-tenant-id"
-      }
-    }
-  }
+        "MS_TENANT_ID": "your-tenant-id",
+      },
+    },
+  },
 }
 ```
 
@@ -269,6 +276,7 @@ Config file: `opencode.json` or `opencode.jsonc` in project root, or `~/.config/
 #### Claude Desktop
 
 Config file: `claude_desktop_config.json`
+
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 
@@ -349,17 +357,20 @@ The `OUTLOOK_CLIENT_ID` and `OUTLOOK_CLIENT_SECRET` env vars are used by the MCP
 The server automatically refreshes expired access tokens using the stored refresh token. You only need to authenticate once via the browser flow — after that, the server handles renewal transparently.
 
 **How it works:**
+
 1. Initial auth exchanges the authorization code for an access token + refresh token
 2. Tokens are stored in `~/.outlook-mcp-tokens.json` with restrictive permissions (0o600)
 3. When the access token expires (typically ~1 hour), `TokenStorage` automatically refreshes it using the refresh token
 4. The refreshed token is saved back to the file, extending the session indefinitely
 
 **Requirements for persistent auth:**
+
 - The Azure app registration must include `offline_access` permission (enables refresh tokens)
 - The `config.js` scope list includes `offline_access` — all 10 scopes are requested on both initial auth and refresh
 - If `MS_SCOPES` env var is set, it MUST include `offline_access` or the server will warn
 
 **When re-authentication is needed:**
+
 - First time setup (no token file exists)
 - Refresh token expires or is revoked by Microsoft (rare, typically 90 days)
 - Token file is deleted
@@ -370,18 +381,19 @@ The server automatically refreshes expired access tokens using the stored refres
 Power Automate requires a separate token with the Flow API scope. Configure additional Azure AD permissions for `https://service.flow.microsoft.com//.default` scope.
 
 **Limitations:**
+
 - Only solution-aware flows are accessible
 - Only manual trigger flows can be run via API
 - Requires environment ID for most operations
 
 ## Troubleshooting
 
-| Symptom | Fix |
-|---------|-----|
-| `Cannot find module` | `npm install` |
-| Port 3333 in use | `npx kill-port 3333` then `npm run auth-server` |
-| `Invalid client secret` (AADSTS7000215) | Use the secret **VALUE**, not the Secret ID |
-| `Authentication required` | Delete `~/.outlook-mcp-tokens.json` and re-authenticate |
+| Symptom                                 | Fix                                                     |
+| --------------------------------------- | ------------------------------------------------------- |
+| `Cannot find module`                    | `npm install`                                           |
+| Port 3333 in use                        | `npx kill-port 3333` then `npm run auth-server`         |
+| `Invalid client secret` (AADSTS7000215) | Use the secret **VALUE**, not the Secret ID             |
+| `Authentication required`               | Delete `~/.outlook-mcp-tokens.json` and re-authenticate |
 
 ## Testing
 
@@ -411,6 +423,7 @@ This is an independently maintained fork. Please open issues and pull requests a
 - **Pull requests**: https://github.com/rafaga2469/outlook-mcp/pulls
 
 When reporting a bug, include:
+
 - [ ] Steps to reproduce
 - [ ] Expected vs. actual behavior
 - [ ] Node.js version and OS

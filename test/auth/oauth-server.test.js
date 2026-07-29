@@ -70,12 +70,16 @@ describe('OAuth Server Routes', () => {
     const mockState = 'mock_state_value'; // Example state
 
     it('should exchange code for tokens and return success HTML', async () => {
-      mockTokenStorageInstance.exchangeCodeForTokens.mockResolvedValue({ access_token: 'mock_access_token' });
+      mockTokenStorageInstance.exchangeCodeForTokens.mockResolvedValue({
+        access_token: 'mock_access_token',
+      });
 
       // Note: State validation is mocked/skipped here as session management is outside this module.
       // In a real app, the 'state' would be generated in /auth, stored (e.g. session),
       // and verified here. The test passes 'state' to simulate it coming from provider.
-      const response = await request(app).get(`/auth/callback?code=${mockAuthCode}&state=${mockState}`);
+      const response = await request(app).get(
+        `/auth/callback?code=${mockAuthCode}&state=${mockState}`
+      );
 
       expect(mockTokenStorageInstance.exchangeCodeForTokens).toHaveBeenCalledWith(mockAuthCode);
       expect(response.status).toBe(200);
@@ -85,7 +89,9 @@ describe('OAuth Server Routes', () => {
     it('should return 400 and error HTML if OAuth provider returns an error', async () => {
       const oauthError = 'access_denied';
       const oauthErrorDesc = 'User denied access';
-      const response = await request(app).get(`/auth/callback?error=${oauthError}&error_description=${oauthErrorDesc}&state=${mockState}`);
+      const response = await request(app).get(
+        `/auth/callback?error=${oauthError}&error_description=${oauthErrorDesc}&state=${mockState}`
+      );
 
       expect(response.status).toBe(400);
       expect(response.text).toContain('Authorization Failed');
@@ -124,16 +130,19 @@ describe('OAuth Server Routes', () => {
       expect(response.text).toContain('Error:</strong> Missing State Parameter');
       expect(response.text).toContain('The state parameter was missing from the OAuth callback.');
       expect(mockTokenStorageInstance.exchangeCodeForTokens).not.toHaveBeenCalled();
-      expect(consoleErrorSpy).toHaveBeenCalledWith("OAuth callback received without a 'state' parameter. Rejecting request to prevent potential CSRF attack.");
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "OAuth callback received without a 'state' parameter. Rejecting request to prevent potential CSRF attack."
+      );
       consoleErrorSpy.mockRestore();
     });
-
 
     it('should return 500 if token exchange fails', async () => {
       const exchangeError = new Error('Token exchange process failed');
       mockTokenStorageInstance.exchangeCodeForTokens.mockRejectedValue(exchangeError);
 
-      const response = await request(app).get(`/auth/callback?code=${mockAuthCode}&state=${mockState}`);
+      const response = await request(app).get(
+        `/auth/callback?code=${mockAuthCode}&state=${mockState}`
+      );
 
       expect(response.status).toBe(500);
       expect(response.text).toContain('Token Exchange Failed');
@@ -195,56 +204,64 @@ describe('OAuth Server Routes', () => {
     const originalEnv = process.env;
 
     beforeEach(() => {
-        jest.resetModules(); // Important to clear module cache for process.env changes
-        process.env = { ...originalEnv }; // Make a copy
+      jest.resetModules(); // Important to clear module cache for process.env changes
+      process.env = { ...originalEnv }; // Make a copy
     });
 
     afterAll(() => {
-        process.env = originalEnv; // Restore original environment
+      process.env = originalEnv; // Restore original environment
     });
 
     it('should use default values if environment variables are not set', () => {
-        const config = createAuthConfig('TEST_PREFIX_'); // Use a prefix to avoid collision
-        expect(config.clientId).toBe('');
-        expect(config.clientSecret).toBe('');
-        expect(config.redirectUri).toBe('http://localhost:3333/auth/callback');
-        expect(config.scopes).toEqual(['offline_access', 'User.Read', 'Mail.Read']);
-        expect(config.tokenEndpoint).toBe('https://login.microsoftonline.com/common/oauth2/v2.0/token');
-        expect(config.authEndpoint).toBe('https://login.microsoftonline.com/common/oauth2/v2.0/authorize');
+      const config = createAuthConfig('TEST_PREFIX_'); // Use a prefix to avoid collision
+      expect(config.clientId).toBe('');
+      expect(config.clientSecret).toBe('');
+      expect(config.redirectUri).toBe('http://localhost:3333/auth/callback');
+      expect(config.scopes).toEqual(['offline_access', 'User.Read', 'Mail.Read']);
+      expect(config.tokenEndpoint).toBe(
+        'https://login.microsoftonline.com/common/oauth2/v2.0/token'
+      );
+      expect(config.authEndpoint).toBe(
+        'https://login.microsoftonline.com/common/oauth2/v2.0/authorize'
+      );
     });
 
     it('should use environment variables with specified prefix', () => {
-        process.env.MYAPP_CLIENT_ID = 'env_client_id';
-        process.env.MYAPP_CLIENT_SECRET = 'env_client_secret';
-        process.env.MYAPP_REDIRECT_URI = 'http://env.redirect/uri';
-        process.env.MYAPP_SCOPES = 'scope1 scope2';
-        process.env.MYAPP_TOKEN_ENDPOINT = 'http://env.token/endpoint';
-        process.env.MYAPP_AUTH_ENDPOINT = 'http://env.auth/endpoint';
+      process.env.MYAPP_CLIENT_ID = 'env_client_id';
+      process.env.MYAPP_CLIENT_SECRET = 'env_client_secret';
+      process.env.MYAPP_REDIRECT_URI = 'http://env.redirect/uri';
+      process.env.MYAPP_SCOPES = 'scope1 scope2';
+      process.env.MYAPP_TOKEN_ENDPOINT = 'http://env.token/endpoint';
+      process.env.MYAPP_AUTH_ENDPOINT = 'http://env.auth/endpoint';
 
-        const config = createAuthConfig('MYAPP_');
+      const config = createAuthConfig('MYAPP_');
 
-        expect(config.clientId).toBe('env_client_id');
-        expect(config.clientSecret).toBe('env_client_secret');
-        expect(config.redirectUri).toBe('http://env.redirect/uri');
-        expect(config.scopes).toEqual(['scope1', 'scope2']);
-        expect(config.tokenEndpoint).toBe('http://env.token/endpoint');
-        expect(config.authEndpoint).toBe('http://env.auth/endpoint');
+      expect(config.clientId).toBe('env_client_id');
+      expect(config.clientSecret).toBe('env_client_secret');
+      expect(config.redirectUri).toBe('http://env.redirect/uri');
+      expect(config.scopes).toEqual(['scope1', 'scope2']);
+      expect(config.tokenEndpoint).toBe('http://env.token/endpoint');
+      expect(config.authEndpoint).toBe('http://env.auth/endpoint');
     });
 
     it('should use default "MS_" prefix if none provided', () => {
-        process.env.MS_CLIENT_ID = 'ms_client_id_val';
-        const config = createAuthConfig(); // No prefix, defaults to MS_
-        expect(config.clientId).toBe('ms_client_id_val');
+      process.env.MS_CLIENT_ID = 'ms_client_id_val';
+      const config = createAuthConfig(); // No prefix, defaults to MS_
+      expect(config.clientId).toBe('ms_client_id_val');
     });
 
     it('should build tenant-specific endpoints when TENANT_ID is set', () => {
-        delete process.env.MYAPP_AUTHORITY_HOST;
-        delete process.env.MYAPP_TOKEN_ENDPOINT;
-        delete process.env.MYAPP_AUTH_ENDPOINT;
-        process.env.MYAPP_TENANT_ID = 'd508624f-a0b7-4fd3-9511-05b18ca02784';
-        const config = createAuthConfig('MYAPP_');
-        expect(config.tokenEndpoint).toBe('https://login.microsoftonline.com/d508624f-a0b7-4fd3-9511-05b18ca02784/oauth2/v2.0/token');
-        expect(config.authEndpoint).toBe('https://login.microsoftonline.com/d508624f-a0b7-4fd3-9511-05b18ca02784/oauth2/v2.0/authorize');
+      delete process.env.MYAPP_AUTHORITY_HOST;
+      delete process.env.MYAPP_TOKEN_ENDPOINT;
+      delete process.env.MYAPP_AUTH_ENDPOINT;
+      process.env.MYAPP_TENANT_ID = 'd508624f-a0b7-4fd3-9511-05b18ca02784';
+      const config = createAuthConfig('MYAPP_');
+      expect(config.tokenEndpoint).toBe(
+        'https://login.microsoftonline.com/d508624f-a0b7-4fd3-9511-05b18ca02784/oauth2/v2.0/token'
+      );
+      expect(config.authEndpoint).toBe(
+        'https://login.microsoftonline.com/d508624f-a0b7-4fd3-9511-05b18ca02784/oauth2/v2.0/authorize'
+      );
     });
   });
 });

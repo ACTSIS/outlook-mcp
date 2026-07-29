@@ -2,7 +2,6 @@
  * OneDrive chunked upload functionality (files > 4MB)
  */
 const https = require('https');
-const config = require('../config');
 const { callGraphAPI } = require('../utils/graph-api');
 const { ensureAuthenticated } = require('../auth');
 
@@ -20,19 +19,23 @@ async function handleUploadLarge(args) {
 
   if (!path) {
     return {
-      content: [{
-        type: "text",
-        text: "Path is required (e.g., '/Documents/largefile.zip')."
-      }]
+      content: [
+        {
+          type: 'text',
+          text: "Path is required (e.g., '/Documents/largefile.zip').",
+        },
+      ],
     };
   }
 
   if (!content) {
     return {
-      content: [{
-        type: "text",
-        text: "Content is required."
-      }]
+      content: [
+        {
+          type: 'text',
+          text: 'Content is required.',
+        },
+      ],
     };
   }
 
@@ -48,18 +51,20 @@ async function handleUploadLarge(args) {
     const sessionEndpoint = `me/drive/root:/${normalizedPath}:/createUploadSession`;
     const sessionBody = {
       item: {
-        '@microsoft.graph.conflictBehavior': conflictBehavior
-      }
+        '@microsoft.graph.conflictBehavior': conflictBehavior,
+      },
     };
 
     const sessionResponse = await callGraphAPI(accessToken, 'POST', sessionEndpoint, sessionBody);
 
     if (!sessionResponse || !sessionResponse.uploadUrl) {
       return {
-        content: [{
-          type: "text",
-          text: "Failed to create upload session."
-        }]
+        content: [
+          {
+            type: 'text',
+            text: 'Failed to create upload session.',
+          },
+        ],
       };
     }
 
@@ -77,10 +82,12 @@ async function handleUploadLarge(args) {
 
       if (response.error) {
         return {
-          content: [{
-            type: "text",
-            text: `Upload failed at byte ${offset}: ${response.error}`
-          }]
+          content: [
+            {
+              type: 'text',
+              text: `Upload failed at byte ${offset}: ${response.error}`,
+            },
+          ],
         };
       }
 
@@ -94,34 +101,42 @@ async function handleUploadLarge(args) {
     // Final response should contain the uploaded file info
     if (!response || !response.id) {
       return {
-        content: [{
-          type: "text",
-          text: "Upload completed but no file info returned."
-        }]
+        content: [
+          {
+            type: 'text',
+            text: 'Upload completed but no file info returned.',
+          },
+        ],
       };
     }
 
     return {
-      content: [{
-        type: "text",
-        text: `Successfully uploaded "${response.name}" (${formatSize(response.size)})\n\nID: ${response.id}\nWeb URL: ${response.webUrl}`
-      }]
+      content: [
+        {
+          type: 'text',
+          text: `Successfully uploaded "${response.name}" (${formatSize(response.size)})\n\nID: ${response.id}\nWeb URL: ${response.webUrl}`,
+        },
+      ],
     };
   } catch (error) {
     if (error.message === 'Authentication required') {
       return {
-        content: [{
-          type: "text",
-          text: "Authentication required. Please use the 'authenticate' tool first."
-        }]
+        content: [
+          {
+            type: 'text',
+            text: "Authentication required. Please use the 'authenticate' tool first.",
+          },
+        ],
       };
     }
 
     return {
-      content: [{
-        type: "text",
-        text: `Error uploading large file: ${error.message}`
-      }]
+      content: [
+        {
+          type: 'text',
+          text: `Error uploading large file: ${error.message}`,
+        },
+      ],
     };
   }
 }
@@ -130,13 +145,13 @@ async function handleUploadLarge(args) {
  * Upload a single chunk to the upload session
  */
 async function uploadChunk(uploadUrl, chunk, start, end, totalSize) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve, _reject) => {
     const options = {
       method: 'PUT',
       headers: {
         'Content-Length': chunk.length,
-        'Content-Range': `bytes ${start}-${end}/${totalSize}`
-      }
+        'Content-Range': `bytes ${start}-${end}/${totalSize}`,
+      },
     };
 
     const req = https.request(uploadUrl, options, (res) => {
@@ -150,7 +165,7 @@ async function uploadChunk(uploadUrl, chunk, start, end, totalSize) {
         if (res.statusCode >= 200 && res.statusCode < 300) {
           try {
             resolve(JSON.parse(responseData || '{}'));
-          } catch (e) {
+          } catch {
             resolve({});
           }
         } else {
