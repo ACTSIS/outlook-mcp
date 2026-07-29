@@ -111,6 +111,29 @@ async function handleReadEmail(args) {
         body = email.bodyPreview || 'No content';
       }
 
+      // Fetch attachment metadata if present
+      let attachmentSection = '';
+      if (email.hasAttachments) {
+        try {
+          const attachmentsEndpoint = `me/messages/${encodeURIComponent(emailId)}/attachments`;
+          const attachments = await callGraphAPI(accessToken, 'GET', attachmentsEndpoint, null, {
+            $select: 'id,name,contentType,size,isInline',
+          });
+
+          if (attachments && attachments.value && attachments.value.length > 0) {
+            const attachmentLines = attachments.value.map((att) => {
+              const inlineFlag = att.isInline ? ' [INLINE]' : '';
+              return `- ${att.name}${inlineFlag}\n  ID: ${att.id}\n  Type: ${att.contentType}\n  Size: ${att.size} bytes`;
+            });
+
+            attachmentSection = `\n\nAttachments:\n${attachmentLines.join('\n')}`;
+          }
+        } catch (attachmentError) {
+          console.error(`Error fetching attachments: ${attachmentError.message}`);
+          attachmentSection = '\n\n[Warning: Could not retrieve attachment metadata]';
+        }
+      }
+
       // Format the email
       const formattedEmail = `From: ${sender}
 To: ${to}
@@ -119,7 +142,7 @@ Date: ${date}
 Importance: ${email.importance || 'normal'}
 Has Attachments: ${email.hasAttachments ? 'Yes' : 'No'}
 ${bodyNote}
-${body}`;
+${body}${attachmentSection}`;
 
       // Optionally include raw HTML for debugging (not recommended for normal use)
       let rawHtmlSection = '';

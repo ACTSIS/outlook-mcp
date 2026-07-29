@@ -15,6 +15,46 @@ function simulateGraphAPIResponse(method, path, _data, _queryParams) {
 
   if (method === 'GET') {
     if (path.includes('messages') && !path.includes('sendMail')) {
+      // Attachment endpoints
+      if (path.includes('/attachments')) {
+        if (path.match(/\/messages\/[^/]+\/attachments\/[^/]+$/)) {
+          // Single attachment response
+          return {
+            id: 'att-1',
+            name: 'weekly-report.pdf',
+            contentType: 'application/pdf',
+            size: 1258291,
+            isInline: false,
+            contentBytes:
+              'JVBERi0xLjQKJcOkw7zDtsO8CjIgMCBvYmoKPDwKL0xlbmd0aCAzIDAgUgovRmlsdGVyIC9GbGF0ZURlY29kZQo+PgpzdHJlYW0KeJzLSMwtykvMTbVSUEjNS85PycxLt1Uy1DNQUkjNzCtJTSxJzsjPS7VVqkwtVrKqVsoECVumVtpaxVZlFqfmlQDZQJZlXklqMVBnpVJ+ZklqUbFSbS0AkKEZGA==',
+          };
+        }
+
+        // List attachments response
+        return {
+          value: [
+            {
+              id: 'att-1',
+              name: 'weekly-report.pdf',
+              contentType: 'application/pdf',
+              size: 1258291,
+              isInline: false,
+              contentBytes:
+                'JVBERi0xLjQKJcOkw7zDtsO8CjIgMCBvYmoKPDwKL0xlbmd0aCAzIDAgUgovRmlsdGVyIC9GbGF0ZURlY29kZQo+PgpzdHJlYW0KeJzLSMwtykvMTbVSUEjNS85PycxLt1Uy1DNQUkjNzCtJTSxJzsjPS7VVqkwtVrKqVsoECVumVtpaxVZlFqfmlQDZQJZlXklqMVBnpVJ+ZklqUbFSbS0AkKEZGA==',
+            },
+            {
+              id: 'att-2',
+              name: 'logo.png',
+              contentType: 'image/png',
+              size: 5120,
+              isInline: true,
+              contentBytes:
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+            },
+          ],
+        };
+      }
+
       // Simulate a successful email list/search response
       if (path.includes('/messages/')) {
         // Single email response

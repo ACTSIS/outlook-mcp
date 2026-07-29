@@ -59,6 +59,9 @@ module.exports = {
   ONEDRIVE_SELECT_FIELDS: 'id,name,size,lastModifiedDateTime,webUrl,folder,file,parentReference',
   ONEDRIVE_UPLOAD_THRESHOLD: 4 * 1024 * 1024, // 4MB - files larger than this need chunked upload
 
+  // Attachment constants
+  ATTACHMENT_SIZE_WARNING_THRESHOLD: 10 * 1024 * 1024, // 10MB - warn when downloading larger attachments
+
   // Power Automate / Flow constants
   FLOW_API_ENDPOINT: 'https://api.flow.microsoft.com',
   FLOW_SCOPE: 'https://service.flow.microsoft.com/.default',

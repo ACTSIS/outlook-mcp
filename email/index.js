@@ -8,6 +8,8 @@ const handleSendEmail = require('./send');
 const handleDraftEmail = require('./draft');
 const handleMarkAsRead = require('./mark-as-read');
 const handleDeleteEmail = require('./delete');
+const handleListAttachments = require('./list-attachments');
+const handleDownloadAttachment = require('./download-attachment');
 
 // Email tool definitions
 const emailTools = [
@@ -215,6 +217,45 @@ const emailTools = [
     },
     handler: handleDeleteEmail,
   },
+  {
+    name: 'list-attachments',
+    description: 'Lists all attachments for a specific email with metadata',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        emailId: {
+          type: 'string',
+          description: 'ID of the email whose attachments to list',
+        },
+      },
+      required: ['emailId'],
+    },
+    handler: handleListAttachments,
+  },
+  {
+    name: 'download-attachment',
+    description:
+      'Downloads a specific email attachment. Text-like content types are decoded by default; set decodeAsText=false to keep base64.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        emailId: {
+          type: 'string',
+          description: 'ID of the email containing the attachment',
+        },
+        attachmentId: {
+          type: 'string',
+          description: 'ID of the attachment to download',
+        },
+        decodeAsText: {
+          type: 'boolean',
+          description: 'Decode text-like content types to readable text (default: true)',
+        },
+      },
+      required: ['emailId', 'attachmentId'],
+    },
+    handler: handleDownloadAttachment,
+  },
 ];
 
 module.exports = {
@@ -226,4 +267,6 @@ module.exports = {
   handleDraftEmail,
   handleMarkAsRead,
   handleDeleteEmail,
+  handleListAttachments,
+  handleDownloadAttachment,
 };
