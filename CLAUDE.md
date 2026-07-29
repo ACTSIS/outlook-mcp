@@ -12,6 +12,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run test-mode` - Start the server in test mode with mock data
 - `npm run inspect` - Use MCP Inspector to test the server interactively
 - `npm test` - Run Jest tests
+- `npm run lint` - Run ESLint
+- `npm run lint:fix` - Run ESLint with auto-fix
+- `npm run format` - Format all files with Prettier
+- `npm run format:check` - Check formatting without writing
 - `npx kill-port 3333` - Kill process using port 3333 if auth server won't start
 
 ## Architecture Overview
@@ -33,6 +37,9 @@ This is a modular MCP (Model Context Protocol) server that provides Claude with 
 Each module exports tools and handlers:
 
 - `auth/` - OAuth 2.0 authentication with token management (Graph + Flow)
+  - `auth/token-storage.js` - **Primary token manager** (async I/O, auto-refresh, unified scopes). Handles both Graph and Flow tokens
+  - `auth/token-manager.js` - **Deprecated**, retained only for `createTestTokens()` in test mode. Do not add new functionality here
+  - `auth/index.js` - Exports `tokenStorage` singleton and `ensureAuthenticated()`
 - `calendar/` - Calendar operations (list, create, accept, decline, delete events)
 - `email/` - Email management (list, search, read, send, mark as read)
   - `email/folder-utils.js` - Folder name and path resolution utilities (`getFolderIdByName`, `resolveSegmentInParent`, `resolveFolderPath`)
@@ -44,7 +51,7 @@ Each module exports tools and handlers:
 
 ### Key Components
 
-- **Token Management**: Tokens stored in `~/.outlook-mcp-tokens.json` (both Graph and Flow tokens)
+- **Token Management**: `TokenStorage` (`auth/token-storage.js`) is the primary token manager — async I/O, automatic Graph token refresh, and unified scopes from `config.js`. Flow tokens are managed via `getFlowAccessToken`, `saveFlowTokens`, `isFlowTokenExpired`, and `getValidFlowAccessToken`. The deprecated `token-manager.js` is retained only for `createTestTokens()` in test mode. Tokens stored in `~/.outlook-mcp-tokens.json` (both Graph and Flow tokens)
 - **Graph API Client**: `utils/graph-api.js` handles Microsoft Graph API calls (Outlook, OneDrive)
 - **Flow API Client**: `power-automate/flow-api.js` handles Power Automate API calls
 - **Folder Path Resolution**: `email/folder-utils.js` resolves `Parent/Child/...` paths for `move-emails` and `create-folder`
@@ -81,7 +88,9 @@ Each module exports tools and handlers:
 ### Power Automate (Optional)
 
 - Requires separate Flow API scope: `https://service.flow.microsoft.com//.default`
-- Flow tokens stored alongside Graph tokens in same token file
+- Flow tokens managed by `TokenStorage` (same as Graph tokens, stored in same token file under `flow_*` keys)
+- Power Automate handlers import `tokenStorage` from `auth/index.js` and call `await tokenStorage.getValidFlowAccessToken()`
+- No Flow token auto-refresh yet — expired Flow tokens return null (re-authentication required)
 - Only solution-aware flows accessible via API
 - Only manual trigger flows can be triggered
 
@@ -125,3 +134,10 @@ Set `USE_TEST_MODE=true` to use mock data instead of real API calls. Mock respon
 - API errors include status codes and response details
 - Token expiration triggers re-authentication flow
 - Empty API responses handled gracefully
+
+## Code Quality
+
+- **ESLint**: Flat config (`eslint.config.mjs`), run with `npm run lint`
+- **Prettier**: Config in `.prettierrc.json` (single quotes, semicolons, 2-space indent, 100 chars)
+- **Husky**: Pre-commit hook runs `lint-staged` (eslint --fix + prettier --write on staged files)
+- **Tests**: Jest 29.7, 166 tests across 11 suites
