@@ -49,7 +49,7 @@ describe('TokenStorage', () => {
       const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
       new TokenStorage({ ...baseConfig, clientId: null });
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        'TokenStorage: MS_CLIENT_ID or MS_CLIENT_SECRET is not configured. Token operations might fail.'
+        'TokenStorage: MS_CLIENT_ID/MS_CLIENT_SECRET (or OUTLOOK_CLIENT_ID/OUTLOOK_CLIENT_SECRET) is not configured. Token operations might fail.'
       );
       consoleWarnSpy.mockRestore();
     });
@@ -244,6 +244,7 @@ describe('TokenStorage', () => {
           if (event === 'error') mockHttpsRequest.errorHandler = cb;
           return mockHttpsRequest;
         }),
+        setTimeout: jest.fn(),
         write: jest.fn(),
         end: jest.fn(),
       };
@@ -361,6 +362,7 @@ describe('TokenStorage', () => {
           if (event === 'error') mockHttpsRequest.errorHandler = cb;
           return mockHttpsRequest;
         }),
+        setTimeout: jest.fn(),
         write: jest.fn(),
         end: jest.fn(),
       };
@@ -529,6 +531,7 @@ describe('TokenStorage', () => {
           if (event === 'error') mockHttpsRequest.errorHandler = cb;
           return mockHttpsRequest;
         }),
+        setTimeout: jest.fn(),
         write: jest.fn(),
         end: jest.fn(),
       };
@@ -920,7 +923,7 @@ describe('TokenStorage', () => {
       consoleWarnSpy.mockRestore();
     });
 
-    it('should return null and invalidate flow tokens when refresh fails', async () => {
+    it('should return null and invalidate flow tokens when refresh fails with invalid_grant', async () => {
       tokenStorage.tokens = {
         flow_access_token: 'expired-flow-token',
         flow_refresh_token: 'will-fail-flow-refresh',
@@ -930,7 +933,7 @@ describe('TokenStorage', () => {
       };
       jest
         .spyOn(tokenStorage, 'refreshFlowAccessToken')
-        .mockRejectedValue(new Error('Flow refresh failed'));
+        .mockRejectedValue(new Error('invalid_grant: Flow refresh token expired'));
       const saveSpy = jest.spyOn(tokenStorage, '_saveTokensToFile');
 
       const token = await tokenStorage.getValidFlowAccessToken();
@@ -939,6 +942,27 @@ describe('TokenStorage', () => {
       expect(tokenStorage.tokens.flow_refresh_token).toBeNull();
       expect(tokenStorage.tokens.access_token).toBe('graph-token');
       expect(saveSpy).toHaveBeenCalled();
+    });
+
+    it('should return null but NOT invalidate flow tokens on transient refresh failure', async () => {
+      tokenStorage.tokens = {
+        flow_access_token: 'expired-flow-token',
+        flow_refresh_token: 'will-fail-flow-refresh',
+        flow_expires_at: Date.now() - 60000,
+        access_token: 'graph-token',
+        refresh_token: 'graph-refresh',
+      };
+      jest
+        .spyOn(tokenStorage, 'refreshFlowAccessToken')
+        .mockRejectedValue(new Error('Flow refresh failed (transient)'));
+      const saveSpy = jest.spyOn(tokenStorage, '_saveTokensToFile');
+
+      const token = await tokenStorage.getValidFlowAccessToken();
+      expect(token).toBeNull();
+      expect(tokenStorage.tokens.flow_access_token).toBe('expired-flow-token');
+      expect(tokenStorage.tokens.flow_refresh_token).toBe('will-fail-flow-refresh');
+      expect(tokenStorage.tokens.access_token).toBe('graph-token');
+      expect(saveSpy).not.toHaveBeenCalled();
     });
 
     it('should load tokens from file when not cached and return the token if valid', async () => {

@@ -1,9 +1,13 @@
 const { handleCheckAuthStatus, handleAuthenticateFlow } = require('../../auth/tools');
-const TokenStorage = require('../../auth/token-storage');
+const { tokenStorage } = require('../../auth/index');
 const tokenManager = require('../../auth/token-manager');
 const config = require('../../config');
 
-jest.mock('../../auth/token-storage');
+jest.mock('../../auth/index', () => ({
+  tokenStorage: {
+    getValidAccessToken: jest.fn(),
+  },
+}));
 jest.mock('../../auth/token-manager', () => ({
   createTestTokens: jest.fn(),
 }));
@@ -15,30 +19,22 @@ describe('auth/tools', () => {
 
   describe('handleCheckAuthStatus', () => {
     it('returns "Authenticated and ready" when getValidAccessToken returns a token', async () => {
-      const mockInstance = {
-        getValidAccessToken: jest.fn().mockResolvedValue('valid_access_token'),
-      };
-      TokenStorage.mockImplementation(() => mockInstance);
+      tokenStorage.getValidAccessToken.mockResolvedValue('valid_access_token');
 
       const result = await handleCheckAuthStatus();
 
-      expect(TokenStorage).toHaveBeenCalledTimes(1);
-      expect(mockInstance.getValidAccessToken).toHaveBeenCalledTimes(1);
+      expect(tokenStorage.getValidAccessToken).toHaveBeenCalledTimes(1);
       expect(result).toEqual({
         content: [{ type: 'text', text: 'Authenticated and ready' }],
       });
     });
 
     it('returns "Not authenticated" when getValidAccessToken returns null', async () => {
-      const mockInstance = {
-        getValidAccessToken: jest.fn().mockResolvedValue(null),
-      };
-      TokenStorage.mockImplementation(() => mockInstance);
+      tokenStorage.getValidAccessToken.mockResolvedValue(null);
 
       const result = await handleCheckAuthStatus();
 
-      expect(TokenStorage).toHaveBeenCalledTimes(1);
-      expect(mockInstance.getValidAccessToken).toHaveBeenCalledTimes(1);
+      expect(tokenStorage.getValidAccessToken).toHaveBeenCalledTimes(1);
       expect(result).toEqual({
         content: [{ type: 'text', text: 'Not authenticated' }],
       });

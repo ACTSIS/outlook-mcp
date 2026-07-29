@@ -63,8 +63,10 @@ async function resolveSegmentInParent(accessToken, parentId, segment) {
   const base = parentId ? `me/mailFolders/${parentId}/childFolders` : 'me/mailFolders';
 
   // First try with exact match filter
+  // OData string literals require single quotes to be escaped by doubling them
+  const escapedSegment = segment.replace(/'/g, "''");
   const response = await callGraphAPI(accessToken, 'GET', base, null, {
-    $filter: `displayName eq '${segment}'`,
+    $filter: `displayName eq '${escapedSegment}'`,
   });
 
   if (response.value && response.value.length > 0) {
