@@ -28,7 +28,7 @@ See [Credits](#credits) for the original work this builds on.
 2. **Azure setup**: Register an app in Azure Portal (see [Azure App Registration](#azure-app-registration--configuration))
 3. **Configure**: `cp .env.example .env` and fill in your Azure credentials
 4. **Wire up your agent**: Add the server to your AI agent's MCP config (see [Agent Configuration](#agent-configuration))
-5. **Authenticate**: `npm run auth-server`, then use the `authenticate` tool in Claude to complete OAuth
+5. **Authenticate**: `npm run auth-server`, then use the `authenticate` tool in Claude to complete OAuth (use `authenticate-flow` for Power Automate)
 6. **Use it**: Access your M365 data through Claude
 
 ## Available Tools
@@ -70,6 +70,7 @@ See [Credits](#credits) for the original work this builds on.
 
 | Tool                     | Description                      |
 | ------------------------ | -------------------------------- |
+| `authenticate-flow`      | Authenticate with Power Automate |
 | `flow-list-environments` | List Power Platform environments |
 | `flow-list`              | List flows in environment        |
 | `flow-run`               | Trigger a manual flow            |
@@ -378,7 +379,26 @@ The server automatically refreshes expired access tokens using the stored refres
 
 ### Power Automate (Optional)
 
-Power Automate requires a separate token with the Flow API scope. Configure additional Azure AD permissions for `https://service.flow.microsoft.com//.default` scope.
+Power Automate requires a separate token with the Flow API scope. After authenticating for Graph, request the Flow token with the `authenticate-flow` tool.
+
+1. Start auth server: `npm run auth-server`
+2. Use the `authenticate` tool in Claude to authenticate for Outlook/OneDrive (Graph)
+3. Use the `authenticate-flow` tool in Claude to authenticate for Power Automate
+4. Visit `http://localhost:3333/auth/flow`, sign in and authorize the Flow scope
+5. Tokens are saved to `~/.outlook-mcp-tokens.json` alongside the Graph tokens
+
+**Azure app registration:**
+
+- The same app registration is used for both Graph and Flow
+- Redirect URI is unchanged: `http://localhost:3333/auth/callback`
+- Flow scope requested: `https://service.flow.microsoft.com/.default`
+
+**Tool reference:**
+
+| Tool                | Description                               |
+| ------------------- | ----------------------------------------- |
+| `authenticate`      | Authenticate with Microsoft Graph API     |
+| `authenticate-flow` | Authenticate with Power Automate Flow API |
 
 **Limitations:**
 

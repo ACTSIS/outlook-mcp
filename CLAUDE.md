@@ -30,7 +30,7 @@ This is a modular MCP (Model Context Protocol) server that provides Claude with 
 
 - `index.js` - Main entry point that combines all module tools and handles MCP protocol
 - `config.js` - Centralized configuration (API endpoints, scopes, field selections)
-- `outlook-auth-server.js` - Standalone OAuth server for authentication flow
+- `outlook-auth-server.js` - Standalone OAuth server for authentication flow; exports `createRequestHandler` and `exchangeCodeForTokens` for tests, but only starts the HTTP server when run directly
 
 ### Modules
 
@@ -91,7 +91,7 @@ Each module exports tools and handlers:
 - Flow tokens managed by `TokenStorage` (same as Graph tokens, stored in same token file under `flow_*` keys)
 - Power Automate handlers import `tokenStorage` from `auth/index.js` and call `await tokenStorage.getValidFlowAccessToken()`
 - Flow token auto-refresh: `TokenStorage.refreshFlowAccessToken()` mirrors Graph refresh with `_flowRefreshPromise` dedup. On failure, only `flow_*` keys are invalidated (Graph tokens preserved).
-- No Flow token initial acquisition flow yet — requires manual Flow auth to populate `flow_refresh_token`
+- Initial Flow token acquisition: use the `authenticate-flow` tool, which redirects to `http://localhost:3333/auth/flow`. The auth server stores `{timestamp, flow: true}` in `pendingStates`, sends the Flow scope in the token exchange, and calls `tokenStorage.saveFlowTokens()` to persist `flow_*` keys without touching Graph tokens.
 - Only solution-aware flows accessible via API
 - Only manual trigger flows can be triggered
 
@@ -141,4 +141,4 @@ Set `USE_TEST_MODE=true` to use mock data instead of real API calls. Mock respon
 - **ESLint**: Flat config (`eslint.config.mjs`), run with `npm run lint`
 - **Prettier**: Config in `.prettierrc.json` (single quotes, semicolons, 2-space indent, 100 chars)
 - **Husky**: Pre-commit hook runs `lint-staged` (eslint --fix + prettier --write on staged files)
-- **Tests**: Jest 29.7, 166 tests across 11 suites
+- **Tests**: Jest 29.7, 188 tests across 12 suites

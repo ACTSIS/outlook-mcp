@@ -55,6 +55,39 @@ async function handleAuthenticate(_args) {
 }
 
 /**
+ * Power Automate Flow authentication tool handler
+ * @param {object} _args - Tool arguments
+ * @returns {object} - MCP response
+ */
+async function handleAuthenticateFlow(_args) {
+  // For test mode, create a test token
+  if (config.USE_TEST_MODE) {
+    tokenManager.createTestTokens();
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: 'Successfully authenticated with Power Automate (test mode)',
+        },
+      ],
+    };
+  }
+
+  // For real authentication, generate an auth URL and instruct the user to visit it
+  const authUrl = `${config.AUTH_CONFIG.authServerUrl}/auth/flow`;
+
+  return {
+    content: [
+      {
+        type: 'text',
+        text: `Flow authentication required. Please visit the following URL to authenticate with Power Automate: ${authUrl}\n\nAfter authentication, you will be redirected back to this application.`,
+      },
+    ],
+  };
+}
+
+/**
  * Check authentication status tool handler
  * @returns {object} - MCP response
  */
@@ -114,11 +147,22 @@ const authTools = [
     },
     handler: handleCheckAuthStatus,
   },
+  {
+    name: 'authenticate-flow',
+    description: 'Authenticate with Power Automate to access flows and environments',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+    handler: handleAuthenticateFlow,
+  },
 ];
 
 module.exports = {
   authTools,
   handleAbout,
   handleAuthenticate,
+  handleAuthenticateFlow,
   handleCheckAuthStatus,
 };
