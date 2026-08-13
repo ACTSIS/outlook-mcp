@@ -1,462 +1,259 @@
-# M365 Assistant MCP Server (maintained fork)
+# M365 Assistant MCP Server
 
 [![CI](https://github.com/rafaga2469/outlook-mcp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/rafaga2469/outlook-mcp/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frafaga2469%2Foutlook-mcp%2Fbadges%2Fcoverage.json)](https://github.com/rafaga2469/outlook-mcp/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frafaga2469%2Foutlook-mcp%2Fbadges%2Ftests.json)](https://github.com/rafaga2469/outlook-mcp/actions/workflows/ci.yml)
 
-> Independent fork of [ryaker/outlook-mcp](https://github.com/ryaker/outlook-mcp) with additional fixes and improvements.
+An independently maintained fork of [ryaker/outlook-mcp](https://github.com/ryaker/outlook-mcp). It exposes 37 MCP tools for Outlook mail and calendar, OneDrive, inbox rules, and Power Automate.
 
-A comprehensive MCP (Model Context Protocol) server that connects Claude with Microsoft 365 services through the Microsoft Graph API and Power Automate API. This fork is independently maintained and adds subfolder path resolution, dotenv support in the entrypoint, and a newer MCP Inspector.
+## Quick start
 
-## Supported Services
+You need Node.js 22.22.1 or later and a Microsoft Entra app registration.
 
-| Service            | Capabilities                     |
-| ------------------ | -------------------------------- |
-| **Outlook**        | Email, calendar, folders, rules  |
-| **OneDrive**       | Files, folders, search, sharing  |
-| **Power Automate** | Flows, environments, run history |
+1. Install the server:
 
-## What's different in this fork
+   ```bash
+   git clone https://github.com/rafaga2469/outlook-mcp.git
+   cd outlook-mcp
+   npm install
+   cp .env.example .env
+   ```
 
-- [x] **Subfolder path resolution** for `move-emails` (e.g. `Tramite/REQ-104951`) — resolves nested folder hierarchies segment-by-segment via `resolveSegmentInParent`
-- [x] **dotenv support in `index.js`** — loads `.env` at server startup so credentials are picked up without extra wiring
-- [x] **MCP Inspector bumped to 0.22.0** for current inspector features
-- [x] New `email/folder-utils.js` module with `getFolderIdByName`, `resolveSegmentInParent`, `resolveFolderPath`
-- [x] **Persistent OAuth authentication** — unified scope list ensures token refresh maintains full permissions (no more re-auth every few hours)
+2. Register a Web redirect URI of `http://localhost:3333/auth/callback` in Microsoft Entra ID and add these delegated Microsoft Graph permissions:
 
-See [Credits](#credits) for the original work this builds on.
+   ```text
+   offline_access User.Read Mail.Read Mail.ReadWrite Mail.Send
+   Calendars.Read Calendars.ReadWrite Contacts.Read Files.Read Files.ReadWrite
+   ```
 
-## Quick Start
+3. Put the application client ID, client secret **value**, and tenant ID in `.env`:
 
-1. **Install**: `npm install`
-2. **Azure setup**: Register an app in Azure Portal (see [Azure App Registration](#azure-app-registration--configuration))
-3. **Configure**: `cp .env.example .env` and fill in your Azure credentials
-4. **Wire up your agent**: Add the server to your AI agent's MCP config (see [Agent Configuration](#agent-configuration))
-5. **Authenticate**: `npm run auth-server`, then use the `authenticate` tool in Claude to complete OAuth (use `authenticate-flow` for Power Automate)
-6. **Use it**: Access your M365 data through Claude
+   ```dotenv
+   MS_CLIENT_ID=your-application-client-id
+   MS_CLIENT_SECRET=your-client-secret-value
+   MS_TENANT_ID=your-directory-tenant-id
+   USE_TEST_MODE=false
+   ```
 
-## Available Tools
+4. Add the MCP server to your client. For Claude Desktop:
 
-### Outlook (Email & Calendar)
+   ```json
+   {
+     "mcpServers": {
+       "m365-assistant": {
+         "command": "node",
+         "args": ["/absolute/path/to/outlook-mcp/index.js"],
+         "env": {
+           "OUTLOOK_CLIENT_ID": "your-application-client-id",
+           "OUTLOOK_CLIENT_SECRET": "your-client-secret-value",
+           "MS_TENANT_ID": "your-directory-tenant-id"
+         }
+       }
+     }
+   }
+   ```
 
-| Tool            | Description                                                                   |
-| --------------- | ----------------------------------------------------------------------------- |
-| `list-emails`   | List recent emails from inbox                                                 |
-| `search-emails` | Search emails with filters                                                    |
-| `read-email`    | Read email content                                                            |
-| `send-email`    | Send a new email                                                              |
-| `mark-as-read`  | Mark email as read/unread                                                     |
-| `list-events`   | List calendar events                                                          |
-| `create-event`  | Create calendar event                                                         |
-| `accept-event`  | Accept event invitation                                                       |
-| `decline-event` | Decline event invitation                                                      |
-| `delete-event`  | Delete calendar event                                                         |
-| `list-folders`  | List mail folders                                                             |
-| `create-folder` | Create mail folder (supports nested paths like `Parent/Child`)                |
-| `move-emails`   | Move emails between folders (supports nested paths like `Tramite/REQ-104951`) |
-| `list-rules`    | List inbox rules                                                              |
-| `create-rule`   | Create inbox rule                                                             |
+   See [`claude-config-sample.json`](./claude-config-sample.json) for a copyable file. The server uses stdio, so restart the MCP client after changing its configuration.
 
-### OneDrive
+5. In a separate terminal, start the browser callback server:
 
-| Tool                     | Description              |
-| ------------------------ | ------------------------ |
-| `onedrive-list`          | List files in a path     |
-| `onedrive-search`        | Search files by query    |
-| `onedrive-download`      | Get download URL         |
-| `onedrive-upload`        | Upload small file (<4MB) |
-| `onedrive-upload-large`  | Chunked upload (>4MB)    |
-| `onedrive-share`         | Create sharing link      |
-| `onedrive-create-folder` | Create folder            |
-| `onedrive-delete`        | Delete file or folder    |
+   ```bash
+   npm run auth-server
+   ```
 
-### Power Automate
+6. Call `authenticate`, open the returned URL, and complete sign-in. Then call `check-auth-status` and use a Graph-backed tool such as `list-emails`.
 
-| Tool                     | Description                      |
-| ------------------------ | -------------------------------- |
-| `authenticate-flow`      | Authenticate with Power Automate |
-| `flow-list-environments` | List Power Platform environments |
-| `flow-list`              | List flows in environment        |
-| `flow-run`               | Trigger a manual flow            |
-| `flow-list-runs`         | Get flow run history             |
-| `flow-toggle`            | Enable/disable a flow            |
+Power Automate is optional and requires a second consent flow. Complete the Graph flow first, then call `authenticate-flow`. See [Power Automate](./docs/power-automate.md).
 
-## Folder Path Resolution
+## What the server can do
 
-`move-emails` and `create-folder` accept folder paths using `/` as a separator.
+| Area                   | Supported operations                                                                                 |
+| ---------------------- | ---------------------------------------------------------------------------------------------------- |
+| Outlook mail           | List, search, read, draft, send/reply, mark, delete, attachments, and folder moves                   |
+| Calendar               | List, create, decline, cancel, and delete events                                                     |
+| Mail folders and rules | List/create folders, move messages, and list/create/reorder inbox rules                              |
+| OneDrive               | List/search, download URL, small and chunked uploads, sharing links, folders, and deletion           |
+| Power Automate         | List environments and solution-aware flows, run manual-trigger flows, inspect runs, and toggle flows |
 
-- **Nested paths**: `Parent/Child/Grandchild` resolves each segment in order, descending into the matching child folder.
-- **Backwards compatible**: passing a flat name (no `/`) behaves identically to the original implementation — it matches a top-level folder.
-- **Resolution helper**: `email/folder-utils.js` exposes `resolveFolderPath(path)` → splits on `/` and walks each segment via `resolveSegmentInParent(parentId, name)`.
-- **Known limitation**: folder names that contain a literal `/` character are **not supported** — the character is always treated as a path separator.
+Nested mail-folder paths such as `Parent/Child/Archive` are resolved segment by segment by `create-folder` and `move-emails`. A literal `/` in a folder name is not supported because `/` is always the path separator.
 
-| Input                | Behavior                                       |
-| -------------------- | ---------------------------------------------- |
-| `Inbox`              | Top-level folder lookup (legacy)               |
-| `Tramite/REQ-104951` | Find `Tramite`, then `REQ-104951` under it     |
-| `A/B/C`              | Walk A → B → C, fail if any segment is missing |
+## Tool inventory (37)
 
-## Directory Structure
+### Authentication (4)
 
-```
-├── index.js                 # Main entry point
-├── config.js                # Configuration settings
-├── auth/                     # Authentication modules
-│   ├── index.js              # Authentication exports
-│   ├── token-manager.js      # Token storage and refresh (Graph + Flow)
-│   └── tools.js              # Auth-related tools
-├── calendar/                 # Calendar functionality
-│   ├── index.js              # Calendar exports
-│   ├── list.js               # List events
-│   ├── create.js             # Create event
-│   ├── delete.js             # Delete event
-│   ├── cancel.js             # Cancel event
-│   ├── accept.js             # Accept event
-│   └── decline.js            # Decline event
-├── email/                    # Email functionality
-│   ├── index.js              # Email exports
-│   ├── list.js               # List emails
-│   ├── search.js             # Search emails
-│   ├── read.js               # Read email
-│   ├── send.js               # Send email
-│   ├── mark-as-read.js       # Mark email read/unread
-│   └── folder-utils.js       # Folder name + path resolution (getFolderIdByName, resolveSegmentInParent, resolveFolderPath)
-├── folder/                   # Folder functionality
-│   ├── index.js              # Folder exports
-│   ├── list.js               # List folders
-│   ├── create.js             # Create folder (path-aware)
-│   └── move.js               # Move emails (path-aware)
-├── rules/                    # Email rules functionality
-│   ├── index.js              # Rules exports
-│   ├── list.js               # List rules
-│   └── create.js             # Create rule
-├── onedrive/                 # OneDrive functionality
-│   ├── index.js              # OneDrive exports
-│   ├── list.js               # List files/folders
-│   ├── search.js             # Search files
-│   ├── download.js           # Get download URL
-│   ├── upload.js             # Simple upload (<4MB)
-│   ├── upload-large.js       # Chunked upload (>4MB)
-│   ├── share.js              # Create sharing link
-│   └── folder.js             # Create/delete folders
-├── power-automate/           # Power Automate functionality
-│   ├── index.js              # Power Automate exports
-│   ├── flow-api.js           # Flow API client
-│   ├── list-environments.js  # List environments
-│   ├── list-flows.js         # List flows
-│   ├── run-flow.js           # Trigger flow
-│   ├── list-runs.js          # Run history
-│   └── toggle-flow.js        # Enable/disable flow
-└── utils/                    # Utility functions
-    ├── graph-api.js          # Microsoft Graph API helper
-    ├── odata-helpers.js      # OData query building
-    └── mock-data.js          # Test mode data
-```
+| Tool                | Purpose                                                         |
+| ------------------- | --------------------------------------------------------------- |
+| `about`             | Report server identity and supported service areas              |
+| `authenticate`      | Return the Microsoft Graph browser-authentication URL           |
+| `check-auth-status` | Check and, when possible, refresh **Graph authentication only** |
+| `authenticate-flow` | Return the separate Power Automate authentication URL           |
 
-## Features
+### Calendar (5)
 
-- **Authentication**: OAuth 2.0 authentication with Microsoft Graph API (+ Flow API for Power Automate)
-- **Email Management**: List, search, read, send, and organize emails — including **nested folder paths**
-- **Calendar Management**: List, create, accept, decline, and delete calendar events
-- **OneDrive Integration**: List, search, upload, download, and share files
-- **Power Automate**: List environments/flows, trigger flows, view run history
-- **Modular Structure**: Clean separation of concerns for maintainability
-- **Test Mode**: Simulated responses for testing without real API calls
+| Tool            | Purpose                                          |
+| --------------- | ------------------------------------------------ |
+| `list-events`   | List upcoming events in an optional date range   |
+| `create-event`  | Create an event with optional attendees and body |
+| `decline-event` | Decline an event with an optional comment        |
+| `cancel-event`  | Cancel an event with an optional comment         |
+| `delete-event`  | Delete an event                                  |
 
-## Installation
+### Email (9)
 
-### Prerequisites
+| Tool                  | Purpose                                                                     |
+| --------------------- | --------------------------------------------------------------------------- |
+| `list-emails`         | List recent messages in a mail folder                                       |
+| `search-emails`       | Search by text, sender, recipient, subject, attachments, or unread state    |
+| `read-email`          | Read sanitized visible content; raw HTML is an explicit unsafe debug option |
+| `send-email`          | Send a new message or reply to an existing message                          |
+| `draft-email`         | Create a new draft or reply draft                                           |
+| `mark-as-read`        | Mark a message read or unread                                               |
+| `delete-email`        | Move a message to Deleted Items or permanently delete it                    |
+| `list-attachments`    | List attachment metadata for a message                                      |
+| `download-attachment` | Return attachment content, optionally decoded when text-like                |
 
-- Node.js 22.22.1 or higher
-- npm or yarn package manager
-- Azure account for app registration
+### Mail folders (3)
 
-### Clone & Install
+| Tool            | Purpose                                                     |
+| --------------- | ----------------------------------------------------------- |
+| `list-folders`  | List mail folders, optionally including counts and children |
+| `create-folder` | Create a folder, optionally below a nested parent path      |
+| `move-emails`   | Move comma-separated message IDs to a folder path           |
 
-```bash
-git clone https://github.com/rafaga2469/outlook-mcp.git
-cd outlook-mcp
-npm install
-```
+### Inbox rules (3)
 
-## Azure App Registration & Configuration
+| Tool                 | Purpose                                                        |
+| -------------------- | -------------------------------------------------------------- |
+| `list-rules`         | List inbox rules, optionally with details                      |
+| `create-rule`        | Create a sender/subject/attachment rule with supported actions |
+| `edit-rule-sequence` | Change a named rule's execution sequence                       |
 
-### App Registration
+### OneDrive (8)
 
-1. Open [Azure Portal](https://portal.azure.com/)
-2. Search for "App registrations"
-3. Click "New registration"
-4. Name: "M365 MCP Server"
-5. Account type: "Accounts in any organizational directory and personal Microsoft accounts"
-6. Redirect URI: Web → `http://localhost:3333/auth/callback`
-7. Click "Register"
-8. Copy the "Application (client) ID" for your `.env` file
+| Tool                     | Purpose                                                 |
+| ------------------------ | ------------------------------------------------------- |
+| `onedrive-list`          | List items at a path                                    |
+| `onedrive-search`        | Search files by name or content                         |
+| `onedrive-download`      | Get a pre-authenticated download URL by item ID or path |
+| `onedrive-upload`        | Upload content smaller than 4 MB                        |
+| `onedrive-upload-large`  | Upload content through a chunked upload session         |
+| `onedrive-share`         | Create a view, edit, or embed sharing link              |
+| `onedrive-create-folder` | Create a folder at a path                               |
+| `onedrive-delete`        | Delete an item by ID or path                            |
 
-### App Permissions
+### Power Automate (5)
 
-1. Go to "API permissions" under Manage
-2. Click "Add a permission" → "Microsoft Graph" → "Delegated permissions"
-3. Add these permissions:
-   - `offline_access`
-   - `User.Read`
-   - `Mail.Read`, `Mail.ReadWrite`, `Mail.Send`
-   - `Calendars.Read`, `Calendars.ReadWrite`
-   - `Files.Read`, `Files.ReadWrite`
-4. Click "Add permissions"
+| Tool                     | Purpose                                         |
+| ------------------------ | ----------------------------------------------- |
+| `flow-list-environments` | List Power Platform environments and their IDs  |
+| `flow-list`              | List accessible flows in an environment         |
+| `flow-run`               | Trigger a manual flow with optional JSON inputs |
+| `flow-list-runs`         | List recent runs for a flow                     |
+| `flow-toggle`            | Start or stop a flow                            |
 
-**For Power Automate** (optional):
+## Authentication model
 
-- Requires additional Azure AD configuration with Flow API scope
-- See Power Automate section below for details
+`TokenStorage` in `auth/token-storage.js` is the runtime token authority for both APIs. Graph handlers call `ensureAuthenticated()`, while Power Automate handlers call `getValidFlowAccessToken()`. Both token sets share `~/.outlook-mcp-tokens.json`; writes request owner-only mode `0600`.
 
-### Client Secret
+Access tokens enter their refresh window five minutes before `expires_at`. Graph refresh is automatic when Graph-backed tools run. Flow refresh is automatic only when both an expired/near-expiry `flow_access_token` and a stored `flow_refresh_token` exist. Initial Flow consent is always separate.
 
-1. Go to "Certificates & secrets" → "Client secrets"
-2. Click "New client secret"
-3. Add description and select expiration
-4. **Copy the VALUE** (not the Secret ID)
+`auth/token-manager.js` is legacy code retained for test-token creation and compatibility. New production paths must use `TokenStorage`.
 
-## Configuration
+> **Shared-file warning:** completing Graph authentication writes a new Graph token response directly to the shared file and can remove existing `flow_*` fields. If Power Automate stops authenticating after Graph reauthentication, run `authenticate-flow` again. Do not delete the token file as a first response to a Flow-only problem because that also removes Graph credentials.
 
-### Environment Variables
+For the token lifecycle, failure behavior, and current limitations, read [Authentication](./docs/authentication.md).
 
-```bash
-cp .env.example .env
+## Configuration reference
+
+`.env` is loaded by both `index.js` and `outlook-auth-server.js`. Variables supplied by the MCP client are process environment variables and take precedence over `.env` through dotenv's default behavior.
+
+| Variable                | Consumer                                | Default / precedence                                     | Notes                                                                                             |
+| ----------------------- | --------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `MS_CLIENT_ID`          | Auth server and `TokenStorage`          | Preferred over `OUTLOOK_CLIENT_ID` in `TokenStorage`     | Required by the standalone auth server                                                            |
+| `MS_CLIENT_SECRET`      | Auth server and `TokenStorage`          | Preferred over `OUTLOOK_CLIENT_SECRET` in `TokenStorage` | Use the secret **value**, not its ID                                                              |
+| `OUTLOOK_CLIENT_ID`     | MCP runtime / `TokenStorage`            | Fallback after `MS_CLIENT_ID`                            | Convenient for MCP client configuration; not read by initial acquisition                          |
+| `OUTLOOK_CLIENT_SECRET` | MCP runtime / `TokenStorage`            | Fallback after `MS_CLIENT_SECRET`                        | Not read by initial acquisition                                                                   |
+| `MS_TENANT_ID`          | Both                                    | `common`                                                 | Use the tenant GUID for single-tenant applications                                                |
+| `MS_AUTHORITY_HOST`     | Both                                    | `https://login.microsoftonline.com`                      | Trailing slashes are removed                                                                      |
+| `MS_SCOPES`             | `TokenStorage` refresh/exchange methods | Built-in ten-scope Graph list                            | Space-separated; include `offline_access`; standalone initial Graph acquisition does not honor it |
+| `MS_REDIRECT_URI`       | `TokenStorage`                          | `http://localhost:3333/auth/callback`                    | Standalone initial acquisition uses the fixed configured URI                                      |
+| `MS_TOKEN_ENDPOINT`     | `TokenStorage`                          | Derived v2 token endpoint                                | Standalone initial acquisition derives its endpoint separately                                    |
+| `USE_TEST_MODE`         | MCP server                              | `false`                                                  | Enables mocks; see test-mode limitation in the auth guide                                         |
+
+The standalone auth server always listens on port `3333`; there is no environment-variable port override.
+
+## Other MCP clients
+
+Use the same absolute `node /path/to/outlook-mcp/index.js` command and environment values:
+
+```toml
+# ~/.codex/config.toml
+[mcp_servers.m365-assistant]
+command = "node"
+args = ["/absolute/path/to/outlook-mcp/index.js"]
+
+[mcp_servers.m365-assistant.env]
+OUTLOOK_CLIENT_ID = "your-application-client-id"
+OUTLOOK_CLIENT_SECRET = "your-client-secret-value"
+MS_TENANT_ID = "your-directory-tenant-id"
 ```
 
-Edit `.env`:
-
-```bash
-# Get these values from Azure Portal > App Registrations > Your App
-MS_CLIENT_ID=your-application-client-id-here
-MS_CLIENT_SECRET=your-client-secret-VALUE-here
-MS_TENANT_ID=your-tenant-id-here
-USE_TEST_MODE=false
-```
-
-**Important Notes:**
-
-- Use `MS_CLIENT_ID` and `MS_CLIENT_SECRET` in the `.env` file
-- Set `MS_TENANT_ID` for single-tenant apps to avoid `/common` endpoint errors
-- For Claude Desktop config, you'll use `OUTLOOK_CLIENT_ID` and `OUTLOOK_CLIENT_SECRET`
-- Always use the client secret **VALUE**, never the Secret ID
-
-### Agent Configuration
-
-This server works with any MCP-compatible AI coding agent. Below is a quick reference, followed by detailed config for each.
-
-| Agent          | Config file                        | Format | MCP support |
-| -------------- | ---------------------------------- | ------ | ----------- |
-| OpenCode       | `opencode.json` / `opencode.jsonc` | JSON   | Built-in    |
-| Claude Desktop | `claude_desktop_config.json`       | JSON   | Built-in    |
-| Codex (OpenAI) | `~/.codex/config.toml`             | TOML   | Built-in    |
-| Pi.dev         | `~/.pi/agent/mcp.json`             | JSON   | Via plugin  |
-
-> **Path tip:** Replace `/path/to/outlook-mcp/index.js` with the absolute path to your local clone (e.g. `C:\\Users\\you\\outlook-mcp\\index.js` on Windows, or `/home/you/outlook-mcp/index.js` on Linux).
-
-#### OpenCode
-
-Config file: `opencode.json` or `opencode.jsonc` in project root, or `~/.config/opencode/opencode.json` for global.
+OpenCode uses a command array instead:
 
 ```jsonc
 {
-  "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "outlook-mcp": {
+    "m365-assistant": {
       "type": "local",
-      "command": ["node", "/path/to/outlook-mcp/index.js"],
+      "command": ["node", "/absolute/path/to/outlook-mcp/index.js"],
       "enabled": true,
       "environment": {
-        "OUTLOOK_CLIENT_ID": "your-client-id",
-        "OUTLOOK_CLIENT_SECRET": "your-client-secret",
-        "MS_TENANT_ID": "your-tenant-id",
+        "OUTLOOK_CLIENT_ID": "your-application-client-id",
+        "OUTLOOK_CLIENT_SECRET": "your-client-secret-value",
+        "MS_TENANT_ID": "your-directory-tenant-id",
       },
     },
   },
 }
 ```
 
-> **Note:** `command` is an **array** where `[0]` is the executable and the rest are args. This is different from Claude/Codex which use separate `command` + `args` keys.
-
-#### Claude Desktop
-
-Config file: `claude_desktop_config.json`
-
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-
-Access via Claude Desktop → Settings → Developer tab → Edit Config.
-
-```json
-{
-  "mcpServers": {
-    "outlook-mcp": {
-      "command": "node",
-      "args": ["/path/to/outlook-mcp/index.js"],
-      "env": {
-        "OUTLOOK_CLIENT_ID": "your-client-id",
-        "OUTLOOK_CLIENT_SECRET": "your-client-secret",
-        "MS_TENANT_ID": "your-tenant-id"
-      }
-    }
-  }
-}
-```
-
-> **Note:** Must fully restart Claude Desktop after editing config. Uses stdio transport for local servers.
-
-#### Codex (OpenAI)
-
-Config file: `~/.codex/config.toml` (global) or `.codex/config.toml` (project-scoped).
-
-```toml
-[mcp_servers.outlook-mcp]
-command = "node"
-args = ["/path/to/outlook-mcp/index.js"]
-
-[mcp_servers.outlook-mcp.env]
-OUTLOOK_CLIENT_ID = "your-client-id"
-OUTLOOK_CLIENT_SECRET = "your-client-secret"
-MS_TENANT_ID = "your-tenant-id"
-```
-
-> **Note:** TOML format, not JSON. Supports stdio and HTTP transports. CLI alternative: `codex mcp add outlook-mcp --env OUTLOOK_CLIENT_ID=xxx -- node index.js`.
-
-#### Pi.dev
-
-Config file: `~/.pi/agent/mcp.json`
-
-```json
-{
-  "mcpServers": {
-    "outlook-mcp": {
-      "command": "node",
-      "args": ["/path/to/outlook-mcp/index.js"],
-      "env": {
-        "OUTLOOK_CLIENT_ID": "your-client-id",
-        "OUTLOOK_CLIENT_SECRET": "your-client-secret",
-        "MS_TENANT_ID": "your-tenant-id"
-      }
-    }
-  }
-}
-```
-
-> **Note:** Pi.dev supports MCP via a plugin. The config format is identical to Claude Desktop (`mcpServers` with `command` + `args`). Despite Pi's official docs stating "no MCP", the plugin ecosystem enables it. Check your Pi installation for MCP plugin availability.
-
-#### Credentials: runtime vs auth server
-
-The `OUTLOOK_CLIENT_ID` and `OUTLOOK_CLIENT_SECRET` env vars are used by the MCP server at runtime. The `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, and `MS_TENANT_ID` vars are used by the standalone auth server. Both sets must point to the same Azure app registration. You can set both in the agent config's env block, or use a `.env` file in the project root (loaded automatically by `index.js`).
-
-## Authentication
-
-### Graph API (Outlook + OneDrive)
-
-1. Start auth server: `npm run auth-server`
-2. Use the `authenticate` tool in Claude
-3. Visit the provided URL and sign in
-4. Tokens saved to `~/.outlook-mcp-tokens.json`
-
-### Persistent Authentication (Token Refresh)
-
-The server automatically refreshes expired access tokens using the stored refresh token. You only need to authenticate once via the browser flow — after that, the server handles renewal transparently.
-
-**How it works:**
-
-1. Initial auth exchanges the authorization code for an access token + refresh token
-2. Tokens are stored in `~/.outlook-mcp-tokens.json` with restrictive permissions (0o600)
-3. When the access token expires (typically ~1 hour), `TokenStorage` automatically refreshes it using the refresh token
-4. The refreshed token is saved back to the file, extending the session indefinitely
-
-**Requirements for persistent auth:**
-
-- The Azure app registration must include `offline_access` permission (enables refresh tokens)
-- The `config.js` scope list includes `offline_access` — all 10 scopes are requested on both initial auth and refresh
-- If `MS_SCOPES` env var is set, it MUST include `offline_access` or the server will warn
-
-**When re-authentication is needed:**
-
-- First time setup (no token file exists)
-- Refresh token expires or is revoked by Microsoft (rare, typically 90 days)
-- Token file is deleted
-- Azure app permissions are changed
-
-### Power Automate (Optional)
-
-Power Automate requires a separate token with the Flow API scope. After authenticating for Graph, request the Flow token with the `authenticate-flow` tool.
-
-1. Start auth server: `npm run auth-server`
-2. Use the `authenticate` tool in Claude to authenticate for Outlook/OneDrive (Graph)
-3. Use the `authenticate-flow` tool in Claude to authenticate for Power Automate
-4. Visit `http://localhost:3333/auth/flow`, sign in and authorize the Flow scope
-5. Tokens are saved to `~/.outlook-mcp-tokens.json` alongside the Graph tokens
-
-**Azure app registration:**
-
-- The same app registration is used for both Graph and Flow
-- Redirect URI is unchanged: `http://localhost:3333/auth/callback`
-- Flow scope requested: `https://service.flow.microsoft.com/.default`
-
-**Tool reference:**
-
-| Tool                | Description                               |
-| ------------------- | ----------------------------------------- |
-| `authenticate`      | Authenticate with Microsoft Graph API     |
-| `authenticate-flow` | Authenticate with Power Automate Flow API |
-
-**Limitations:**
-
-- Only solution-aware flows are accessible
-- Only manual trigger flows can be run via API
-- Requires environment ID for most operations
-
 ## Troubleshooting
 
-| Symptom                                 | Fix                                                     |
-| --------------------------------------- | ------------------------------------------------------- |
-| `Cannot find module`                    | `npm install`                                           |
-| Port 3333 in use                        | `npx kill-port 3333` then `npm run auth-server`         |
-| `Invalid client secret` (AADSTS7000215) | Use the secret **VALUE**, not the Secret ID             |
-| `Authentication required`               | Delete `~/.outlook-mcp-tokens.json` and re-authenticate |
+### Microsoft Graph (Outlook, calendar, rules, and OneDrive)
 
-## Testing
+| Symptom                                                                 | Recovery                                                                                                                      |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `Authentication required` or `check-auth-status` says not authenticated | Start `npm run auth-server`, call `authenticate`, and complete Graph consent                                                  |
+| Graph returns `UNAUTHORIZED` (HTTP 401)                                 | The API rejected the submitted token; complete Graph authentication again because a 401 does not force local invalidation     |
+| Graph returns HTTP 403 in an API error                                  | Authentication may be valid but the account/app lacks the required delegated permission; verify Entra permissions and consent |
+| `AADSTS7000215` / invalid client secret                                 | Configure the client secret **value**, not the secret ID                                                                      |
+| OAuth state is invalid or expired                                       | Start again from `authenticate`; pending state expires after ten minutes and is single-use                                    |
+| Port 3333 is already in use                                             | Stop the existing process, or run `npx kill-port 3333`, then restart the auth server                                          |
+
+### Power Automate
+
+| Symptom                                           | Recovery                                                                                                              |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Flow authentication required                      | Call `authenticate-flow`; `check-auth-status` does not inspect Flow credentials                                       |
+| `FLOW_UNAUTHORIZED` (HTTP 401)                    | The API rejected the submitted token; complete `authenticate-flow` again because a 401 does not invalidate it locally |
+| `FLOW_FORBIDDEN` / HTTP 403                       | Verify Power Automate access, ownership/editor rights, environment and flow IDs, and that the flow is solution-aware  |
+| A flow cannot be triggered                        | `flow-run` supports the manual trigger endpoint only; verify the flow is enabled and has a manual trigger             |
+| Flow stopped working after Graph reauthentication | Graph acquisition may have removed `flow_*` from the shared file; call `authenticate-flow` again                      |
+
+See [Power Automate troubleshooting](./docs/power-automate.md#errors-and-recovery) for the service-specific workflow.
+
+## Development
 
 ```bash
-# Run with MCP Inspector
-npm run inspect
-
-# Run in test mode (mock data)
-npm run test-mode
-
-# Run Jest tests
-npm test
+npm run inspect       # MCP Inspector
+npm run test-mode     # server with mock Graph/Flow responses
+npm test              # Jest
+npm run lint          # ESLint
+npm run format:check  # Prettier check
 ```
 
-## Extending the Server
+The active server entry point is `index.js`; the active browser callback server is `outlook-auth-server.js`. Contributor architecture and verification guidance live in [`CLAUDE.md`](./CLAUDE.md).
 
-1. Create new module directory
-2. Implement tool handlers in separate files
-3. Export tool definitions from module index
-4. Import and add to `TOOLS` array in `index.js`
+## Credits and license
 
-## Contributing
-
-This is an independently maintained fork. Please open issues and pull requests against the fork:
-
-- **Issues**: https://github.com/rafaga2469/outlook-mcp/issues
-- **Pull requests**: https://github.com/rafaga2469/outlook-mcp/pulls
-
-When reporting a bug, include:
-
-- [ ] Steps to reproduce
-- [ ] Expected vs. actual behavior
-- [ ] Node.js version and OS
-- [ ] Whether the issue reproduces in test mode (`npm run test-mode`)
-
-## Credits
-
-Built on the original [ryaker/outlook-mcp](https://github.com/ryaker/outlook-mcp) by [ryaker](https://github.com/ryaker). This fork adds subfolder path resolution, dotenv startup loading, and dependency refreshes while keeping the modular architecture intact.
-
-## License
-
-[MIT](./LICENSE) © 2026 Ricardo Pinto. Based on the original work by ryaker, also licensed under MIT.
+Built on [ryaker/outlook-mcp](https://github.com/ryaker/outlook-mcp) by [ryaker](https://github.com/ryaker). Licensed under [MIT](./LICENSE) © 2026 Ricardo Pinto; the original work is also MIT licensed.

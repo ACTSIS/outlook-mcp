@@ -1,144 +1,119 @@
-# CLAUDE.md
+# Repository development guide
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file is for contributors and coding agents. User setup and capability documentation belongs in [`README.md`](./README.md), [`docs/authentication.md`](./docs/authentication.md), and [`docs/power-automate.md`](./docs/power-automate.md).
 
-> Independent fork of [ryaker/outlook-mcp](https://github.com/ryaker/outlook-mcp), maintained by Ricardo Pinto ([rafaga2469](https://github.com/rafaga2469)). Adds subfolder path resolution for `move-emails` / `create-folder`, dotenv loading in `index.js`, and a refreshed MCP Inspector.
+## Before changing code
 
-## Development Commands
+1. Install dependencies with `npm install`.
+2. Read the module's `index.js` tool definitions and its handler tests.
+3. Preserve the public tool name and input schema unless the change explicitly modifies the MCP contract.
+4. Keep production token work in `auth/token-storage.js`; do not extend the legacy token manager.
 
-- `npm install` - **ALWAYS run first** to install dependencies
-- `npm start` - Start the MCP server
-- `npm run auth-server` - Start the OAuth authentication server on port 3333 (**required for authentication**)
-- `npm run test-mode` - Start the server in test mode with mock data
-- `npm run inspect` - Use MCP Inspector to test the server interactively
-- `npm test` - Run Jest tests
-- `npm run lint` - Run ESLint
-- `npm run lint:fix` - Run ESLint with auto-fix
-- `npm run format` - Format all files with Prettier
-- `npm run format:check` - Check formatting without writing
-- `npx kill-port 3333` - Kill process using port 3333 if auth server won't start
+## Commands
 
-## Architecture Overview
+```bash
+npm start              # stdio MCP server
+npm run auth-server    # active OAuth callback server on localhost:3333
+npm run test-mode      # MCP server with USE_TEST_MODE=true
+npm run inspect        # MCP Inspector
+npm test               # Jest suite
+npm run lint           # ESLint
+npm run lint:fix       # ESLint with fixes
+npm run format         # Prettier write (entire repository)
+npm run format:check   # Prettier check
+```
 
-This is a modular MCP (Model Context Protocol) server that provides Claude with access to Microsoft 365 services:
+Prefer focused Jest paths while developing, then run the full checks required by the change. Do not hard-code test counts in documentation; the suite evolves.
 
-- **Outlook** - Email, calendar, folders, rules
-- **OneDrive** - Files, folders, sharing
-- **Power Automate** - Flows, environments, runs
+## Runtime architecture
 
-### Core Structure
+`index.js` loads `.env`, combines seven module tool arrays, and serves them over MCP stdio:
 
-- `index.js` - Main entry point that combines all module tools and handles MCP protocol
-- `config.js` - Centralized configuration (API endpoints, scopes, field selections)
-- `outlook-auth-server.js` - Standalone OAuth server for authentication flow; exports `createRequestHandler` and `exchangeCodeForTokens` for tests, but only starts the HTTP server when run directly
+```text
+MCP client
+  -> index.js / tools/call
+  -> module handler
+     -> ensureAuthenticated() -> TokenStorage -> Microsoft Graph API
+     -> getValidFlowAccessToken() -> TokenStorage -> Power Automate API
+```
 
-### Modules
+| Area                         | Responsibility                                                                                          |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `config.js`                  | Server metadata, Graph scopes/endpoints, field selections, limits, and Flow constants                   |
+| `auth/index.js`              | Exposes the `TokenStorage` singleton and Graph `ensureAuthenticated()` guard                            |
+| `auth/token-storage.js`      | Production Graph and Flow token load/save, expiry checks, refresh, and in-process refresh deduplication |
+| `auth/token-manager.js`      | **Legacy** synchronous cache retained for `createTestTokens()` and compatibility only                   |
+| `outlook-auth-server.js`     | **Active** standalone HTTP server for initial Graph and Flow acquisition                                |
+| `auth/oauth-server.js`       | Inactive Express-oriented module used by its direct unit tests; not wired into either executable        |
+| `utils/graph-api.js`         | Graph transport, pagination, download redirects, and Graph mock dispatch                                |
+| `power-automate/flow-api.js` | Flow transport and inline test-mode responses                                                           |
 
-Each module exports tools and handlers:
+Graph and Flow credentials share `~/.outlook-mcp-tokens.json`. Read the known asymmetries before modifying authentication: [`docs/authentication.md`](./docs/authentication.md#known-limitations).
 
-- `auth/` - OAuth 2.0 authentication with token management (Graph + Flow)
-  - `auth/token-storage.js` - **Primary token manager** (async I/O, auto-refresh, unified scopes). Handles both Graph and Flow tokens
-  - `auth/token-manager.js` - **Deprecated**, retained only for `createTestTokens()` in test mode. Do not add new functionality here
-  - `auth/index.js` - Exports `tokenStorage` singleton and `ensureAuthenticated()`
-- `calendar/` - Calendar operations (list, create, accept, decline, delete events)
-- `email/` - Email management (list, search, read, send, mark as read)
-  - `email/folder-utils.js` - Folder name and path resolution utilities (`getFolderIdByName`, `resolveSegmentInParent`, `resolveFolderPath`)
-- `folder/` - Folder operations (list, create, move) — relies on `email/folder-utils.js` for path resolution
-- `rules/` - Email rules management
-- `onedrive/` - OneDrive operations (list, search, download, upload, share, folder ops)
-- `power-automate/` - Flow operations (list environments, list/run/toggle flows, run history)
-- `utils/` - Shared utilities including Graph API client and OData helpers
+## Modules and contracts
 
-### Key Components
+Each domain exports an array of `{name, description, inputSchema, handler}` objects from its `index.js`:
 
-- **Token Management**: `TokenStorage` (`auth/token-storage.js`) is the primary token manager — async I/O, automatic Graph token refresh, and unified scopes from `config.js`. Flow tokens are managed via `getFlowAccessToken`, `saveFlowTokens`, `isFlowTokenExpired`, and `getValidFlowAccessToken`. The deprecated `token-manager.js` is retained only for `createTestTokens()` in test mode. Tokens stored in `~/.outlook-mcp-tokens.json` (both Graph and Flow tokens)
-- **Graph API Client**: `utils/graph-api.js` handles Microsoft Graph API calls (Outlook, OneDrive)
-- **Flow API Client**: `power-automate/flow-api.js` handles Power Automate API calls
-- **Folder Path Resolution**: `email/folder-utils.js` resolves `Parent/Child/...` paths for `move-emails` and `create-folder`
-- **Test Mode**: Mock data responses when `USE_TEST_MODE=true`
-- **Modular Tools**: Each module exports tools array that gets combined in main server
+- `auth/`: four informational/authentication tools
+- `calendar/`: event listing and mutations
+- `email/`: mail, drafts, replies, deletion, and attachments
+- `folder/`: mail-folder listing, creation, and message moves
+- `rules/`: inbox-rule listing, creation, and sequence changes
+- `onedrive/`: file/folder operations and uploads
+- `power-automate/`: environments, flows, runs, execution, and state
 
-### Folder Path Resolution
+Add a tool by implementing a handler, exporting its definition from the domain index, and including tests for validation, authentication, success, and API error behavior. The root `index.js` already spreads each domain array.
 
-`move-emails` and `create-folder` accept folder paths with `/` as a separator (e.g. `Tramite/REQ-104951`).
+## Important behavior
 
-- `resolveFolderPath(path)` splits the input on `/`, then walks each segment via `resolveSegmentInParent(parentId, segmentName)`, descending into the matching child folder.
-- `getFolderIdByName(name)` handles the legacy flat-name case (top-level lookup only).
-- Backwards compatible: a single segment with no `/` is equivalent to the legacy behavior.
-- Known limitation: folder names that contain a literal `/` character are not supported, because `/` is always treated as a path separator.
+### Authentication
 
-## Authentication
+- Production handlers use the singleton `TokenStorage`; they must not read the token file directly.
+- Access tokens enter the refresh window five minutes before expiry.
+- `_refreshPromise` and `_flowRefreshPromise` deduplicate concurrent refreshes within one process.
+- Preserve a rotated refresh token when Microsoft supplies one; preserve the previous refresh token when it does not.
+- Flow permanent `invalid_grant` failure invalidates only `flow_*` fields. Transient Flow errors leave stored tokens intact.
+- The active initial-acquisition implementation is `outlook-auth-server.js`, not `auth/oauth-server.js`.
+- `check-auth-status` checks Graph only.
 
-### Graph API (Outlook + OneDrive)
+### Mail folder paths
 
-1. Azure app registration required with permissions:
-   - `Mail.Read`, `Mail.ReadWrite`, `Mail.Send`
-   - `Calendars.Read`, `Calendars.ReadWrite`
-   - `Files.Read`, `Files.ReadWrite`
-   - `User.Read`, `offline_access`
-2. Start auth server: `npm run auth-server`
-3. Use authenticate tool to get OAuth URL
-4. Complete browser authentication
-5. Tokens automatically stored and refreshed
+`email/folder-utils.js` resolves `Parent/Child/...` one segment at a time. `folder/create.js` and `folder/move.js` depend on it. OData string literals must escape apostrophes by doubling them. A literal `/` in a display name remains unsupported.
 
-### Persistent Auth
+### API clients
 
-`TokenStorage` automatically refreshes expired tokens using the refresh token. All scopes are unified in `config.js` (10 scopes including `offline_access`). Users only need to re-auth if the refresh token expires or is revoked.
+- Graph: `utils/graph-api.js`; HTTP 401 becomes `UNAUTHORIZED`, other failures retain the status and response body.
+- Flow: `power-automate/flow-api.js`; HTTP 401 becomes `FLOW_UNAUTHORIZED`, and HTTP 403 sets `error.code = 'FLOW_FORBIDDEN'`.
+- OneDrive uploads use the 4 MB threshold from `config.js` to separate simple and chunked paths.
 
-### Power Automate (Optional)
+## Testing map
 
-- Requires separate Flow API scope: `https://service.flow.microsoft.com/.default`
-- Flow tokens managed by `TokenStorage` (same as Graph tokens, stored in same token file under `flow_*` keys)
-- Power Automate handlers import `tokenStorage` from `auth/index.js` and call `await tokenStorage.getValidFlowAccessToken()`
-- Flow token auto-refresh: `TokenStorage.refreshFlowAccessToken()` mirrors Graph refresh with `_flowRefreshPromise` dedup. On failure, only `flow_*` keys are invalidated (Graph tokens preserved).
-- Initial Flow token acquisition: use the `authenticate-flow` tool, which redirects to `http://localhost:3333/auth/flow`. The auth server stores `{timestamp, flow: true}` in `pendingStates`, sends the Flow scope in the token exchange, and calls `tokenStorage.saveFlowTokens()` to persist `flow_*` keys without touching Graph tokens.
-- Only solution-aware flows accessible via API
-- Only manual trigger flows can be triggered
+| Change area                                      | Focused tests                                                                  |
+| ------------------------------------------------ | ------------------------------------------------------------------------------ |
+| Token lifecycle and refresh                      | `test/auth/token-storage.test.js`                                              |
+| Active standalone auth server / Flow acquisition | `test/auth/oauth-server-flow.test.js`                                          |
+| Inactive Express OAuth module                    | `test/auth/oauth-server.test.js`                                               |
+| Auth MCP tools                                   | `test/auth/tools.test.js`, `test/auth/index.test.js`                           |
+| Flow transport and handlers                      | `test/power-automate/flow-api.test.js`, `test/power-automate/handlers.test.js` |
+| Graph transport and pagination                   | `test/utils/graph-api.test.js`                                                 |
+| Domain handlers                                  | matching files under `test/calendar/` and `test/email/`                        |
 
-## Configuration
+Test mode is not a complete authentication-system simulation: `authenticate-flow` currently creates only Graph-shaped legacy test tokens. Handler tests mock `TokenStorage` directly where Flow authentication state matters.
 
-### Agent Configuration
+## Specification ownership
 
-The server works with OpenCode, Claude Desktop, Codex (OpenAI), and Pi.dev. Each uses a different config file and format — see [README.md](./README.md#agent-configuration) for detailed config examples for each agent.
+Canonical requirements are organized by behavior, not by the archive that introduced them:
 
-### Environment Variables
+- [`openspec/specs/auth/spec.md`](./openspec/specs/auth/spec.md): productive Graph OAuth, Graph refresh, authentication status, and legacy boundaries
+- [`openspec/specs/flow-token-management/spec.md`](./openspec/specs/flow-token-management/spec.md): Flow acquisition, persistence, validity, refresh, and invalidation
+- [`openspec/specs/power-automate/spec.md`](./openspec/specs/power-automate/spec.md): the five user-visible Power Automate tools and Flow API errors
+- [`openspec/traceability.md`](./openspec/traceability.md): archive lineage, supersession, and known implementation gaps
 
-- **For .env file**: Use `MS_CLIENT_ID` and `MS_CLIENT_SECRET`
-- **For Claude Desktop config**: Use `OUTLOOK_CLIENT_ID` and `OUTLOOK_CLIENT_SECRET`
-- **Important**: Always use the client secret VALUE from Azure, not the Secret ID
+Archived changes are historical evidence. Never edit an archive to correct current behavior; update the owning canonical specification and record any lineage correction in the traceability document.
 
-### Config Constants
+## Quality rules
 
-- `GRAPH_API_ENDPOINT`: `https://graph.microsoft.com/v1.0/`
-- `FLOW_API_ENDPOINT`: `https://api.flow.microsoft.com`
-- `ONEDRIVE_UPLOAD_THRESHOLD`: 4MB (files larger need chunked upload)
-- Default page size: 25, max results: 50
-
-### Common Setup Issues
-
-1. **Missing dependencies**: Always run `npm install` first
-2. **Wrong secret**: Use Azure secret VALUE, not ID (AADSTS7000215 error)
-3. **Auth server not running**: Start `npm run auth-server` before authenticating
-4. **Port conflicts**: Use `npx kill-port 3333` if port is in use
-
-## Test Mode
-
-Set `USE_TEST_MODE=true` to use mock data instead of real API calls. Mock responses defined in:
-
-- `utils/mock-data.js` - Graph API mocks
-- `power-automate/flow-api.js` - Flow API mocks (inline)
-
-## Error Handling
-
-- Graph API auth failures: "UNAUTHORIZED" error
-- Flow API auth failures: "FLOW_UNAUTHORIZED" error
-- API errors include status codes and response details
-- Token expiration triggers re-authentication flow
-- Empty API responses handled gracefully
-
-## Code Quality
-
-- **ESLint**: Flat config (`eslint.config.mjs`), run with `npm run lint`
-- **Prettier**: Config in `.prettierrc.json` (single quotes, semicolons, 2-space indent, 100 chars)
-- **Husky**: Pre-commit hook runs `lint-staged` (eslint --fix + prettier --write on staged files)
-- **Tests**: Jest 29.7, 188 tests across 12 suites
+- CommonJS modules, two-space indentation, single quotes, semicolons, and Prettier's 100-column width.
+- Keep credentials and token contents out of logs, fixtures, commits, and documentation examples.
+- Keep tests with behavioral changes and update both user-facing docs and OpenSpec when a public contract changes.
+- Do not add AI attribution or `Co-Authored-By` trailers to commits; use conventional commit messages.
