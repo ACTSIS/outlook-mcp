@@ -2,11 +2,13 @@
 schema: spec-driven
 
 context: |
-  Tech stack: Node.js (CommonJS), Microsoft Graph API MCP server
-  Architecture: Modular MCP server with auth/, calendar/, email/, folder/, onedrive/, power-automate/, utils/ modules
-  Testing: Jest 29.7, supertest 7.0, test/ directory (auth, calendar, email, utils)
-  Style: CommonJS modules, no lint/formatter config detected
-  VCS: Git (GitHub, fork of ryaker/outlook-mcp)
+  Tech stack: Node.js (CommonJS), MCP SDK, Microsoft Graph API, and Power Automate Flow API
+  Architecture: Modular MCP server with auth/, calendar/, email/, folder/, onedrive/, power-automate/, and utils/ modules
+  Authentication: Productive OAuth server in outlook-auth-server.js; singleton TokenStorage with a shared Graph/Flow token file
+  Testing: Jest 29.7 and supertest 7.0; suites under test/ cover auth, calendar, email, folders, OneDrive, Power Automate, contracts, and utilities
+  Quality: ESLint 9 flat config, Prettier 3, Husky 9, and lint-staged
+  CI: GitHub Actions validates Node.js 22 and 24 with npm ci, lint, format checks, and tests
+  VCS: Git with GitHub Actions
 
 strict_tdd: true
 test_command: npm test
@@ -20,11 +22,14 @@ testing:
     e2e: false
   coverage:
     available: true
-    command: npx jest --coverage
+    command: npm test -- --coverage
   quality:
-    linter: false
+    linter: true
+    lint_command: npm run lint
     type_checker: false
-    formatter: false
+    formatter: true
+    format_check_command: npm run format:check
+    pre_commit: Husky runs lint-staged
 
 rules:
   proposal:
@@ -33,6 +38,7 @@ rules:
   specs:
     - Use Given/When/Then for scenarios
     - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+    - Keep canonical product behavior separate from non-normative implementation gaps
   design:
     - Include sequence diagrams for complex flows
     - Document architecture decisions with rationale
@@ -42,11 +48,16 @@ rules:
   apply:
     guidelines:
       - Follow existing code patterns (CommonJS, modular structure)
+      - Run ESLint and Prettier for changed implementation files
     tdd: true
     test_command: npm test
   verify:
     test_command: npm test
     build_command: ''
+    lint_command: npm run lint
+    format_check_command: npm run format:check
+    coverage_command: npm test -- --coverage
     coverage_threshold: 0
   archive:
     - Warn before merging destructive deltas
+    - Preserve archived artifacts as immutable historical evidence

@@ -1,297 +1,182 @@
-# Auth — Persistent Authentication Specification
+# Authentication Specification
 
 ## Purpose
 
-Define the behavior of the OAuth token lifecycle: scope configuration, token refresh, and auth status reporting. All auth modules MUST reference a single scope source in `config.js` to prevent silent scope downgrade on refresh.
+Define the productive Microsoft Graph OAuth flow, Graph token refresh, authentication status, and the boundary between the current `TokenStorage` implementation and the legacy `token-manager` compatibility module. Power Automate token lifecycle requirements live in [`../flow-token-management/spec.md`](../flow-token-management/spec.md).
 
 ## Requirements
 
-### Requirement: Scope Unification
+### Requirement: Productive OAuth Server
 
-All auth modules that request scopes from Microsoft identity platform MUST reference `config.js` as the single source of truth for scope lists.
-(Previously: Only Graph scopes were unified; Flow scope was not used by auth server routes)
+The productive authentication process MUST be `outlook-auth-server.js`, started through `npm run auth-server`, and MUST expose Graph authorization, Flow authorization, and the shared callback on port 3333.
 
-#### Scenario: All scope consumers reference config.js
+#### Scenario: Graph authentication URL is requested
 
-- GIVEN `config.js` defines `AUTH_CONFIG.scopes` with the full scope set
-- WHEN any auth module (`token-storage.js`, `outlook-auth-server.js`) constructs an OAuth request
-- THEN it MUST use `config.AUTH_CONFIG.scopes` as the scope parameter
-- AND it MUST NOT define its own inline scope list
+- GIVEN the productive auth server has `MS_CLIENT_ID` and `MS_CLIENT_SECRET`
+- WHEN a client requests `GET /auth`
+- THEN the server MUST redirect to the configured Microsoft identity authority
+- AND the request MUST include the Graph scopes from `config.AUTH_CONFIG.scopes`, the configured callback URI, and a cryptographically random `state`
 
-#### Scenario: /auth/flow uses FLOW_SCOPE from config.js
+#### Scenario: Required credentials are absent
 
-- GIVEN `config.js` defines `FLOW_SCOPE` as `https://service.flow.microsoft.com/.default`
-- WHEN the `/auth/flow` route constructs the OAuth authorization URL
-- THEN it MUST use `config.FLOW_SCOPE` as the scope parameter
-- AND it MUST NOT use `config.AUTH_CONFIG.scopes`
+- GIVEN either `MS_CLIENT_ID` or `MS_CLIENT_SECRET` is absent
+- WHEN a client requests `GET /auth` or `GET /auth/flow`
+- THEN the server MUST respond with HTTP 500
+- AND the response MUST explain which credentials are required
 
-#### Scenario: MS_SCOPES env var overrides config.js scopes
+### Requirement: Graph Scope Configuration
 
-- GIVEN `process.env.MS_SCOPES` is set
-- WHEN `token-storage.js` initializes its config
-- THEN it MUST use `MS_SCOPES` instead of `config.AUTH_CONFIG.scopes`
-- AND `outlook-auth-server.js` MUST NOT use `MS_SCOPES` (it uses `config.js` directly)
+Productive Graph authorization MUST use `config.AUTH_CONFIG.scopes`. The scope list MUST contain `offline_access` and the delegated scopes required by the registered Graph tools.
 
-### Requirement: Full-Scope Token Refresh
-
-`token-storage.refreshAccessToken()` MUST request the same scope set as the initial authorization code exchange.
-
-#### Scenario: Refresh POST body includes full scopes
-
-- GIVEN a stored refresh token from a previous auth with 10+ scopes
-- WHEN `refreshAccessToken()` is called
-- THEN the POST body to the token endpoint MUST include `scope` with all scopes from the configured list
-- AND the `scope` parameter MUST NOT be a subset of the original auth scopes
-
-#### Scenario: Refresh with downscoped env var override
-
-- GIVEN `MS_SCOPES` is set to `"offline_access User.Read Mail.Read"`
-- WHEN `refreshAccessToken()` is called
-- THEN the POST body MUST use the `MS_SCOPES` value as the scope parameter
-- AND the resulting token SHALL be limited to those scopes
-
-### Requirement: Auth Status Accuracy
-
-The `check-auth-status` tool MUST report authentication status based on `token-storage`'s token state, including its refresh capability.
-
-#### Scenario: Token expired but refreshable reports authenticated
-
-- GIVEN a stored token with `expires_at` in the past and a valid `refresh_token`
-- WHEN `check-auth-status` is called
-- THEN it MUST report "Authenticated" because `token-storage` can refresh the token on demand
-
-#### Scenario: No tokens stored reports not authenticated
-
-- GIVEN no token file exists at the configured path
-- WHEN `check-auth-status` is called
-- THEN it MUST report "Not authenticated"
-
-### Requirement: offline_access Presence
-
-The scope list in `config.js` MUST include `offline_access` to ensure Microsoft returns a refresh token during the authorization code exchange.
-
-#### Scenario: offline_access in config.js scopes
+#### Scenario: Productive Graph scopes are constructed
 
 - GIVEN `config.AUTH_CONFIG.scopes`
-- WHEN the list is inspected
-- THEN it MUST contain `"offline_access"`
-- AND the initial auth URL and token exchange POST body MUST include `offline_access`
+- WHEN `outlook-auth-server.js` constructs the Graph authorization URL and code-exchange request
+- THEN both requests MUST use that scope list
+- AND the list MUST contain `offline_access`, `User.Read`, mail, calendar, contacts, and files permissions
 
-### Requirement: Backwards Compatibility
+#### Scenario: TokenStorage uses its configured Graph scopes
 
-Existing code that reads tokens from the token file MUST continue to work after the scope unification.
+- GIVEN a `TokenStorage` instance
+- WHEN it constructs a Graph refresh or direct code-exchange request
+- THEN it MUST use `MS_SCOPES` when that environment variable is set
+- AND otherwise it MUST default to `config.AUTH_CONFIG.scopes`
 
-#### Scenario: Token file format unchanged
+### Requirement: Callback Intent Is Bound to OAuth State
 
-- GIVEN a token file at `~/.outlook-mcp-tokens.json` created by the previous auth flow
-- WHEN `token-storage.getTokens()` is called
-- THEN it MUST parse and return the tokens successfully
-- AND the token structure (`access_token`, `refresh_token`, `expires_at`, `expires_in`, `scope`) MUST be identical to the previous format
+The shared `GET /auth/callback` route MUST determine whether a callback belongs to Graph or Flow from server-side metadata stored for the OAuth `state`. It MUST NOT infer intent from the token response scope.
 
-### Requirement: One-Time Re-Auth
+#### Scenario: Flow callback is routed by state metadata
 
-After deploying the scope fix, users with existing tokens that were issued with a downscoped scope set MAY need to re-authenticate once to obtain a token with the full scope set.
+- GIVEN `/auth/flow` stored `{ flow: true }` for a generated state
+- WHEN `/auth/callback` receives that valid state and an authorization code
+- THEN the server MUST exchange the code as a Flow authorization
+- AND it MUST persist the result through `TokenStorage.saveFlowTokens()`
+- AND it MUST preserve existing Graph keys
 
-#### Scenario: Existing downscoped token triggers re-auth prompt
+#### Scenario: Graph callback is routed by state metadata
 
-- GIVEN a stored token whose `scope` field is a subset of `config.AUTH_CONFIG.scopes`
-- WHEN `getValidAccessToken()` detects the token is expired and refresh returns a downscoped token
-- THEN the system SHOULD surface a message indicating re-authentication may be needed
-- AND the user MAY re-authenticate via the `authenticate` tool to obtain a full-scope token
+- GIVEN `/auth` stored `{ flow: false }` for a generated state
+- WHEN `/auth/callback` receives that valid state and an authorization code
+- THEN the server MUST exchange the code as a Graph authorization
+- AND it MUST render the Graph authentication result
 
-### Requirement: Flow Token Methods in TokenStorage
+#### Scenario: Callback state is invalid or expired
 
-TokenStorage MUST provide `getFlowAccessToken()`, `saveFlowTokens()`, `isFlowTokenExpired()`, and `getValidFlowAccessToken()` methods that read/write `flow_`-prefixed keys in the same token file.
-(Previously: `getValidFlowAccessToken()` returned null on expiry without attempting refresh)
+- GIVEN a callback with a missing or unknown `state`
+- WHEN `/auth/callback` handles the request
+- THEN it MUST respond with HTTP 403
+- AND it MUST NOT exchange the authorization code
 
-#### Scenario: getFlowAccessToken reads flow_access_token from file
+### Requirement: Graph Token Validity and Refresh
 
-- GIVEN a token file with `flow_access_token: "flow-token-123"` and `flow_expires_at` in the future
-- WHEN `tokenStorage.getFlowAccessToken()` is called
-- THEN it MUST return `"flow-token-123"`
+`TokenStorage.getValidAccessToken()` MUST load Graph credentials from the shared token file, treat a token as expired when it is missing an expiry or is within the five-minute refresh buffer, and refresh it when a refresh token is available.
 
-#### Scenario: saveFlowTokens writes flow keys without removing Graph keys
+#### Scenario: Valid Graph access token is available
 
-- GIVEN a token file with `access_token: "graph-token"` and `refresh_token: "graph-refresh"`
-- WHEN `tokenStorage.saveFlowTokens({ access_token: "flow-token", refresh_token: "flow-refresh", expires_in: 3600 })` is called
-- THEN the file MUST contain both `access_token: "graph-token"` AND `flow_access_token: "flow-token"`
-- AND the Graph keys MUST be unmodified
+- GIVEN the shared token file contains `access_token` with `expires_at` more than five minutes in the future
+- WHEN `getValidAccessToken()` is called
+- THEN it MUST return the stored access token
+- AND it MUST NOT call the token endpoint
 
-#### Scenario: saveFlowTokens handles initial acquisition response
+#### Scenario: Graph access token requires refresh
 
-- GIVEN a token file with valid Graph tokens and no `flow_` keys
-- WHEN `tokenStorage.saveFlowTokens()` is called with the token response from the `/auth/flow` callback
-- THEN `flow_access_token`, `flow_refresh_token`, and `flow_expires_at` MUST be added to the token file
-- AND the Graph keys MUST remain unchanged
-- AND `flow_refresh_token` MUST be stored for future refresh operations
+- GIVEN the access token is expired or within five minutes of expiry
+- AND a `refresh_token` exists
+- WHEN `getValidAccessToken()` is called
+- THEN it MUST request a new token with `grant_type=refresh_token`
+- AND it MUST include the configured Graph scopes
+- AND it MUST persist the new access token and expiry
 
-#### Scenario: isFlowTokenExpired returns true for expired flow token
+#### Scenario: Concurrent Graph refreshes are requested
 
-- GIVEN `flow_expires_at` is `Date.now() - 60000`
-- WHEN `tokenStorage.isFlowTokenExpired()` is called
-- THEN it MUST return `true`
+- GIVEN a Graph refresh is already in progress
+- WHEN another caller requests a refresh
+- THEN both callers MUST share the same `_refreshPromise`
+- AND only one token-endpoint request SHALL be sent
 
-#### Scenario: getValidFlowAccessToken attempts refresh on expiry
+#### Scenario: Microsoft rotates the Graph refresh token
 
-- GIVEN a token file with expired `flow_access_token` and a valid `flow_refresh_token`
-- WHEN `tokenStorage.getValidFlowAccessToken()` is called
-- THEN it MUST call `refreshFlowAccessToken()`
-- AND it MUST return the refreshed access token on success
+- GIVEN a successful Graph refresh
+- WHEN the response includes a new `refresh_token`
+- THEN TokenStorage MUST persist the new refresh token
+- AND when the response omits it, TokenStorage MUST retain the existing refresh token
 
-#### Scenario: getValidFlowAccessToken returns null when no flow_refresh_token exists
+### Requirement: Graph Authentication Status
 
-- GIVEN a token file with expired `flow_access_token` and no `flow_refresh_token`
-- WHEN `tokenStorage.getValidFlowAccessToken()` is called
-- THEN it MUST return `null`
-- AND it MUST NOT attempt an OAuth refresh
+The `check-auth-status` tool MUST resolve status through `TokenStorage.getValidAccessToken()` and MUST use the runtime's exact status messages.
 
-#### Scenario: getValidFlowAccessToken returns null when refresh fails
+#### Scenario: Graph token is valid or refresh succeeds
 
-- GIVEN a token file with expired `flow_access_token` and a `flow_refresh_token`
-- WHEN `getValidFlowAccessToken()` calls `refreshFlowAccessToken()` and it throws
-- THEN it MUST return `null`
-- AND flow tokens MUST be invalidated in the token file
+- GIVEN `getValidAccessToken()` returns a token
+- WHEN `check-auth-status` is invoked
+- THEN it MUST return exactly `Authenticated and ready`
 
-#### Scenario: getValidFlowAccessToken loads tokens from file when not cached
+#### Scenario: Graph credentials are unavailable or unusable
 
-- GIVEN a token file with `flow_access_token: "file-flow-token"` and `flow_expires_at` in the future
-- WHEN `tokenStorage.getValidFlowAccessToken()` is called with `this.tokens` null
-- THEN it MUST load tokens from the file
-- AND it MUST return `"file-flow-token"`
+- GIVEN `getValidAccessToken()` returns `null`
+- WHEN `check-auth-status` is invoked
+- THEN it MUST return exactly `Not authenticated`
 
-### Requirement: Five Handler Import Migration
+### Requirement: Authentication Tools
 
-All five power-automate handlers MUST import Flow token access from `auth/token-storage` instead of `auth/token-manager`.
+The MCP server MUST expose separate `authenticate` and `authenticate-flow` tools because Graph and Flow use different resource scopes.
 
-#### Scenario: All handlers import from token-storage
+#### Scenario: Graph authentication is requested
 
-- GIVEN `power-automate/list-environments.js`, `list-flows.js`, `list-runs.js`, `run-flow.js`, `toggle-flow.js`
-- WHEN each file's imports are inspected
-- THEN each MUST import `getFlowAccessToken` from `../auth/token-storage`
-- AND none MUST import `getFlowAccessToken` from `../auth/token-manager`
+- GIVEN normal runtime mode
+- WHEN `authenticate` is invoked
+- THEN it MUST return the productive `/auth` URL and instructions to complete authentication in a browser
 
-### Requirement: Flow Token Refresh
+#### Scenario: Flow authentication is requested
 
-TokenStorage MUST provide `refreshFlowAccessToken()` that calls the Microsoft token endpoint with `grant_type=refresh_token` using the stored `flow_refresh_token` and `FLOW_SCOPE` from config. Concurrent calls MUST be deduplicated via a dedicated `_flowRefreshPromise`.
+- GIVEN normal runtime mode
+- WHEN `authenticate-flow` is invoked
+- THEN it MUST return `http://localhost:3333/auth/flow` and instructions to complete authentication in a browser
 
-#### Scenario: Successful refresh returns new access token
+### Requirement: Shared Token File Compatibility
 
-- GIVEN a token file with `flow_refresh_token: "valid-flow-refresh"` and `flow_access_token` expired
-- WHEN `tokenStorage.refreshFlowAccessToken()` is called
-- THEN the POST body MUST include `grant_type=refresh_token`, `refresh_token=valid-flow-refresh`, and `scope=https://service.flow.microsoft.com/.default`
-- AND `flow_access_token` and `flow_expires_at` MUST be updated in the token file
-- AND it MUST return the new `flow_access_token`
+TokenStorage MUST read the existing JSON token file at `~/.outlook-mcp-tokens.json`, preserve supported additive keys, and write it with owner-only permissions.
 
-#### Scenario: Concurrent refresh calls share a single HTTP request
+#### Scenario: Existing Graph token file is loaded
 
-- GIVEN two concurrent calls to `refreshFlowAccessToken()` while the token is expired
-- WHEN both calls are made
-- THEN only one HTTP request SHALL be sent to the token endpoint
-- AND both calls SHALL resolve with the same access token
-- AND `_flowRefreshPromise` SHALL be null after resolution
+- GIVEN a valid pre-existing file containing Graph token keys
+- WHEN `TokenStorage.getTokens()` is called
+- THEN it MUST parse and return those keys without requiring a migration
 
-#### Scenario: Refresh token rotation preserves new flow_refresh_token
+#### Scenario: Token data is persisted
 
-- GIVEN a token file with `flow_refresh_token: "old-flow-refresh"`
-- WHEN `refreshFlowAccessToken()` returns a response with a new `refresh_token`
-- THEN `flow_refresh_token` MUST be updated to the new value in the token file
+- GIVEN TokenStorage saves token data
+- WHEN the shared file is written
+- THEN it MUST contain valid JSON
+- AND it MUST be created with mode `0600`
 
-#### Scenario: Refresh without rotation preserves existing flow_refresh_token
+### Requirement: Legacy Token Manager Boundary
 
-- GIVEN a token file with `flow_refresh_token: "existing-flow-refresh"`
-- WHEN `refreshFlowAccessToken()` returns a response without a `refresh_token` field
-- THEN `flow_refresh_token` MUST remain `"existing-flow-refresh"` unchanged
+`auth/token-manager.js` MUST remain a deprecated compatibility module. New productive consumers MUST use the singleton TokenStorage exported by `auth/index.js`.
 
-#### Scenario: Refresh failure invalidates flow tokens
+#### Scenario: Legacy exports remain available
 
-- GIVEN a token file with `flow_refresh_token: "invalid-refresh"` and `flow_access_token` expired
-- WHEN `refreshFlowAccessToken()` is called and the token endpoint returns an error
-- THEN `flow_access_token` and `flow_refresh_token` MUST be cleared from the token file
-- AND the method MUST throw an error
+- GIVEN a legacy import of `auth/token-manager.js`
+- WHEN its exports are inspected
+- THEN `loadTokenCache`, `saveTokenCache`, `getAccessToken`, and `createTestTokens` MUST remain available
+- AND Flow token lifecycle methods MUST NOT be exported
 
-#### Scenario: Missing flow_refresh_token throws error
+#### Scenario: Productive handlers require credentials
 
-- GIVEN a token file with no `flow_refresh_token`
-- WHEN `refreshFlowAccessToken()` is called
-- THEN it MUST throw an error indicating no refresh token is available
+- GIVEN a Graph or Power Automate handler
+- WHEN it obtains an access token
+- THEN it MUST use the singleton TokenStorage
+- AND it MUST NOT add a new dependency on `token-manager.js`
 
-### Requirement: Flow Auth Route
+## Known Implementation Gaps (Non-Normative)
 
-The auth server MUST expose a `GET /auth/flow` route that generates a Microsoft OAuth authorization URL with `FLOW_SCOPE` only, using the same `client_id`, `redirect_uri`, and CSRF state mechanism as the existing `/auth` route.
+These observations describe current limitations; they are not requirements to preserve:
 
-#### Scenario: /auth/flow returns redirect with FLOW_SCOPE
+- Productive initial Graph acquisition writes the token response as the whole file and can remove existing `flow_*` keys during Graph re-authentication.
+- Graph refresh failure clears the shared in-memory token object, including Flow data, but the attempted save is a no-op after the object becomes `null`; stale credentials can remain on disk.
+- `MS_SCOPES`, `MS_REDIRECT_URI`, and `MS_TOKEN_ENDPOINT` affect TokenStorage but are not consistently applied by the productive initial authorization server.
+- The advertised `authenticate.force` argument is currently ignored.
+- In test mode, `authenticate-flow` reports success after `createTestTokens()`, but that helper writes Graph-style test keys rather than `flow_*` keys.
 
-- GIVEN the auth server is running with valid `MS_CLIENT_ID` and `MS_CLIENT_SECRET`
-- WHEN a GET request is made to `/auth/flow`
-- THEN the response MUST be a 302 redirect to `https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize`
-- AND the `scope` query parameter MUST be `https://service.flow.microsoft.com/.default`
-- AND the `client_id`, `redirect_uri`, `response_type=code`, and `state` parameters MUST be present
-
-#### Scenario: /auth/flow returns 500 when credentials missing
-
-- GIVEN the auth server has no `MS_CLIENT_ID` or `MS_CLIENT_SECRET` configured
-- WHEN a GET request is made to `/auth/flow`
-- THEN the response MUST be 500 with an HTML error page
-- AND the error page MUST indicate missing credentials
-
-### Requirement: Authenticate-Flow Tool
-
-The `auth/tools.js` module MUST export an `authenticate-flow` tool that returns the URL to `http://localhost:3333/auth/flow` for the user to visit in their browser.
-
-#### Scenario: authenticate-flow returns Flow auth URL
-
-- GIVEN the auth server is running at `http://localhost:3333`
-- WHEN the `authenticate-flow` tool is invoked
-- THEN it MUST return a text response containing `http://localhost:3333/auth/flow`
-- AND the response MUST instruct the user to visit the URL to authenticate with Power Automate
-
-#### Scenario: authenticate-flow in test mode creates test flow tokens
-
-- GIVEN `USE_TEST_MODE=true`
-- WHEN the `authenticate-flow` tool is invoked
-- THEN it MUST create test flow tokens via `tokenManager.createTestTokens()`
-- AND it MUST return a success message indicating test mode authentication
-
-### Requirement: Flow Token Detection in Callback
-
-The auth server's `exchangeCodeForTokens()` MUST detect whether the token response is for Flow by inspecting the `scope` field, and call `TokenStorage.saveFlowTokens()` for Flow responses instead of writing Graph keys.
-
-#### Scenario: Flow scope detected calls saveFlowTokens
-
-- GIVEN a token response with `scope` containing `https://service.flow.microsoft.com/.default`
-- WHEN `exchangeCodeForTokens()` processes the response
-- THEN it MUST call `tokenStorage.saveFlowTokens()` with the token response
-- AND it MUST NOT overwrite existing Graph token keys in the token file
-- AND the success HTML page MUST indicate Flow authentication
-
-#### Scenario: Graph scope detected writes Graph tokens normally
-
-- GIVEN a token response with `scope` containing `Mail.Read` (no Flow scope)
-- WHEN `exchangeCodeForTokens()` processes the response
-- THEN it MUST write Graph token keys (`access_token`, `refresh_token`, `expires_at`) to the token file
-- AND it MUST NOT call `saveFlowTokens()`
-
-#### Scenario: Flow auth failure does not affect Graph tokens
-
-- GIVEN a token file with valid Graph tokens (`access_token`, `refresh_token`, `expires_at`)
-- WHEN the user completes a Flow OAuth flow and the token endpoint returns an error
-- THEN the Graph token keys MUST remain unchanged in the token file
-- AND the error HTML page MUST indicate Flow authentication failure
-
-### Requirement: token-manager.js Retention
-
-`token-manager.js` MUST retain only `createTestTokens()` and remove `getFlowAccessToken()` and `saveFlowTokens()`.
-
-#### Scenario: createTestTokens still works
-
-- GIVEN `token-manager.js` after the migration
-- WHEN `tokenManager.createTestTokens()` is called
-- THEN it MUST create test tokens and save them to the token file
-- AND it MUST return the test token object
-
-#### Scenario: Flow methods removed from token-manager exports
-
-- GIVEN `token-manager.js` after the migration
-- WHEN `module.exports` is inspected
-- THEN it MUST NOT include `getFlowAccessToken` or `saveFlowTokens`
-- AND it MUST include `createTestTokens`
+See [`../../traceability.md`](../../traceability.md) for archive lineage and specification errata.
