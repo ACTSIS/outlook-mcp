@@ -2,9 +2,11 @@ const handleSendEmail = require('../../email/send');
 const { emailTools } = require('../../email');
 const { callGraphAPI } = require('../../utils/graph-api');
 const { ensureAuthenticated } = require('../../auth');
+const { composeEmail } = require('../../signature/composer');
 
 jest.mock('../../utils/graph-api');
 jest.mock('../../auth');
+jest.mock('../../signature/composer');
 
 describe('handleSendEmail', () => {
   const accessToken = 'dummy_access_token';
@@ -14,6 +16,9 @@ describe('handleSendEmail', () => {
     ensureAuthenticated.mockReset();
     ensureAuthenticated.mockResolvedValue(accessToken);
     callGraphAPI.mockResolvedValue({});
+    composeEmail.mockImplementation(({ body, isHtml }) =>
+      Promise.resolve({ body, contentType: isHtml ? 'html' : 'text', attachments: [] })
+    );
   });
 
   test('preserves the new-email route and payload', async () => {
@@ -43,6 +48,47 @@ describe('handleSendEmail', () => {
       saveToSentItems: false,
     });
     expect(result.content[0].text).toContain('Email sent successfully!');
+  });
+
+  test('adds a composed signature and inline CID attachments to a new email', async () => {
+    const attachment = { contentId: 'logo', isInline: true, contentBytes: 'aA==' };
+    composeEmail.mockResolvedValue({
+      body: '<p>Body</p><p>Signed</p>',
+      contentType: 'html',
+      attachments: [attachment],
+    });
+
+    await handleSendEmail({
+      to: 'to@example.com',
+      subject: 'Signed',
+      body: 'Body',
+      signatureName: 'work',
+    });
+
+    expect(composeEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ body: 'Body', signatureName: 'work' })
+    );
+    expect(callGraphAPI.mock.calls[0][3].message).toEqual(
+      expect.objectContaining({
+        body: { contentType: 'html', content: '<p>Body</p><p>Signed</p>' },
+        attachments: [attachment],
+      })
+    );
+  });
+
+  test('does not authenticate or call Graph when signature composition fails', async () => {
+    composeEmail.mockRejectedValue(new Error('Signature not found: missing'));
+
+    const result = await handleSendEmail({
+      to: 'to@example.com',
+      subject: 'Subject',
+      body: 'Body',
+      signatureName: 'missing',
+    });
+
+    expect(result.content[0].text).toBe('Error sending email: Signature not found: missing');
+    expect(ensureAuthenticated).not.toHaveBeenCalled();
+    expect(callGraphAPI).not.toHaveBeenCalled();
   });
 
   test.each([

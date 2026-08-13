@@ -2,9 +2,11 @@ const handleDraftEmail = require('../../email/draft');
 const { emailTools } = require('../../email');
 const { callGraphAPI } = require('../../utils/graph-api');
 const { ensureAuthenticated } = require('../../auth');
+const { composeEmail } = require('../../signature/composer');
 
 jest.mock('../../utils/graph-api');
 jest.mock('../../auth');
+jest.mock('../../signature/composer');
 
 describe('handleDraftEmail', () => {
   const accessToken = 'dummy_access_token';
@@ -14,6 +16,20 @@ describe('handleDraftEmail', () => {
     ensureAuthenticated.mockReset();
     ensureAuthenticated.mockResolvedValue(accessToken);
     callGraphAPI.mockResolvedValue({ id: 'draft-123', subject: 'Test subject' });
+    composeEmail.mockImplementation(({ body = '', isHtml }) =>
+      Promise.resolve({
+        body,
+        contentType:
+          isHtml === true
+            ? 'html'
+            : isHtml === false
+              ? 'text'
+              : body.toLowerCase().includes('<html')
+                ? 'html'
+                : 'text',
+        attachments: [],
+      })
+    );
   });
 
   function createdMessage() {
@@ -27,6 +43,33 @@ describe('handleDraftEmail', () => {
       contentType: 'html',
       content: '<p>HTML fragment</p>',
     });
+  });
+
+  test('creates a signed new draft with inline CID attachments', async () => {
+    const attachment = { contentId: 'logo', isInline: true, contentBytes: 'aA==' };
+    composeEmail.mockResolvedValue({
+      body: '<p>Body</p><p>Signed</p>',
+      contentType: 'html',
+      attachments: [attachment],
+    });
+
+    await handleDraftEmail({ body: 'Body', includeSignature: true });
+
+    expect(createdMessage().body).toEqual({
+      contentType: 'html',
+      content: '<p>Body</p><p>Signed</p>',
+    });
+    expect(createdMessage().attachments).toEqual([attachment]);
+  });
+
+  test('does not authenticate or call Graph when draft composition fails', async () => {
+    composeEmail.mockRejectedValue(new Error('Signature store is corrupt or invalid'));
+
+    const result = await handleDraftEmail({ body: 'Body' });
+
+    expect(result.content[0].text).toContain('Signature store is corrupt or invalid');
+    expect(ensureAuthenticated).not.toHaveBeenCalled();
+    expect(callGraphAPI).not.toHaveBeenCalled();
   });
 
   test('forces plain text when isHtml is false even with an html tag', async () => {

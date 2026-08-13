@@ -3,6 +3,7 @@
  */
 const { callGraphAPI } = require('../utils/graph-api');
 const { ensureAuthenticated } = require('../auth');
+const { composeNewMessage } = require('./graph-message-flow');
 
 /**
  * Draft email handler
@@ -24,9 +25,6 @@ async function handleDraftEmail(args) {
   } = args || {};
 
   try {
-    // Get access token
-    const accessToken = await ensureAuthenticated();
-
     // Format recipients only when provided
     const toRecipients = to
       ? to
@@ -66,6 +64,7 @@ async function handleDraftEmail(args) {
             : 'text';
 
     if (replyToId) {
+      const accessToken = await ensureAuthenticated();
       const replyDraft = await callGraphAPI(
         accessToken,
         'POST',
@@ -97,7 +96,7 @@ async function handleDraftEmail(args) {
     }
 
     // Create message payload for draft creation
-    const messageObject = {
+    const messageObject = await composeNewMessage(args, {
       subject,
       body: {
         contentType,
@@ -107,9 +106,10 @@ async function handleDraftEmail(args) {
       ccRecipients: ccRecipients.length > 0 ? ccRecipients : undefined,
       bccRecipients: bccRecipients.length > 0 ? bccRecipients : undefined,
       importance,
-    };
+    });
 
     // Create draft message
+    const accessToken = await ensureAuthenticated();
     const draft = await callGraphAPI(accessToken, 'POST', 'me/messages', messageObject);
 
     return {

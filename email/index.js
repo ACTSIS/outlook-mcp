@@ -135,6 +135,14 @@ const emailTools = [
           description:
             'ID of the existing message to reply to. When provided, recipients and subject are inherited from the original message.',
         },
+        signatureName: {
+          type: 'string',
+          description: 'Managed signature name; overrides the shared default',
+        },
+        includeSignature: {
+          type: 'boolean',
+          description: 'Set to false to omit managed signatures for this operation',
+        },
         importance: {
           type: 'string',
           description: 'Email importance (normal, high, low)',
@@ -185,6 +193,14 @@ const emailTools = [
           type: 'string',
           description:
             'ID of the existing message to reply to. When provided, recipients and subject are inherited from the original message.',
+        },
+        signatureName: {
+          type: 'string',
+          description: 'Managed signature name; overrides the shared default',
+        },
+        includeSignature: {
+          type: 'boolean',
+          description: 'Set to false to omit managed signatures for this operation',
         },
         importance: {
           type: 'string',

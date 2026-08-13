@@ -3,6 +3,7 @@
  */
 const { callGraphAPI } = require('../utils/graph-api');
 const { ensureAuthenticated } = require('../auth');
+const { composeNewMessage } = require('./graph-message-flow');
 
 /**
  * Send email handler
@@ -57,9 +58,6 @@ async function handleSendEmail(args) {
   }
 
   try {
-    // Get access token
-    const accessToken = await ensureAuthenticated();
-
     // Determine content type: explicit isHtml param takes precedence, otherwise auto-detect
     const contentType =
       isHtml === true
@@ -71,6 +69,7 @@ async function handleSendEmail(args) {
             : 'text';
 
     if (replyToId) {
+      const accessToken = await ensureAuthenticated();
       await callGraphAPI(
         accessToken,
         'POST',
@@ -130,22 +129,24 @@ async function handleSendEmail(args) {
       : [];
 
     // Prepare email object
-    const emailObject = {
-      message: {
-        subject,
-        body: {
-          contentType: contentType,
-          content: body,
-        },
-        toRecipients,
-        ccRecipients: ccRecipients.length > 0 ? ccRecipients : undefined,
-        bccRecipients: bccRecipients.length > 0 ? bccRecipients : undefined,
-        importance,
+    const message = await composeNewMessage(args, {
+      subject,
+      body: {
+        contentType: contentType,
+        content: body,
       },
+      toRecipients,
+      ccRecipients: ccRecipients.length > 0 ? ccRecipients : undefined,
+      bccRecipients: bccRecipients.length > 0 ? bccRecipients : undefined,
+      importance,
+    });
+    const emailObject = {
+      message,
       saveToSentItems,
     };
 
     // Make API call to send email
+    const accessToken = await ensureAuthenticated();
     await callGraphAPI(accessToken, 'POST', 'me/sendMail', emailObject);
 
     return {

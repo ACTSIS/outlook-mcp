@@ -8,12 +8,12 @@
 | 400-line budget risk    | High                                                                          |
 | Chained PRs recommended | Yes                                                                           |
 | Suggested split         | PR 1 storage/tools → PR 2 composition/new messages → PR 3 native replies/docs |
-| Delivery strategy       | ask-on-risk                                                                   |
-| Chain strategy          | pending                                                                       |
+| Delivery strategy       | approved chained PRs                                                          |
+| Chain strategy          | stacked-to-main                                                               |
 
-Decision needed before apply: Yes
+Decision needed before apply: No
 Chained PRs recommended: Yes
-Chain strategy: pending
+Chain strategy: stacked-to-main
 400-line budget risk: High
 
 ### Suggested Work Units
@@ -35,10 +35,10 @@ Chain strategy: pending
 
 ## Phase 2: Work Unit 2 — Composition and New Messages
 
-- [ ] 2.1 **RED:** Add `test/signature/composer.test.js` for opt-out/override/default precedence, unknown overrides, second-pass sanitization, text escaping, single append, and attachment mapping.
-- [ ] 2.2 **GREEN:** Implement `signature/composer.js` and expose `signatureName`/`includeSignature` through `email/index.js`.
-- [ ] 2.3 **RED:** Extend `test/email/send.test.js` and `test/email/draft.test.js` for signed new-message payloads, unsigned regression, CID attachments, and no Graph call after composition failure.
-- [ ] 2.4 **GREEN/REFACTOR:** Add `email/graph-message-flow.js`; adapt `email/send.js` and `email/draft.js` while preserving unsigned Graph contracts.
+- [x] 2.1 **RED:** Add `test/signature/composer.test.js` for opt-out/override/default precedence, unknown overrides, second-pass sanitization, text escaping, single append, and attachment mapping.
+- [x] 2.2 **GREEN:** Implement `signature/composer.js` and expose `signatureName`/`includeSignature` through `email/index.js`.
+- [x] 2.3 **RED:** Extend `test/email/send.test.js` and `test/email/draft.test.js` for signed new-message payloads, unsigned regression, CID attachments, and no Graph call after composition failure.
+- [x] 2.4 **GREEN/REFACTOR:** Add `email/graph-message-flow.js`; adapt `email/send.js` and `email/draft.js` while preserving unsigned Graph contracts.
 
 ## Phase 3: Work Unit 3 — Native Replies and Delivery Evidence
 
