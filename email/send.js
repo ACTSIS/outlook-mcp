@@ -3,7 +3,12 @@
  */
 const { callGraphAPI } = require('../utils/graph-api');
 const { ensureAuthenticated } = require('../auth');
-const { composeNewMessage } = require('./graph-message-flow');
+const {
+  composeNewMessage,
+  composeReply,
+  hasManagedSignature,
+  deliverNativeReply,
+} = require('./graph-message-flow');
 
 /**
  * Send email handler
@@ -69,20 +74,25 @@ async function handleSendEmail(args) {
             : 'text';
 
     if (replyToId) {
+      const composed = await composeReply(args);
       const accessToken = await ensureAuthenticated();
-      await callGraphAPI(
-        accessToken,
-        'POST',
-        `me/messages/${encodeURIComponent(replyToId)}/reply`,
-        {
-          message: {
-            body: {
-              contentType,
-              content: body,
+      if (hasManagedSignature(composed)) {
+        await deliverNativeReply(accessToken, replyToId, composed, true, callGraphAPI);
+      } else {
+        await callGraphAPI(
+          accessToken,
+          'POST',
+          `me/messages/${encodeURIComponent(replyToId)}/reply`,
+          {
+            message: {
+              body: {
+                contentType,
+                content: body,
+              },
             },
-          },
-        }
-      );
+          }
+        );
+      }
 
       return {
         content: [

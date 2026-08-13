@@ -3,7 +3,12 @@
  */
 const { callGraphAPI } = require('../utils/graph-api');
 const { ensureAuthenticated } = require('../auth');
-const { composeNewMessage } = require('./graph-message-flow');
+const {
+  composeNewMessage,
+  composeReply,
+  hasManagedSignature,
+  deliverNativeReply,
+} = require('./graph-message-flow');
 
 /**
  * Draft email handler
@@ -64,7 +69,25 @@ async function handleDraftEmail(args) {
             : 'text';
 
     if (replyToId) {
+      const composed = await composeReply(args);
       const accessToken = await ensureAuthenticated();
+      if (hasManagedSignature(composed)) {
+        const { replyDraft, updatedDraft } = await deliverNativeReply(
+          accessToken,
+          replyToId,
+          composed,
+          false,
+          callGraphAPI
+        );
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Reply draft created successfully!\n\nDraft ID: ${updatedDraft.id || replyDraft.id}\nSubject: ${updatedDraft.subject || replyDraft.subject || '(no subject)'}\nRecipients: inherited from original message`,
+            },
+          ],
+        };
+      }
       const replyDraft = await callGraphAPI(
         accessToken,
         'POST',

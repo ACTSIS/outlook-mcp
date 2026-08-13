@@ -77,7 +77,7 @@ Power Automate is optional and requires a second consent flow. Complete the Grap
 
 Nested mail-folder paths such as `Parent/Child/Archive` are resolved segment by segment by `create-folder` and `move-emails`. A literal `/` in a folder name is not supported because `/` is always the path separator.
 
-## Tool inventory (37)
+## Tool inventory (43)
 
 ### Authentication (4)
 
@@ -111,6 +111,22 @@ Nested mail-folder paths such as `Parent/Child/Archive` are resolved segment by 
 | `delete-email`        | Move a message to Deleted Items or permanently delete it                    |
 | `list-attachments`    | List attachment metadata for a message                                      |
 | `download-attachment` | Return attachment content, optionally decoded when text-like                |
+
+### Email signatures (6)
+
+| Tool                          | Purpose                                      |
+| ----------------------------- | -------------------------------------------- |
+| `create-email-signature`      | Store sanitized HTML and managed CID images  |
+| `list-email-signatures`       | List signatures and the shared default       |
+| `get-email-signature`         | Read one stored signature                    |
+| `update-email-signature`      | Replace a signature's HTML and images        |
+| `delete-email-signature`      | Delete a signature and clear it if default   |
+| `set-default-email-signature` | Set or clear the default used by email flows |
+
+`send-email` and `draft-email` apply the shared default to new messages and native replies.
+Use `signatureName` for a per-operation override or `includeSignature: false` to opt out. See
+[Managed email signatures](docs/email-signatures.md) for CID image, storage, limit, and recovery
+details.
 
 ### Mail folders (3)
 

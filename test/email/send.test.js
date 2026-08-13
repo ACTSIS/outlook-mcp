@@ -91,6 +91,100 @@ describe('handleSendEmail', () => {
     expect(callGraphAPI).not.toHaveBeenCalled();
   });
 
+  test('sends a signed native reply only after patching its quoted body and CID attachments', async () => {
+    const attachment = { contentId: 'logo', isInline: true, contentBytes: 'aA==' };
+    composeEmail.mockResolvedValue({
+      body: '<p>Reply</p><p>Signed</p>',
+      contentType: 'html',
+      attachments: [attachment],
+      hasSignature: true,
+    });
+    callGraphAPI
+      .mockResolvedValueOnce({
+        id: 'reply draft/id',
+        body: { contentType: 'html', content: '<blockquote>Original</blockquote>' },
+      })
+      .mockResolvedValue({});
+
+    const result = await handleSendEmail({ replyToId: 'original/id', body: 'Reply' });
+
+    expect(callGraphAPI.mock.calls).toEqual([
+      [accessToken, 'POST', 'me/messages/original%2Fid/createReply'],
+      [
+        accessToken,
+        'PATCH',
+        'me/messages/reply%20draft%2Fid',
+        {
+          body: {
+            contentType: 'html',
+            content: '<p>Reply</p><p>Signed</p><blockquote>Original</blockquote>',
+          },
+        },
+      ],
+      [accessToken, 'POST', 'me/messages/reply%20draft%2Fid/attachments', attachment],
+      [accessToken, 'POST', 'me/messages/reply%20draft%2Fid/send'],
+    ]);
+    expect(result.content[0].text).toContain('Reply sent successfully');
+  });
+
+  test('keeps a recoverable signed reply draft when an attachment fails', async () => {
+    composeEmail.mockResolvedValue({
+      body: '<p>Signed reply</p>',
+      contentType: 'html',
+      attachments: [{ contentId: 'first' }, { contentId: 'second' }],
+      hasSignature: true,
+    });
+    callGraphAPI
+      .mockResolvedValueOnce({ id: 'recoverable-draft', body: { content: '<p>Quoted</p>' } })
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error('Attachment rejected'));
+
+    const result = await handleSendEmail({ replyToId: 'original-id', body: 'Reply' });
+
+    expect(result.content[0].text).toContain('attachment 2');
+    expect(result.content[0].text).toContain('recoverable-draft');
+    expect(callGraphAPI.mock.calls.at(-1)[2]).toContain('/attachments');
+    expect(callGraphAPI.mock.calls.some((call) => call[2].endsWith('/send'))).toBe(false);
+  });
+
+  test.each([
+    {
+      stage: 'body update',
+      responses: [
+        { id: 'recoverable-draft', body: { content: '<p>Quoted</p>' } },
+        new Error('Patch rejected'),
+      ],
+      expectedCalls: 2,
+    },
+    {
+      stage: 'send',
+      responses: [
+        { id: 'recoverable-draft', body: { content: '<p>Quoted</p>' } },
+        {},
+        new Error('Send rejected'),
+      ],
+      expectedCalls: 3,
+    },
+  ])('reports the recoverable draft when signed reply $stage fails', async (scenario) => {
+    composeEmail.mockResolvedValue({
+      body: '<p>Signed reply</p>',
+      contentType: 'html',
+      attachments: [],
+      hasSignature: true,
+    });
+    scenario.responses.forEach((response) => {
+      if (response instanceof Error) callGraphAPI.mockRejectedValueOnce(response);
+      else callGraphAPI.mockResolvedValueOnce(response);
+    });
+
+    const result = await handleSendEmail({ replyToId: 'original-id', body: 'Reply' });
+
+    expect(result.content[0].text).toContain(scenario.stage);
+    expect(result.content[0].text).toContain('recoverable-draft');
+    expect(callGraphAPI.mock.calls).toHaveLength(scenario.expectedCalls);
+  });
+
   test.each([
     [{ subject: 'Subject', body: 'Body' }, 'Recipient (to) is required.'],
     [{ to: 'to@example.com', body: 'Body' }, 'Subject is required.'],

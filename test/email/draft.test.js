@@ -72,6 +72,63 @@ describe('handleDraftEmail', () => {
     expect(callGraphAPI).not.toHaveBeenCalled();
   });
 
+  test('creates a signed native reply draft with preserved quote and CID attachment', async () => {
+    const attachment = { contentId: 'logo', isInline: true, contentBytes: 'aA==' };
+    composeEmail.mockResolvedValue({
+      body: '<p>Reply</p><p>Signed</p>',
+      contentType: 'html',
+      attachments: [attachment],
+      hasSignature: true,
+    });
+    callGraphAPI
+      .mockResolvedValueOnce({
+        id: 'reply-draft',
+        subject: 'RE: Original',
+        body: { content: '<blockquote>Original</blockquote>' },
+      })
+      .mockResolvedValueOnce({ id: 'reply-draft', subject: 'RE: Original' })
+      .mockResolvedValueOnce({});
+
+    const result = await handleDraftEmail({ replyToId: 'original-id', body: 'Reply' });
+
+    expect(callGraphAPI.mock.calls).toEqual([
+      [accessToken, 'POST', 'me/messages/original-id/createReply'],
+      [
+        accessToken,
+        'PATCH',
+        'me/messages/reply-draft',
+        {
+          body: {
+            contentType: 'html',
+            content: '<p>Reply</p><p>Signed</p><blockquote>Original</blockquote>',
+          },
+        },
+      ],
+      [accessToken, 'POST', 'me/messages/reply-draft/attachments', attachment],
+    ]);
+    expect(result.content[0].text).toContain('Draft ID: reply-draft');
+    expect(callGraphAPI.mock.calls.some((call) => call[2].endsWith('/send'))).toBe(false);
+  });
+
+  test('reports the recoverable reply draft when CID attachment creation fails', async () => {
+    composeEmail.mockResolvedValue({
+      body: '<p>Signed reply</p>',
+      contentType: 'html',
+      attachments: [{ contentId: 'logo' }],
+      hasSignature: true,
+    });
+    callGraphAPI
+      .mockResolvedValueOnce({ id: 'recoverable-draft', body: { content: '<p>Quoted</p>' } })
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error('Attachment rejected'));
+
+    const result = await handleDraftEmail({ replyToId: 'original-id', body: 'Reply' });
+
+    expect(result.content[0].text).toContain('attachment 1');
+    expect(result.content[0].text).toContain('recoverable-draft');
+    expect(callGraphAPI.mock.calls).toHaveLength(3);
+  });
+
   test('forces plain text when isHtml is false even with an html tag', async () => {
     await handleDraftEmail({ body: '<html><p>Markup</p></html>', isHtml: false });
 

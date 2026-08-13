@@ -42,7 +42,7 @@ Chain strategy: stacked-to-main
 
 ## Phase 3: Work Unit 3 — Native Replies and Delivery Evidence
 
-- [ ] 3.1 **RED:** Extend email tests for reply/reply-draft `createReply→PATCH→attachments→send`, quoted-body preservation, staged failure with draft ID, and never-send-before-all-attachments.
-- [ ] 3.2 **GREEN/REFACTOR:** Complete reply orchestration in `email/graph-message-flow.js`; retain recoverable partial drafts and native threading.
-- [ ] 3.3 Document tools, limits, CID images, precedence, storage, recovery, and draft-only validation in `README.md` and `docs/email-signatures.md`.
-- [ ] 3.4 Record each unit’s exact focused-test result, Inspector draft-only result, rollback boundary, and changed-line count; then run `npm test`, coverage, lint, format check, and `git diff --check`.
+- [x] 3.1 **RED:** Extend email tests for reply/reply-draft `createReply→PATCH→attachments→send`, quoted-body preservation, staged failure with draft ID, and never-send-before-all-attachments.
+- [x] 3.2 **GREEN/REFACTOR:** Complete reply orchestration in `email/graph-message-flow.js`; retain recoverable partial drafts and native threading.
+- [x] 3.3 Document tools, limits, CID images, precedence, storage, recovery, and draft-only validation in `README.md` and `docs/email-signatures.md`.
+- [x] 3.4 Record each unit’s exact focused-test result, Inspector draft-only result, rollback boundary, and changed-line count; then run `npm test`, coverage, lint, format check, and `git diff --check`.
