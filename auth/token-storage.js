@@ -11,7 +11,7 @@ class TokenStorage {
       process.env.MS_AUTHORITY_HOST || 'https://login.microsoftonline.com'
     ).replace(/\/+$/, '');
 
-    // Support both MS_CLIENT_ID (auth server / .env) and OUTLOOK_CLIENT_ID (Claude Desktop config)
+    // Prefer the MS_* configuration while preserving the legacy OUTLOOK_* aliases.
     const clientId = process.env.MS_CLIENT_ID || process.env.OUTLOOK_CLIENT_ID;
     const clientSecret = process.env.MS_CLIENT_SECRET || process.env.OUTLOOK_CLIENT_SECRET;
 
@@ -76,10 +76,9 @@ class TokenStorage {
         mode: 0o600,
       });
       console.log('Tokens saved successfully.');
-      // return true; // No longer returning boolean, will throw on error.
     } catch (error) {
       console.error('Error saving token cache:', error);
-      throw error; // Propagate the error
+      throw error;
     }
   }
 
@@ -259,10 +258,7 @@ class TokenStorage {
                 resolve(this.tokens);
               } catch (saveError) {
                 console.error('Failed to save refreshed tokens:', saveError);
-                // Even if save fails, tokens are updated in memory.
-                // Depending on desired strictness, could reject here.
-                // For now, resolve with in-memory tokens but log critical error.
-                // Or, to be stricter and align with re-throwing:
+                // The in-memory token is updated, but the refresh is not durable.
                 reject(
                   new Error(`Access token refreshed but failed to save: ${saveError.message}`)
                 );
@@ -483,7 +479,7 @@ class TokenStorage {
     });
   }
 
-  // Utility to clear tokens, e.g., for logout or forcing re-auth
+  // Graph and Flow credentials share one cache, so clearing it removes both token families.
   async clearTokens() {
     this.tokens = null;
     try {
@@ -500,4 +496,3 @@ class TokenStorage {
 }
 
 module.exports = TokenStorage;
-// Adding a newline at the end of the file as requested by Gemini Code Assist

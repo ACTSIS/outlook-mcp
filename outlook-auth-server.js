@@ -226,7 +226,7 @@ function createRequestHandler(deps = {}) {
                       <p>You have successfully authenticated with Power Automate.</p>
                       <p>The Flow access token has been saved securely.</p>
                     </div>
-                    <p>You can now close this window and return to Claude.</p>
+                    <p>You can now close this window and return to your MCP client.</p>
                   </body>
                 </html>
               `);
@@ -248,7 +248,7 @@ function createRequestHandler(deps = {}) {
                     <p>You have successfully authenticated with Microsoft Graph API.</p>
                     <p>The access token has been saved securely.</p>
                   </div>
-                  <p>You can now close this window and return to Claude.</p>
+                  <p>You can now close this window and return to your MCP client.</p>
                 </body>
               </html>
             `);
@@ -342,7 +342,7 @@ function createRequestHandler(deps = {}) {
             <body>
               <h1>Configuration Error</h1>
               <div class="error-box">
-                <p>Microsoft Graph API credentials are not set. Please set the following environment variables:</p>
+                <p>Microsoft identity credentials are not set. Please set the following environment variables:</p>
                 <ul>
                   <li><code>MS_CLIENT_ID</code></li>
                   <li><code>MS_CLIENT_SECRET</code></li>
@@ -395,7 +395,7 @@ function createRequestHandler(deps = {}) {
             <body>
               <h1>Configuration Error</h1>
               <div class="error-box">
-                <p>Microsoft Graph API credentials are not set. Please set the following environment variables:</p>
+                <p>Microsoft identity credentials are not set. Please set the following environment variables:</p>
                 <ul>
                   <li><code>MS_CLIENT_ID</code></li>
                   <li><code>MS_CLIENT_SECRET</code></li>
@@ -433,7 +433,7 @@ function createRequestHandler(deps = {}) {
       res.end(`
         <html>
           <head>
-            <title>Outlook Authentication Server</title>
+            <title>M365 MCP Authentication Server</title>
             <style>
               body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
               h1 { color: #0078d4; }
@@ -442,10 +442,10 @@ function createRequestHandler(deps = {}) {
             </style>
           </head>
           <body>
-            <h1>Outlook Authentication Server</h1>
+            <h1>M365 MCP Authentication Server</h1>
             <div class="info-box">
               <p>This server is running to handle Microsoft Graph API authentication callbacks.</p>
-              <p>Don't navigate here directly. Instead, use the <code>authenticate</code> tool in Claude to start the authentication process.</p>
+              <p>Don't navigate here directly. Instead, use the <code>authenticate</code> tool in your MCP client to start the authentication process.</p>
               <p>Make sure you've set the <code>MS_CLIENT_ID</code> and <code>MS_CLIENT_SECRET</code> environment variables.</p>
             </div>
             <p>Server is running at http://localhost:3333</p>
@@ -463,7 +463,7 @@ function createRequestHandler(deps = {}) {
 // Only start the HTTP server when this file is run directly (not during tests)
 if (require.main === module) {
   // Log to console
-  console.log('Starting Outlook Authentication Server');
+  console.log('Starting M365 MCP Authentication Server');
 
   // Create HTTP server
   const server = http.createServer(createRequestHandler());
@@ -476,7 +476,7 @@ if (require.main === module) {
     console.log(`Token will be stored at: ${AUTH_CONFIG.tokenStorePath}`);
 
     if (!AUTH_CONFIG.clientId || !AUTH_CONFIG.clientSecret) {
-      console.log('\n⚠️  WARNING: Microsoft Graph API credentials are not set.');
+      console.log('\n⚠️  WARNING: Microsoft identity credentials are not set.');
       console.log('   Please set the MS_CLIENT_ID and MS_CLIENT_SECRET environment variables.');
     }
   });
