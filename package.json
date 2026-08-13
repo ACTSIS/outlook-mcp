@@ -36,7 +36,8 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
-    "dotenv": "^16.5.0"
+    "dotenv": "^16.5.0",
+    "sanitize-html": "2.17.7"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
@@ -57,5 +58,10 @@
   "lint-staged": {
     "*.js": "eslint --fix",
     "*.{js,json,md}": "prettier --write"
+  },
+  "overrides": {
+    "sanitize-html": {
+      "htmlparser2": "8.0.2"
+    }
   }
 }

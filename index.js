@@ -21,6 +21,7 @@ const { folderTools } = require('./folder');
 const { rulesTools } = require('./rules');
 const { onedriveTools } = require('./onedrive');
 const { powerAutomateTools } = require('./power-automate');
+const { signatureTools } = require('./signature');
 
 // Log startup information
 console.error(`STARTING ${config.SERVER_NAME.toUpperCase()} MCP SERVER`);
@@ -35,6 +36,7 @@ const TOOLS = [
   ...rulesTools,
   ...onedriveTools,
   ...powerAutomateTools,
+  ...signatureTools,
 ];
 
 // Create server with tools capabilities
