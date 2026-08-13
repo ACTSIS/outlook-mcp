@@ -1,5 +1,6 @@
 const { composeEmail } = require('../../signature/composer');
 const { emailTools } = require('../../email');
+const { hasManagedSignature } = require('../../email/graph-message-flow');
 
 const logo = {
   contentId: 'brand-logo',
@@ -29,7 +30,13 @@ test('resolves opt-out, named override, and default in precedence order', async 
   );
   const fallback = await composeEmail({ body: 'Body' }, store);
 
-  expect(optedOut).toEqual({ body: 'Plain', contentType: 'text', attachments: [] });
+  expect(optedOut).toEqual({
+    body: 'Plain',
+    contentType: 'text',
+    attachments: [],
+    hasSignature: false,
+  });
+  expect(named.hasSignature).toBe(true);
   expect(named.body).toContain('<p>Work<img src="cid:brand-logo" /></p>');
   expect(named.attachments).toEqual([
     {
@@ -43,6 +50,15 @@ test('resolves opt-out, named override, and default in precedence order', async 
   ]);
   expect(fallback.body).toContain('<p>Default</p>');
   expect(store.getDefault).toHaveBeenCalledTimes(1);
+});
+
+test('uses explicit composition metadata instead of caller-controlled marker text', () => {
+  expect(
+    hasManagedSignature({
+      body: 'Unsigned data-outlook-mcp-signature= collision',
+      hasSignature: false,
+    })
+  ).toBe(false);
 });
 
 test('escapes text, appends the signature once, and sanitizes stored HTML again', async () => {

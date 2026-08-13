@@ -14,10 +14,7 @@ async function composeReply(args) {
 }
 
 function hasManagedSignature(composed) {
-  return (
-    composed.hasSignature === true ||
-    (typeof composed.body === 'string' && composed.body.includes('data-outlook-mcp-signature='))
-  );
+  return composed.hasSignature === true;
 }
 
 async function deliverNativeReply(accessToken, replyToId, composed, send, callGraphAPI) {

@@ -10,11 +10,28 @@
 | Suggested split         | PR 1 storage/tools → PR 2 composition/new messages → PR 3 native replies/docs |
 | Delivery strategy       | approved chained PRs                                                          |
 | Chain strategy          | stacked-to-main                                                               |
+| Approved size exception | 1,000 authored changed lines per PR                                           |
 
 Decision needed before apply: No
 Chained PRs recommended: Yes
 Chain strategy: stacked-to-main
 400-line budget risk: High
+
+The maintainer rejected a fourth documentation-only PR and approved a scoped
+`size:exception` of 1,000 authored changed lines for each PR in this existing
+three-PR chain. Generated lockfiles remain part of candidate identity but are
+excluded from authored review-line totals.
+
+### Actual Review Budget
+
+| Slice                                            | Authored changed lines | Generated lockfile lines | 1,000-line result                      |
+| ------------------------------------------------ | ---------------------: | -----------------------: | -------------------------------------- |
+| PR 1 — storage/tools                             |                    448 |                      305 | Within exception (552 lines available) |
+| PR 2 — composition/new messages                  |                    299 |                        0 | Within exception (701 lines available) |
+| PR 3 — native replies/docs/specs and remediation |                    758 |                        0 | Within exception (242 lines available) |
+
+The PR 3 count includes both correction batches, verification-remediation tests,
+and this evidence, measured from the PR 2 tip (`349f313`) against the candidate.
 
 ### Suggested Work Units
 

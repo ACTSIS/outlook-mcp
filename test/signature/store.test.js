@@ -31,16 +31,35 @@ describe('SignatureStore', () => {
     await store.create(signature('work'));
     await expect(store.create(signature('work'))).rejects.toThrow(/exists/i);
     await expect(store.update('missing', signature('missing'))).rejects.toThrow(/not found/i);
+    await store.setDefault('work');
     await expect(store.setDefault('missing')).rejects.toThrow(/not found/i);
-    expect((await store.list()).map((item) => item.name)).toEqual(['work']);
+    expect(await store.list()).toEqual([{ name: 'work', isDefault: true }]);
+    expect((await store.getDefault()).name).toBe('work');
     fs.writeFileSync(filePath, '{broken');
     await expect(store.list()).rejects.toThrow(/corrupt/i);
   });
 
-  it('serializes overlapping mutations without losing updates', async () => {
-    const store = new SignatureStore({ filePath });
-    await Promise.all([store.create(signature('alpha')), store.create(signature('beta'))]);
-    expect((await store.list()).map((item) => item.name)).toEqual(['alpha', 'beta']);
+  it('serializes overlapping mutations across store instances without losing updates', async () => {
+    const first = new SignatureStore({ filePath });
+    const second = new SignatureStore({ filePath });
+    let releasePersist;
+    let enteredPersist;
+    const entered = new Promise((resolve) => (enteredPersist = resolve));
+    const release = new Promise((resolve) => (releasePersist = resolve));
+    const persist = first.persist.bind(first);
+    first.persist = async (state) => {
+      enteredPersist();
+      await release;
+      return persist(state);
+    };
+
+    const alpha = first.create(signature('alpha'));
+    await entered;
+    const beta = second.create(signature('beta'));
+    releasePersist();
+    await Promise.all([alpha, beta]);
+
+    expect((await first.list()).map((item) => item.name)).toEqual(['alpha', 'beta']);
   });
 
   it('preserves prior durable state when atomic rename fails', async () => {

@@ -20,20 +20,22 @@ function escapeText(value) {
 async function composeEmail(args, store = signatureStore) {
   const body = args.body ?? '';
   const contentType = contentTypeFor(body, args.isHtml);
-  if (args.includeSignature === false) return { body, contentType, attachments: [] };
+  if (args.includeSignature === false)
+    return { body, contentType, attachments: [], hasSignature: false };
 
   const signature = args.signatureName
     ? await store.get(args.signatureName)
     : await store.getDefault();
   if (args.signatureName && !signature)
     throw new Error(`Signature not found: ${args.signatureName}`);
-  if (!signature) return { body, contentType, attachments: [] };
+  if (!signature) return { body, contentType, attachments: [], hasSignature: false };
 
   const safe = validateSignature(signature);
   const messageBody = contentType === 'html' ? body : escapeText(body);
   return {
     body: `${messageBody}<div data-outlook-mcp-signature="${safe.name}">${safe.html}</div>`,
     contentType: 'html',
+    hasSignature: true,
     attachments: safe.images.map((image) => ({
       '@odata.type': '#microsoft.graph.fileAttachment',
       name: image.fileName,

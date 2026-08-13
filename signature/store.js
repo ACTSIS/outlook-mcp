@@ -5,10 +5,13 @@ const crypto = require('crypto');
 const { validateSignature } = require('./sanitizer');
 const emptyState = () => ({ version: 1, defaultName: null, signatures: {} });
 const clone = (value) => JSON.parse(JSON.stringify(value));
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 class SignatureStore {
   constructor(options = {}) {
     this.filePath = options.filePath || path.join(os.homedir(), '.outlook-mcp-signatures.json');
     this.fs = options.fs || fs.promises;
+    this.lockPath = `${this.filePath}.lock`;
+    this.lockTimeout = options.lockTimeout || 5000;
     this.queue = Promise.resolve();
     this.state = emptyState();
   }
@@ -37,14 +40,33 @@ class SignatureStore {
   }
   mutate(operation) {
     const run = async () => {
-      const next = operation(clone(await this.load()));
-      await this.persist(next);
-      this.state = next;
-      return clone(next);
+      await this.acquireLock();
+      try {
+        const next = operation(clone(await this.load()));
+        await this.persist(next);
+        this.state = next;
+        return clone(next);
+      } finally {
+        await this.fs.rm(this.lockPath, { recursive: true, force: true });
+      }
     };
     const result = this.queue.then(run, run);
     this.queue = result.catch(() => {});
     return result;
+  }
+  async acquireLock() {
+    const deadline = Date.now() + this.lockTimeout;
+    while (true) {
+      try {
+        await this.fs.mkdir(this.lockPath, { mode: 0o700 });
+        await this.fs.writeFile(path.join(this.lockPath, 'owner'), String(process.pid));
+        return;
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+        if (Date.now() >= deadline) throw new Error('Signature store lock timed out');
+        await delay(10);
+      }
+    }
   }
   async persist(state) {
     const temp = `${this.filePath}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;

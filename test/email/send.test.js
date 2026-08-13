@@ -50,12 +50,15 @@ describe('handleSendEmail', () => {
     expect(result.content[0].text).toContain('Email sent successfully!');
   });
 
-  test('adds a composed signature and inline CID attachments to a new email', async () => {
-    const attachment = { contentId: 'logo', isInline: true, contentBytes: 'aA==' };
+  test('adds both managed CID images as inline attachments to a new email', async () => {
+    const attachments = [
+      { contentId: 'logo', isInline: true, contentBytes: 'aA==' },
+      { contentId: 'badge', isInline: true, contentBytes: 'Yg==' },
+    ];
     composeEmail.mockResolvedValue({
-      body: '<p>Body</p><p>Signed</p>',
+      body: '<p>Body</p><img src="cid:logo"><img src="cid:badge">',
       contentType: 'html',
-      attachments: [attachment],
+      attachments,
     });
 
     await handleSendEmail({
@@ -70,8 +73,11 @@ describe('handleSendEmail', () => {
     );
     expect(callGraphAPI.mock.calls[0][3].message).toEqual(
       expect.objectContaining({
-        body: { contentType: 'html', content: '<p>Body</p><p>Signed</p>' },
-        attachments: [attachment],
+        body: {
+          contentType: 'html',
+          content: '<p>Body</p><img src="cid:logo"><img src="cid:badge">',
+        },
+        attachments,
       })
     );
   });
