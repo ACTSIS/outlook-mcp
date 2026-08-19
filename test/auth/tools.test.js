@@ -1,4 +1,9 @@
-const { handleCheckAuthStatus, handleAuthenticateFlow } = require('../../auth/tools');
+const {
+  handleAuthenticate,
+  handleAuthenticateFlow,
+  handleCheckAuthStatus,
+  handleStopAuthServer,
+} = require('../../auth/tools');
 const { tokenStorage } = require('../../auth/index');
 const tokenManager = require('../../auth/token-manager');
 const config = require('../../config');
@@ -11,10 +16,64 @@ jest.mock('../../auth/index', () => ({
 jest.mock('../../auth/token-manager', () => ({
   createTestTokens: jest.fn(),
 }));
+jest.mock('../../auth/auth-server-manager', () => ({
+  startAuthServer: jest.fn(),
+  stopAuthServer: jest.fn(),
+}));
+
+const authServerManager = require('../../auth/auth-server-manager');
 
 describe('auth/tools', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    authServerManager.startAuthServer.mockResolvedValue({
+      started: true,
+      running: true,
+      message: 'Authentication server started.',
+    });
+  });
+
+  describe('handleAuthenticate', () => {
+    const originalUseTestMode = config.USE_TEST_MODE;
+    const originalClientId = config.AUTH_CONFIG.clientId;
+
+    beforeEach(() => {
+      config.USE_TEST_MODE = false;
+      config.AUTH_CONFIG.clientId = 'test-client-id';
+    });
+
+    afterEach(() => {
+      config.USE_TEST_MODE = originalUseTestMode;
+      config.AUTH_CONFIG.clientId = originalClientId;
+    });
+
+    it('starts the callback server and returns a complete auth URL', async () => {
+      const result = await handleAuthenticate({});
+
+      expect(authServerManager.startAuthServer).toHaveBeenCalledTimes(1);
+      expect(result.content[0].text).toContain(
+        'http://localhost:3333/auth?client_id=test-client-id'
+      );
+    });
+
+    it('reports callback-server startup failures without returning a dead URL', async () => {
+      authServerManager.startAuthServer.mockResolvedValue({
+        started: false,
+        running: false,
+        message: 'Authentication server did not become ready.',
+      });
+
+      const result = await handleAuthenticate({});
+
+      expect(result).toEqual({
+        content: [
+          {
+            type: 'text',
+            text: 'Authentication server could not be started. Authentication server did not become ready.',
+          },
+        ],
+      });
+    });
   });
 
   describe('handleCheckAuthStatus', () => {
@@ -65,6 +124,7 @@ describe('auth/tools', () => {
       });
       expect(result.content[0].text).toContain('Power Automate');
       expect(tokenManager.createTestTokens).not.toHaveBeenCalled();
+      expect(authServerManager.startAuthServer).toHaveBeenCalledTimes(1);
     });
 
     it('creates test tokens in test mode', async () => {
@@ -78,6 +138,7 @@ describe('auth/tools', () => {
       const result = await handleAuthenticateFlow({});
 
       expect(tokenManager.createTestTokens).toHaveBeenCalledTimes(1);
+      expect(authServerManager.startAuthServer).not.toHaveBeenCalled();
       expect(result).toEqual({
         content: [
           {
@@ -85,6 +146,22 @@ describe('auth/tools', () => {
             text: expect.stringContaining('test mode'),
           },
         ],
+      });
+    });
+  });
+
+  describe('handleStopAuthServer', () => {
+    it('delegates stopping the callback server to the manager', async () => {
+      authServerManager.stopAuthServer.mockResolvedValue({
+        stopped: true,
+        message: 'Authentication server stopped (pid 1234).',
+      });
+
+      const result = await handleStopAuthServer();
+
+      expect(authServerManager.stopAuthServer).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({
+        content: [{ type: 'text', text: 'Authentication server stopped (pid 1234).' }],
       });
     });
   });

@@ -5,12 +5,11 @@ Power Automate support uses the Flow API, not Microsoft Graph. It has a separate
 ## Complete the workflow
 
 1. Complete normal Graph authentication first.
-2. Run the callback server with `npm run auth-server`.
-3. Call `authenticate-flow` and open the returned `http://localhost:3333/auth/flow` URL.
-4. Consent to `https://service.flow.microsoft.com/.default`.
-5. Call `flow-list-environments` and copy an environment ID such as `Default-12345`.
-6. Call `flow-list` with that `environmentId` and copy the flow ID from its `ID` field.
-7. Use the exact environment and flow IDs with `flow-run`, `flow-list-runs`, or `flow-toggle`.
+2. Call `authenticate-flow` and open the returned `http://localhost:3333/auth/flow` URL. The MCP process starts the callback server automatically.
+3. Consent to `https://service.flow.microsoft.com/.default`.
+4. Call `flow-list-environments` and copy an environment ID such as `Default-12345`.
+5. Call `flow-list` with that `environmentId` and copy the flow ID from its `ID` field.
+6. Use the exact environment and flow IDs with `flow-run`, `flow-list-runs`, or `flow-toggle`.
 
 Display names are for people; API operations require IDs. Do not substitute an environment display name or flow display name for its `name`/ID value.
 

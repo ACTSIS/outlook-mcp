@@ -6,8 +6,9 @@
  * Microsoft 365 services (Outlook, OneDrive, Power Automate)
  * through the Microsoft Graph API and Flow API.
  */
-// Load environment variables from .env file
-require('dotenv').config();
+// Load environment variables from the repository's .env file. MCP clients may
+// launch this process with a different working directory.
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');

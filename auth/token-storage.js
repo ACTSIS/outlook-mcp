@@ -11,9 +11,10 @@ class TokenStorage {
       process.env.MS_AUTHORITY_HOST || 'https://login.microsoftonline.com'
     ).replace(/\/+$/, '');
 
-    // Prefer the MS_* configuration while preserving the legacy OUTLOOK_* aliases.
-    const clientId = process.env.MS_CLIENT_ID || process.env.OUTLOOK_CLIENT_ID;
-    const clientSecret = process.env.MS_CLIENT_SECRET || process.env.OUTLOOK_CLIENT_SECRET;
+    // Match config.js precedence so token exchange uses the same credentials
+    // that the MCP tool and callback server advertise.
+    const clientId = process.env.OUTLOOK_CLIENT_ID || process.env.MS_CLIENT_ID;
+    const clientSecret = process.env.OUTLOOK_CLIENT_SECRET || process.env.MS_CLIENT_SECRET;
 
     this.config = {
       tokenStorePath: path.join(

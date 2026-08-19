@@ -3,7 +3,7 @@
  */
 const config = require('../config');
 const tokenManager = require('./token-manager');
-const { tokenStorage } = require('./index');
+const authServerManager = require('./auth-server-manager');
 
 /**
  * About tool handler
@@ -41,6 +41,19 @@ async function handleAuthenticate(_args) {
     };
   }
 
+  const serverStatus = await authServerManager.startAuthServer();
+
+  if (!serverStatus.running) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Authentication server could not be started. ${serverStatus.message}`,
+        },
+      ],
+    };
+  }
+
   // For real authentication, generate an auth URL and instruct the user to visit it
   const authUrl = `${config.AUTH_CONFIG.authServerUrl}/auth?client_id=${config.AUTH_CONFIG.clientId}`;
 
@@ -48,9 +61,21 @@ async function handleAuthenticate(_args) {
     content: [
       {
         type: 'text',
-        text: `Authentication required. Please visit the following URL to authenticate with Microsoft: ${authUrl}\n\nAfter authentication, you will be redirected back to this application.`,
+        text: `${serverStatus.message}\n\nAuthentication required. Please visit the following URL to authenticate with Microsoft: ${authUrl}\n\nAfter authentication, tell me when you are done and I can stop the authentication server.`,
       },
     ],
+  };
+}
+
+/**
+ * Stop the callback server when the authentication flow is complete.
+ * @returns {Promise<object>} - MCP response
+ */
+async function handleStopAuthServer() {
+  const stopStatus = await authServerManager.stopAuthServer();
+
+  return {
+    content: [{ type: 'text', text: stopStatus.message }],
   };
 }
 
@@ -74,6 +99,19 @@ async function handleAuthenticateFlow(_args) {
     };
   }
 
+  const serverStatus = await authServerManager.startAuthServer();
+
+  if (!serverStatus.running) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Authentication server could not be started. ${serverStatus.message}`,
+        },
+      ],
+    };
+  }
+
   // For real authentication, generate an auth URL and instruct the user to visit it
   const authUrl = `${config.AUTH_CONFIG.authServerUrl}/auth/flow`;
 
@@ -81,7 +119,7 @@ async function handleAuthenticateFlow(_args) {
     content: [
       {
         type: 'text',
-        text: `Flow authentication required. Please visit the following URL to authenticate with Power Automate: ${authUrl}\n\nAfter authentication, you will be redirected back to this application.`,
+        text: `${serverStatus.message}\n\nFlow authentication required. Please visit the following URL to authenticate with Power Automate: ${authUrl}\n\nAfter authentication, tell me when you are done and I can stop the authentication server.`,
       },
     ],
   };
@@ -94,6 +132,9 @@ async function handleAuthenticateFlow(_args) {
 async function handleCheckAuthStatus() {
   console.error('[CHECK-AUTH-STATUS] Starting authentication status check');
 
+  // Lazy loading avoids the auth/index.js -> auth/tools.js circular import
+  // while still using the singleton TokenStorage instance at call time.
+  const { tokenStorage } = require('./index');
   const accessToken = await tokenStorage.getValidAccessToken();
 
   console.error(`[CHECK-AUTH-STATUS] Valid access token: ${accessToken ? 'YES' : 'NO'}`);
@@ -156,6 +197,16 @@ const authTools = [
     },
     handler: handleAuthenticateFlow,
   },
+  {
+    name: 'stop-auth-server',
+    description: 'Stop the temporary Outlook authentication callback server started by authenticate',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+    handler: handleStopAuthServer,
+  },
 ];
 
 module.exports = {
@@ -164,4 +215,5 @@ module.exports = {
   handleAuthenticate,
   handleAuthenticateFlow,
   handleCheckAuthStatus,
+  handleStopAuthServer,
 };

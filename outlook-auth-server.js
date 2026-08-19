@@ -41,8 +41,10 @@ const config = require('./config');
 const { tokenStorage } = require('./auth/index');
 
 const AUTH_CONFIG = {
-  clientId: process.env.MS_CLIENT_ID || '', // Set your client ID as an environment variable
-  clientSecret: process.env.MS_CLIENT_SECRET || '', // Set your client secret as an environment variable
+  // Resolve credentials through the shared config so the MCP process and its
+  // callback child use the same MS_* / OUTLOOK_* fallback behavior.
+  clientId: config.AUTH_CONFIG.clientId,
+  clientSecret: config.AUTH_CONFIG.clientSecret,
   tenantId: process.env.MS_TENANT_ID || 'common',
   authorityHost: (process.env.MS_AUTHORITY_HOST || 'https://login.microsoftonline.com').replace(
     /\/+$/,
@@ -344,8 +346,8 @@ function createRequestHandler(deps = {}) {
               <div class="error-box">
                 <p>Microsoft identity credentials are not set. Please set the following environment variables:</p>
                 <ul>
-                  <li><code>MS_CLIENT_ID</code></li>
-                  <li><code>MS_CLIENT_SECRET</code></li>
+                  <li><code>MS_CLIENT_ID</code> or <code>OUTLOOK_CLIENT_ID</code></li>
+                  <li><code>MS_CLIENT_SECRET</code> or <code>OUTLOOK_CLIENT_SECRET</code></li>
                 </ul>
               </div>
             </body>
@@ -397,8 +399,8 @@ function createRequestHandler(deps = {}) {
               <div class="error-box">
                 <p>Microsoft identity credentials are not set. Please set the following environment variables:</p>
                 <ul>
-                  <li><code>MS_CLIENT_ID</code></li>
-                  <li><code>MS_CLIENT_SECRET</code></li>
+                  <li><code>MS_CLIENT_ID</code> or <code>OUTLOOK_CLIENT_ID</code></li>
+                  <li><code>MS_CLIENT_SECRET</code> or <code>OUTLOOK_CLIENT_SECRET</code></li>
                 </ul>
               </div>
             </body>
@@ -446,7 +448,7 @@ function createRequestHandler(deps = {}) {
             <div class="info-box">
               <p>This server is running to handle Microsoft Graph API authentication callbacks.</p>
               <p>Don't navigate here directly. Instead, use the <code>authenticate</code> tool in your MCP client to start the authentication process.</p>
-              <p>Make sure you've set the <code>MS_CLIENT_ID</code> and <code>MS_CLIENT_SECRET</code> environment variables.</p>
+              <p>Make sure you've set <code>MS_CLIENT_ID</code>/<code>MS_CLIENT_SECRET</code> or the <code>OUTLOOK_CLIENT_ID</code>/<code>OUTLOOK_CLIENT_SECRET</code> environment variables.</p>
             </div>
             <p>Server is running at http://localhost:3333</p>
           </body>
@@ -477,7 +479,7 @@ if (require.main === module) {
 
     if (!AUTH_CONFIG.clientId || !AUTH_CONFIG.clientSecret) {
       console.log('\n⚠️  WARNING: Microsoft identity credentials are not set.');
-      console.log('   Please set the MS_CLIENT_ID and MS_CLIENT_SECRET environment variables.');
+      console.log('   Please set MS_CLIENT_ID/MS_CLIENT_SECRET or OUTLOOK_CLIENT_ID/OUTLOOK_CLIENT_SECRET.');
     }
   });
 

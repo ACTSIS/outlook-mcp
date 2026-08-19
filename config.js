@@ -17,8 +17,12 @@ module.exports = {
 
   // Authentication configuration
   AUTH_CONFIG: {
-    clientId: process.env.OUTLOOK_CLIENT_ID || '',
-    clientSecret: process.env.OUTLOOK_CLIENT_SECRET || '',
+    // OUTLOOK_* is used by MCP client configuration; MS_* is used by .env and
+    // the standalone callback server. Accept both so the two entry points
+    // resolve the same credentials.
+    clientId: process.env.OUTLOOK_CLIENT_ID || process.env.MS_CLIENT_ID || '',
+    clientSecret:
+      process.env.OUTLOOK_CLIENT_SECRET || process.env.MS_CLIENT_SECRET || '',
     redirectUri: 'http://localhost:3333/auth/callback',
     scopes: [
       'offline_access',

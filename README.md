@@ -55,13 +55,7 @@ You need Node.js 22.22.1 or later and a Microsoft Entra app registration.
 
    See [`claude-config-sample.json`](./claude-config-sample.json) for a copyable file. The server uses stdio, so restart the MCP client after changing its configuration.
 
-5. In a separate terminal, start the browser callback server:
-
-   ```bash
-   npm run auth-server
-   ```
-
-6. Call `authenticate`, open the returned URL, and complete sign-in. Then call `check-auth-status` and use a Graph-backed tool such as `list-emails`.
+5. Call `authenticate`, open the returned URL, and complete sign-in. The MCP tool starts the browser callback server automatically. Then call `check-auth-status` and use a Graph-backed tool such as `list-emails`.
 
 Power Automate is optional and requires a second consent flow. Complete the Graph flow first, then call `authenticate-flow`. See [Power Automate](./docs/power-automate.md).
 
@@ -84,9 +78,10 @@ Nested mail-folder paths such as `Parent/Child/Archive` are resolved segment by 
 | Tool                | Purpose                                                         |
 | ------------------- | --------------------------------------------------------------- |
 | `about`             | Report server identity and supported service areas              |
-| `authenticate`      | Return the Microsoft Graph browser-authentication URL           |
+| `authenticate`      | Start the callback server and return the Microsoft Graph browser-authentication URL |
 | `check-auth-status` | Check and, when possible, refresh **Graph authentication only** |
-| `authenticate-flow` | Return the separate Power Automate authentication URL           |
+| `authenticate-flow` | Start the callback server and return the separate Power Automate authentication URL |
+| `stop-auth-server`  | Stop the callback server started by an authentication tool      |
 
 ### Calendar (5)
 
@@ -185,10 +180,10 @@ For the token lifecycle, failure behavior, and current limitations, read [Authen
 
 | Variable                | Consumer                                | Default / precedence                                     | Notes                                                                                             |
 | ----------------------- | --------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `MS_CLIENT_ID`          | Auth server and `TokenStorage`          | Preferred over `OUTLOOK_CLIENT_ID` in `TokenStorage`     | Required by the standalone auth server                                                            |
-| `MS_CLIENT_SECRET`      | Auth server and `TokenStorage`          | Preferred over `OUTLOOK_CLIENT_SECRET` in `TokenStorage` | Use the secret **value**, not its ID                                                              |
-| `OUTLOOK_CLIENT_ID`     | MCP runtime / `TokenStorage`            | Fallback after `MS_CLIENT_ID`                            | Convenient for MCP client configuration; not read by initial acquisition                          |
-| `OUTLOOK_CLIENT_SECRET` | MCP runtime / `TokenStorage`            | Fallback after `MS_CLIENT_SECRET`                        | Not read by initial acquisition                                                                   |
+| `MS_CLIENT_ID`          | MCP runtime, auth server, and `TokenStorage`          | Fallback after `OUTLOOK_CLIENT_ID`     | Standard `.env` name                                                                              |
+| `MS_CLIENT_SECRET`      | MCP runtime, auth server, and `TokenStorage`          | Fallback after `OUTLOOK_CLIENT_SECRET` | Use the secret **value**, not its ID                                                              |
+| `OUTLOOK_CLIENT_ID`     | MCP runtime, auth server, and `TokenStorage`            | Preferred over `MS_CLIENT_ID`                            | Convenient for MCP client configuration                                                           |
+| `OUTLOOK_CLIENT_SECRET` | MCP runtime, auth server, and `TokenStorage`            | Preferred over `MS_CLIENT_SECRET`                        | Convenient for MCP client configuration                                                           |
 | `MS_TENANT_ID`          | Both                                    | `common`                                                 | Use the tenant GUID for single-tenant applications                                                |
 | `MS_AUTHORITY_HOST`     | Both                                    | `https://login.microsoftonline.com`                      | Trailing slashes are removed                                                                      |
 | `MS_SCOPES`             | `TokenStorage` refresh/exchange methods | Built-in ten-scope Graph list                            | Space-separated; include `offline_access`; standalone initial Graph acquisition does not honor it |
@@ -239,12 +234,12 @@ OpenCode uses a command array instead:
 
 | Symptom                                                                 | Recovery                                                                                                                      |
 | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `Authentication required` or `check-auth-status` says not authenticated | Start `npm run auth-server`, call `authenticate`, and complete Graph consent                                                  |
+| `Authentication required` or `check-auth-status` says not authenticated | Call `authenticate`, open its URL, and complete Graph consent; the callback server starts automatically                         |
 | Graph returns `UNAUTHORIZED` (HTTP 401)                                 | The API rejected the submitted token; complete Graph authentication again because a 401 does not force local invalidation     |
 | Graph returns HTTP 403 in an API error                                  | Authentication may be valid but the account/app lacks the required delegated permission; verify Entra permissions and consent |
 | `AADSTS7000215` / invalid client secret                                 | Configure the client secret **value**, not the secret ID                                                                      |
 | OAuth state is invalid or expired                                       | Start again from `authenticate`; pending state expires after ten minutes and is single-use                                    |
-| Port 3333 is already in use                                             | Stop the existing process, or run `npx kill-port 3333`, then restart the auth server                                          |
+| Port 3333 is already in use                                             | Stop the existing process, or run `npx kill-port 3333`, then call `authenticate` again                                       |
 
 ### Power Automate
 

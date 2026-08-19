@@ -5,11 +5,11 @@ This guide describes the behavior implemented by the active executables: `index.
 ## Authenticate successfully
 
 1. Configure one Microsoft Entra app with the Web redirect URI `http://localhost:3333/auth/callback`.
-2. Put `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, and `MS_TENANT_ID` in `.env`.
-3. Run `npm run auth-server`.
-4. Call the `authenticate` MCP tool and open its URL.
-5. After consent, call `check-auth-status` to validate the Graph token.
-6. If Power Automate is required, call `authenticate-flow` and complete its separate consent flow.
+2. Put `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, and `MS_TENANT_ID` in `.env`, or provide the `OUTLOOK_*` equivalents through the MCP client environment.
+3. Call the `authenticate` MCP tool and open its URL. The MCP process starts the callback server automatically.
+4. After consent, call `check-auth-status` to validate the Graph token.
+5. If Power Automate is required, call `authenticate-flow` and complete its separate consent flow.
+6. When authentication is complete, call `stop-auth-server` to stop a server started by this MCP process.
 
 `check-auth-status` is Graph-only. Validate Flow authentication with a Flow operation such as `flow-list-environments`.
 
@@ -91,9 +91,9 @@ This table documents current behavior, including asymmetry rather than an ideali
 
 ## Configuration and precedence
 
-The runtime `TokenStorage` resolves credentials as `MS_CLIENT_ID` before `OUTLOOK_CLIENT_ID`, and `MS_CLIENT_SECRET` before `OUTLOOK_CLIENT_SECRET`. It also honors `MS_TENANT_ID`, `MS_AUTHORITY_HOST`, `MS_SCOPES`, `MS_REDIRECT_URI`, and `MS_TOKEN_ENDPOINT`.
+The runtime, callback server, and `TokenStorage` resolve `OUTLOOK_CLIENT_ID` before `MS_CLIENT_ID`, and `OUTLOOK_CLIENT_SECRET` before `MS_CLIENT_SECRET`. They also honor `MS_TENANT_ID` and `MS_AUTHORITY_HOST`; `TokenStorage` additionally honors `MS_SCOPES`, `MS_REDIRECT_URI`, and `MS_TOKEN_ENDPOINT` for refresh/exchange operations.
 
-The active initial-acquisition server requires `MS_CLIENT_ID` and `MS_CLIENT_SECRET`, honors `MS_TENANT_ID` and `MS_AUTHORITY_HOST`, but obtains redirect URI and Graph scopes from `config.js` and constructs its own token endpoint. Therefore the three `TokenStorage` overrides are not a consistent end-to-end customization mechanism; see limitation 5 below.
+The active initial-acquisition server obtains redirect URI and Graph scopes from `config.js` and constructs its own token endpoint. Therefore the three `TokenStorage` overrides are not a consistent end-to-end customization mechanism; see limitation 5 below.
 
 ## Known limitations
 
