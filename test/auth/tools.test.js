@@ -51,12 +51,14 @@ describe('auth/tools', () => {
       const result = await handleAuthenticate({});
 
       expect(authServerManager.startAuthServer).toHaveBeenCalledTimes(1);
-      expect(result.content[0].text).toContain(
-        'http://localhost:3333/auth?client_id=test-client-id'
-      );
+      expect(result.content[0]).toEqual({
+        type: 'text',
+        text: 'http://localhost:3333/auth?client_id=test-client-id',
+      });
+      expect(result.content[1].text).toContain('Copy and open the URL shown above');
     });
 
-    it('reports callback-server startup failures without returning a dead URL', async () => {
+    it('returns the auth URL even when callback-server readiness cannot be confirmed', async () => {
       authServerManager.startAuthServer.mockResolvedValue({
         started: false,
         running: false,
@@ -65,11 +67,55 @@ describe('auth/tools', () => {
 
       const result = await handleAuthenticate({});
 
+      expect(result.content[0].text).toBe('http://localhost:3333/auth?client_id=test-client-id');
+      expect(result.content[1].text).toContain(
+        'The authentication callback server could not be confirmed'
+      );
+      expect(result.content[1].text).toContain('Copy and open the URL shown above');
+    });
+  });
+
+  describe('handleAuthenticateFlow', () => {
+    const originalUseTestMode = config.USE_TEST_MODE;
+
+    beforeEach(() => {
+      config.USE_TEST_MODE = false;
+    });
+
+    afterEach(() => {
+      config.USE_TEST_MODE = originalUseTestMode;
+    });
+
+    it('returns URL containing /auth/flow for production mode', async () => {
+      const result = await handleAuthenticateFlow({});
+
+      expect(result.content[0]).toEqual({
+        type: 'text',
+        text: 'http://localhost:3333/auth/flow',
+      });
+      expect(result.content[1].text).toContain('Power Automate');
+      expect(result.content[1].text).toContain('Copy and open the URL shown above');
+      expect(tokenManager.createTestTokens).not.toHaveBeenCalled();
+      expect(authServerManager.startAuthServer).toHaveBeenCalledTimes(1);
+    });
+
+    it('creates test tokens in test mode', async () => {
+      config.USE_TEST_MODE = true;
+      tokenManager.createTestTokens.mockReturnValue({
+        access_token: 'test-token',
+        refresh_token: 'test-refresh',
+        expires_at: Date.now() + 3600 * 1000,
+      });
+
+      const result = await handleAuthenticateFlow({});
+
+      expect(tokenManager.createTestTokens).toHaveBeenCalledTimes(1);
+      expect(authServerManager.startAuthServer).not.toHaveBeenCalled();
       expect(result).toEqual({
         content: [
           {
             type: 'text',
-            text: 'Authentication server could not be started. Authentication server did not become ready.',
+            text: expect.stringContaining('test mode'),
           },
         ],
       });
@@ -96,56 +142,6 @@ describe('auth/tools', () => {
       expect(tokenStorage.getValidAccessToken).toHaveBeenCalledTimes(1);
       expect(result).toEqual({
         content: [{ type: 'text', text: 'Not authenticated' }],
-      });
-    });
-  });
-
-  describe('handleAuthenticateFlow', () => {
-    const originalUseTestMode = config.USE_TEST_MODE;
-
-    beforeEach(() => {
-      config.USE_TEST_MODE = false;
-    });
-
-    afterEach(() => {
-      config.USE_TEST_MODE = originalUseTestMode;
-    });
-
-    it('returns URL containing /auth/flow for production mode', async () => {
-      const result = await handleAuthenticateFlow({});
-
-      expect(result).toEqual({
-        content: [
-          {
-            type: 'text',
-            text: expect.stringContaining('http://localhost:3333/auth/flow'),
-          },
-        ],
-      });
-      expect(result.content[0].text).toContain('Power Automate');
-      expect(tokenManager.createTestTokens).not.toHaveBeenCalled();
-      expect(authServerManager.startAuthServer).toHaveBeenCalledTimes(1);
-    });
-
-    it('creates test tokens in test mode', async () => {
-      config.USE_TEST_MODE = true;
-      tokenManager.createTestTokens.mockReturnValue({
-        access_token: 'test-token',
-        refresh_token: 'test-refresh',
-        expires_at: Date.now() + 3600 * 1000,
-      });
-
-      const result = await handleAuthenticateFlow({});
-
-      expect(tokenManager.createTestTokens).toHaveBeenCalledTimes(1);
-      expect(authServerManager.startAuthServer).not.toHaveBeenCalled();
-      expect(result).toEqual({
-        content: [
-          {
-            type: 'text',
-            text: expect.stringContaining('test mode'),
-          },
-        ],
       });
     });
   });

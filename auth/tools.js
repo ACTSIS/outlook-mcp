@@ -5,6 +5,27 @@ const config = require('../config');
 const tokenManager = require('./token-manager');
 const authServerManager = require('./auth-server-manager');
 
+function buildAuthenticationResponse(authUrl, provider, serverStatus) {
+  const serverMessage = serverStatus.running
+    ? 'The authentication callback server is ready.'
+    : `The authentication callback server could not be confirmed: ${serverStatus.message}`;
+
+  return {
+    content: [
+      { type: 'text', text: authUrl },
+      {
+        type: 'text',
+        text: [
+          'The browser was not opened automatically.',
+          'Copy and open the URL shown above in your browser.',
+          serverMessage,
+          `Complete ${provider} sign-in, then tell me when you are done.`,
+        ].join('\n'),
+      },
+    ],
+  };
+}
+
 /**
  * About tool handler
  * @returns {object} - MCP response
@@ -42,29 +63,9 @@ async function handleAuthenticate(_args) {
   }
 
   const serverStatus = await authServerManager.startAuthServer();
-
-  if (!serverStatus.running) {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Authentication server could not be started. ${serverStatus.message}`,
-        },
-      ],
-    };
-  }
-
-  // For real authentication, generate an auth URL and instruct the user to visit it
   const authUrl = `${config.AUTH_CONFIG.authServerUrl}/auth?client_id=${config.AUTH_CONFIG.clientId}`;
 
-  return {
-    content: [
-      {
-        type: 'text',
-        text: `${serverStatus.message}\n\nAuthentication required. Please visit the following URL to authenticate with Microsoft: ${authUrl}\n\nAfter authentication, tell me when you are done and I can stop the authentication server.`,
-      },
-    ],
-  };
+  return buildAuthenticationResponse(authUrl, 'Microsoft', serverStatus);
 }
 
 /**
@@ -100,29 +101,9 @@ async function handleAuthenticateFlow(_args) {
   }
 
   const serverStatus = await authServerManager.startAuthServer();
-
-  if (!serverStatus.running) {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Authentication server could not be started. ${serverStatus.message}`,
-        },
-      ],
-    };
-  }
-
-  // For real authentication, generate an auth URL and instruct the user to visit it
   const authUrl = `${config.AUTH_CONFIG.authServerUrl}/auth/flow`;
 
-  return {
-    content: [
-      {
-        type: 'text',
-        text: `${serverStatus.message}\n\nFlow authentication required. Please visit the following URL to authenticate with Power Automate: ${authUrl}\n\nAfter authentication, tell me when you are done and I can stop the authentication server.`,
-      },
-    ],
-  };
+  return buildAuthenticationResponse(authUrl, 'Power Automate', serverStatus);
 }
 
 /**

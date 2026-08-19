@@ -6,7 +6,7 @@ This guide describes the behavior implemented by the active executables: `index.
 
 1. Configure one Microsoft Entra app with the Web redirect URI `http://localhost:3333/auth/callback`.
 2. Put `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, and `MS_TENANT_ID` in `.env`, or provide the `OUTLOOK_*` equivalents through the MCP client environment.
-3. Call the `authenticate` MCP tool and open its URL. The MCP process starts the callback server automatically.
+3. Call the `authenticate` MCP tool, copy the URL returned as the first response line, and open it in your browser. The browser is not opened automatically; the MCP process starts the callback server automatically.
 4. After consent, call `check-auth-status` to validate the Graph token.
 5. If Power Automate is required, call `authenticate-flow` and complete its separate consent flow.
 6. When authentication is complete, call `stop-auth-server` to stop a server started by this MCP process.

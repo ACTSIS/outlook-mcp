@@ -55,7 +55,7 @@ You need Node.js 22.22.1 or later and a Microsoft Entra app registration.
 
    See [`claude-config-sample.json`](./claude-config-sample.json) for a copyable file. The server uses stdio, so restart the MCP client after changing its configuration.
 
-5. Call `authenticate`, open the returned URL, and complete sign-in. The MCP tool starts the browser callback server automatically. Then call `check-auth-status` and use a Graph-backed tool such as `list-emails`.
+5. Call `authenticate`, copy the URL returned as the first response line, and open it in your browser. The browser is not opened automatically; the MCP tool starts the callback server automatically. Then call `check-auth-status` and use a Graph-backed tool such as `list-emails`.
 
 Power Automate is optional and requires a second consent flow. Complete the Graph flow first, then call `authenticate-flow`. See [Power Automate](./docs/power-automate.md).
 
