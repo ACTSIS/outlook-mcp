@@ -54,7 +54,7 @@ Graph and Flow credentials share `~/.outlook-mcp-tokens.json`. Read the known as
 
 Each domain exports an array of `{name, description, inputSchema, handler}` objects from its `index.js`:
 
-  - `auth/`: five informational/authentication tools, including callback-server lifecycle control
+- `auth/`: five informational/authentication tools, including callback-server lifecycle control
 - `calendar/`: event listing and mutations
 - `email/`: mail, drafts, replies, deletion, and attachments
 - `folder/`: mail-folder listing, creation, and message moves

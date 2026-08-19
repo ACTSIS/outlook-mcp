@@ -52,16 +52,13 @@ describe('auth-server-manager', () => {
     child.pid = 4321;
     child.unref = jest.fn();
     spawn.mockReturnValue(child);
-    configureHttpResponses(
-      { type: 'error' },
-      { type: 'success', statusCode: 200 }
-    );
+    configureHttpResponses({ type: 'error' }, { type: 'success', statusCode: 200 });
 
     const result = await manager.startAuthServer();
 
     expect(spawn).toHaveBeenCalledWith(
       process.execPath,
-      expect.arrayContaining(['outlook-auth-server.js']),
+      expect.arrayContaining([expect.stringMatching(/outlook-auth-server\.js$/)]),
       expect.objectContaining({ detached: false, stdio: ['ignore', 'ignore', 'ignore'] })
     );
     expect(child.unref).toHaveBeenCalledTimes(1);

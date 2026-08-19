@@ -479,7 +479,9 @@ if (require.main === module) {
 
     if (!AUTH_CONFIG.clientId || !AUTH_CONFIG.clientSecret) {
       console.log('\n⚠️  WARNING: Microsoft identity credentials are not set.');
-      console.log('   Please set MS_CLIENT_ID/MS_CLIENT_SECRET or OUTLOOK_CLIENT_ID/OUTLOOK_CLIENT_SECRET.');
+      console.log(
+        '   Please set MS_CLIENT_ID/MS_CLIENT_SECRET or OUTLOOK_CLIENT_ID/OUTLOOK_CLIENT_SECRET.'
+      );
     }
   });
 

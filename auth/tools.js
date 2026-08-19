@@ -199,7 +199,8 @@ const authTools = [
   },
   {
     name: 'stop-auth-server',
-    description: 'Stop the temporary Outlook authentication callback server started by authenticate',
+    description:
+      'Stop the temporary Outlook authentication callback server started by authenticate',
     inputSchema: {
       type: 'object',
       properties: {},

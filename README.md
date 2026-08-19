@@ -75,13 +75,13 @@ Nested mail-folder paths such as `Parent/Child/Archive` are resolved segment by 
 
 ### Authentication (4)
 
-| Tool                | Purpose                                                         |
-| ------------------- | --------------------------------------------------------------- |
-| `about`             | Report server identity and supported service areas              |
+| Tool                | Purpose                                                                             |
+| ------------------- | ----------------------------------------------------------------------------------- |
+| `about`             | Report server identity and supported service areas                                  |
 | `authenticate`      | Start the callback server and return the Microsoft Graph browser-authentication URL |
-| `check-auth-status` | Check and, when possible, refresh **Graph authentication only** |
+| `check-auth-status` | Check and, when possible, refresh **Graph authentication only**                     |
 | `authenticate-flow` | Start the callback server and return the separate Power Automate authentication URL |
-| `stop-auth-server`  | Stop the callback server started by an authentication tool      |
+| `stop-auth-server`  | Stop the callback server started by an authentication tool                          |
 
 ### Calendar (5)
 
@@ -178,18 +178,18 @@ For the token lifecycle, failure behavior, and current limitations, read [Authen
 
 `.env` is loaded by both `index.js` and `outlook-auth-server.js`. Variables supplied by the MCP client are process environment variables and take precedence over `.env` through dotenv's default behavior.
 
-| Variable                | Consumer                                | Default / precedence                                     | Notes                                                                                             |
-| ----------------------- | --------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `MS_CLIENT_ID`          | MCP runtime, auth server, and `TokenStorage`          | Fallback after `OUTLOOK_CLIENT_ID`     | Standard `.env` name                                                                              |
-| `MS_CLIENT_SECRET`      | MCP runtime, auth server, and `TokenStorage`          | Fallback after `OUTLOOK_CLIENT_SECRET` | Use the secret **value**, not its ID                                                              |
-| `OUTLOOK_CLIENT_ID`     | MCP runtime, auth server, and `TokenStorage`            | Preferred over `MS_CLIENT_ID`                            | Convenient for MCP client configuration                                                           |
-| `OUTLOOK_CLIENT_SECRET` | MCP runtime, auth server, and `TokenStorage`            | Preferred over `MS_CLIENT_SECRET`                        | Convenient for MCP client configuration                                                           |
-| `MS_TENANT_ID`          | Both                                    | `common`                                                 | Use the tenant GUID for single-tenant applications                                                |
-| `MS_AUTHORITY_HOST`     | Both                                    | `https://login.microsoftonline.com`                      | Trailing slashes are removed                                                                      |
-| `MS_SCOPES`             | `TokenStorage` refresh/exchange methods | Built-in ten-scope Graph list                            | Space-separated; include `offline_access`; standalone initial Graph acquisition does not honor it |
-| `MS_REDIRECT_URI`       | `TokenStorage`                          | `http://localhost:3333/auth/callback`                    | Standalone initial acquisition uses the fixed configured URI                                      |
-| `MS_TOKEN_ENDPOINT`     | `TokenStorage`                          | Derived v2 token endpoint                                | Standalone initial acquisition derives its endpoint separately                                    |
-| `USE_TEST_MODE`         | MCP server                              | `false`                                                  | Enables mocks; see test-mode limitation in the auth guide                                         |
+| Variable                | Consumer                                     | Default / precedence                   | Notes                                                                                             |
+| ----------------------- | -------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `MS_CLIENT_ID`          | MCP runtime, auth server, and `TokenStorage` | Fallback after `OUTLOOK_CLIENT_ID`     | Standard `.env` name                                                                              |
+| `MS_CLIENT_SECRET`      | MCP runtime, auth server, and `TokenStorage` | Fallback after `OUTLOOK_CLIENT_SECRET` | Use the secret **value**, not its ID                                                              |
+| `OUTLOOK_CLIENT_ID`     | MCP runtime, auth server, and `TokenStorage` | Preferred over `MS_CLIENT_ID`          | Convenient for MCP client configuration                                                           |
+| `OUTLOOK_CLIENT_SECRET` | MCP runtime, auth server, and `TokenStorage` | Preferred over `MS_CLIENT_SECRET`      | Convenient for MCP client configuration                                                           |
+| `MS_TENANT_ID`          | Both                                         | `common`                               | Use the tenant GUID for single-tenant applications                                                |
+| `MS_AUTHORITY_HOST`     | Both                                         | `https://login.microsoftonline.com`    | Trailing slashes are removed                                                                      |
+| `MS_SCOPES`             | `TokenStorage` refresh/exchange methods      | Built-in ten-scope Graph list          | Space-separated; include `offline_access`; standalone initial Graph acquisition does not honor it |
+| `MS_REDIRECT_URI`       | `TokenStorage`                               | `http://localhost:3333/auth/callback`  | Standalone initial acquisition uses the fixed configured URI                                      |
+| `MS_TOKEN_ENDPOINT`     | `TokenStorage`                               | Derived v2 token endpoint              | Standalone initial acquisition derives its endpoint separately                                    |
+| `USE_TEST_MODE`         | MCP server                                   | `false`                                | Enables mocks; see test-mode limitation in the auth guide                                         |
 
 The standalone auth server always listens on port `3333`; there is no environment-variable port override.
 
@@ -234,12 +234,12 @@ OpenCode uses a command array instead:
 
 | Symptom                                                                 | Recovery                                                                                                                      |
 | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `Authentication required` or `check-auth-status` says not authenticated | Call `authenticate`, open its URL, and complete Graph consent; the callback server starts automatically                         |
+| `Authentication required` or `check-auth-status` says not authenticated | Call `authenticate`, open its URL, and complete Graph consent; the callback server starts automatically                       |
 | Graph returns `UNAUTHORIZED` (HTTP 401)                                 | The API rejected the submitted token; complete Graph authentication again because a 401 does not force local invalidation     |
 | Graph returns HTTP 403 in an API error                                  | Authentication may be valid but the account/app lacks the required delegated permission; verify Entra permissions and consent |
 | `AADSTS7000215` / invalid client secret                                 | Configure the client secret **value**, not the secret ID                                                                      |
 | OAuth state is invalid or expired                                       | Start again from `authenticate`; pending state expires after ten minutes and is single-use                                    |
-| Port 3333 is already in use                                             | Stop the existing process, or run `npx kill-port 3333`, then call `authenticate` again                                       |
+| Port 3333 is already in use                                             | Stop the existing process, or run `npx kill-port 3333`, then call `authenticate` again                                        |
 
 ### Power Automate
 
