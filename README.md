@@ -59,6 +59,173 @@ You need Node.js 22.22.1 or later and a Microsoft Entra app registration.
 
 Power Automate is optional and requires a second consent flow. Complete the Graph flow first, then call `authenticate-flow`. See [Power Automate](./docs/power-automate.md).
 
+## Pre-built executables
+
+Standalone executables are published as GitHub Release assets. They include the MCP server and the authentication callback server in one file, and **do not require Node.js or npm** on the machine that runs them.
+
+| Target      | Artifact                  | Platform               |
+| ----------- | ------------------------- | ---------------------- |
+| Windows x64 | `outlook-mcp-win-x64.exe` | Windows 10/11, x64     |
+| Linux x64   | `outlook-mcp-linux-x64`   | Linux x64, glibc 2.28+ |
+
+1. Open the [Releases](https://github.com/rafaga2469/outlook-mcp/releases) page and pick a release whose version matches your needs. Releases are created only from pushed tags; branches never publish.
+2. Download the artifact for your platform. On Linux, make it executable:
+
+   ```bash
+   chmod +x outlook-mcp-linux-x64
+   ```
+
+3. Configure the runtime credentials as described below.
+4. Launch the MCP mode from the downloaded file. The MCP mode is the default, so the argument is optional:
+
+   ```text
+   outlook-mcp-win-x64.exe mcp
+   ./outlook-mcp-linux-x64 mcp
+   ```
+
+   The `auth` mode serves the browser callback on `http://localhost:3333`:
+
+   ```text
+   outlook-mcp-win-x64.exe auth
+   ./outlook-mcp-linux-x64 auth
+   ```
+
+   In MCP mode, the executable relaunches itself in `auth` mode when an authentication tool needs the callback server, so one file covers the whole flow. If a future release must use separate fallback artifacts, it will document `outlook-mcp-<target>-mcp` and `outlook-mcp-<target>-auth` names and the same mode-specific invocation.
+
+### Runtime configuration for pre-built executables
+
+Runtime configuration is external. The build does not receive OAuth credentials, and the downloaded binary does not contain them. Use either process environment variables or a `.env` file in the **same directory as the executable**.
+
+#### Supported variables
+
+The server can start without credentials, but the first Graph or Power Automate authentication and any token refresh require a client ID and client secret. Use one name from each alias pair; when both non-empty aliases are set, the `OUTLOOK_*` value wins.
+
+| Variable                                      | Required?                               | Controls                                                                                                                                                                                                    |
+| --------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OUTLOOK_CLIENT_ID` or `MS_CLIENT_ID`         | Required for authentication and refresh | Microsoft Entra application (client) ID. `OUTLOOK_CLIENT_ID` takes precedence over `MS_CLIENT_ID`.                                                                                                          |
+| `OUTLOOK_CLIENT_SECRET` or `MS_CLIENT_SECRET` | Required for authentication and refresh | Microsoft Entra client secret **value**, not the secret ID. `OUTLOOK_CLIENT_SECRET` takes precedence over `MS_CLIENT_SECRET`.                                                                               |
+| `MS_TENANT_ID`                                | Optional                                | Tenant used by the identity endpoints. Defaults to `common`; set a tenant GUID for a single-tenant app.                                                                                                     |
+| `MS_AUTHORITY_HOST`                           | Optional                                | Identity authority host. Defaults to `https://login.microsoftonline.com`; trailing slashes are removed.                                                                                                     |
+| `MS_SCOPES`                                   | Optional advanced override              | Space-separated scopes used by `TokenStorage` refresh and code-exchange operations. Include `offline_access` when overriding it. The active initial Graph auth server uses the built-in scope list instead. |
+| `MS_REDIRECT_URI`                             | Optional advanced override              | Redirect URI used by `TokenStorage` refresh and code-exchange operations. Initial acquisition remains fixed at `http://localhost:3333/auth/callback`.                                                       |
+| `MS_TOKEN_ENDPOINT`                           | Optional advanced override              | Token endpoint used by `TokenStorage` refresh and exchange operations. Initial acquisition derives its endpoint from `MS_AUTHORITY_HOST` and `MS_TENANT_ID`.                                                |
+| `USE_TEST_MODE`                               | Optional                                | Uses test API responses when set to `true`; defaults to `false` and should remain disabled for real accounts.                                                                                               |
+
+`MS_SCOPES`, `MS_REDIRECT_URI`, and `MS_TOKEN_ENDPOINT` are refresh/exchange overrides, not complete replacements for the active initial acquisition flow. Leave them unset unless you specifically need those `TokenStorage` behaviors.
+
+#### Precedence
+
+The server sees MCP-client values and shell/OS values together as `process.env`; it does not distinguish their origin. The effective order is:
+
+1. Existing process environment values win. An MCP client's `env` block is passed into `process.env`, so it overrides a value from the `.env` file beside the executable.
+2. The packaged dispatcher reads `.env` beside the executable and fills only variables that are not already set. It does not overwrite an existing value, including an intentionally empty value.
+3. If both names in an alias pair are non-empty, `OUTLOOK_CLIENT_ID` wins over `MS_CLIENT_ID`, and `OUTLOOK_CLIENT_SECRET` wins over `MS_CLIENT_SECRET`. The alias fallback uses JavaScript's `||`, so an empty `OUTLOOK_*` value falls back to its `MS_*` alias even though the `.env` loader does not replace that empty process value.
+
+For a packaged executable, `.env` is resolved by the executable's directory, not by the MCP client's working directory. Keep the file beside the downloaded binary.
+
+#### Windows PowerShell
+
+Set variables for the current PowerShell session and start MCP mode:
+
+```powershell
+Set-Location 'C:\Tools\outlook-mcp'
+$env:OUTLOOK_CLIENT_ID = 'your-application-client-id'
+$env:OUTLOOK_CLIENT_SECRET = 'your-client-secret-value'
+$env:MS_TENANT_ID = 'your-directory-tenant-id'
+& '.\outlook-mcp-win-x64.exe' mcp
+```
+
+#### Windows Command Prompt
+
+Set variables for the current Command Prompt session:
+
+```bat
+cd /d C:\Tools\outlook-mcp
+set "OUTLOOK_CLIENT_ID=your-application-client-id"
+set "OUTLOOK_CLIENT_SECRET=your-client-secret-value"
+set "MS_TENANT_ID=your-directory-tenant-id"
+outlook-mcp-win-x64.exe mcp
+```
+
+#### Linux shell
+
+```bash
+cd /opt/outlook-mcp
+export OUTLOOK_CLIENT_ID='your-application-client-id'
+export OUTLOOK_CLIENT_SECRET='your-client-secret-value'
+export MS_TENANT_ID='your-directory-tenant-id'
+./outlook-mcp-linux-x64 mcp
+```
+
+#### `.env` beside the executable
+
+Windows layout and file contents:
+
+```text
+C:\Tools\outlook-mcp\outlook-mcp-win-x64.exe
+C:\Tools\outlook-mcp\.env
+```
+
+```dotenv
+# C:\Tools\outlook-mcp\.env
+MS_CLIENT_ID=your-application-client-id
+MS_CLIENT_SECRET=your-client-secret-value
+MS_TENANT_ID=your-directory-tenant-id
+```
+
+Run it from any working directory; the file is found beside the executable:
+
+```powershell
+& 'C:\Tools\outlook-mcp\outlook-mcp-win-x64.exe' mcp
+```
+
+Linux layout and file contents:
+
+```text
+/opt/outlook-mcp/outlook-mcp-linux-x64
+/opt/outlook-mcp/.env
+```
+
+```dotenv
+# /opt/outlook-mcp/.env
+MS_CLIENT_ID=your-application-client-id
+MS_CLIENT_SECRET=your-client-secret-value
+MS_TENANT_ID=your-directory-tenant-id
+```
+
+Restrict the file to the account that runs the server. On Linux, use `chmod 600 /opt/outlook-mcp/.env`; on Windows, use a user-only ACL for the containing directory and `.env` file.
+
+#### MCP client JSON
+
+An MCP client can pass the same values in its `env` block instead of using `.env`. This Claude Desktop-style example uses the Windows executable; use the Linux path and executable name on Linux:
+
+```json
+{
+  "mcpServers": {
+    "m365-assistant": {
+      "command": "C:\\Tools\\outlook-mcp\\outlook-mcp-win-x64.exe",
+      "args": ["mcp"],
+      "env": {
+        "OUTLOOK_CLIENT_ID": "your-application-client-id",
+        "OUTLOOK_CLIENT_SECRET": "your-client-secret-value",
+        "MS_TENANT_ID": "your-directory-tenant-id"
+      }
+    }
+  }
+}
+```
+
+The MCP client supplies these values when it starts the process. Do not place a real client secret in a repository, shared configuration sample, issue, or chat transcript.
+
+### Runtime safety and release credentials
+
+- Do not commit `.env`, `.env.*`, token caches, or real credentials. `.env.example` remains intentionally trackable.
+- The executable and GitHub Release artifacts are secret-free. The release workflow builds without OAuth variables, scans the artifacts for embedded credentials, and publishes only after the scan passes.
+- The inspected workflows use no OAuth client secrets. The release job uses GitHub's built-in `github.token` only to publish the release; it is not a Microsoft credential and is not embedded in the binary.
+- Build-time GitHub Actions credentials, if a future maintenance workflow needs them, are CI/release infrastructure credentials. They must never be used as substitutes for the end user's runtime Microsoft Entra values.
+
+The existing npm installation above remains fully supported and unchanged. Its `.env` lives in the project directory, while a pre-built executable reads `.env` beside the binary. Both paths use the same `OUTLOOK_*`/`MS_*` variables, and both `mcp` and `auth` modes use the same runtime environment.
+
 ## What the server can do
 
 | Area                   | Supported operations                                                                                 |
@@ -164,7 +331,7 @@ details.
 
 ## Authentication model
 
-`TokenStorage` in `auth/token-storage.js` is the runtime token authority for both APIs. Graph handlers call `ensureAuthenticated()`, while Power Automate handlers call `getValidFlowAccessToken()`. Both token sets share `~/.outlook-mcp-tokens.json`; writes request owner-only mode `0600`.
+`TokenStorage` in `auth/token-storage.js` is the runtime token authority for both APIs. Graph handlers call `ensureAuthenticated()`, while Power Automate handlers call `getValidFlowAccessToken()`. Both token sets share `~/.outlook-mcp-tokens.json`; writes request owner-only mode `0600`. The runtime uses `HOME` first and `USERPROFILE` second to locate that file; these are OS home-directory variables, not OAuth settings that normally belong in `.env`.
 
 Access tokens enter their refresh window five minutes before `expires_at`. Graph refresh is automatic when Graph-backed tools run. Flow refresh is automatic only when both an expired/near-expiry `flow_access_token` and a stored `flow_refresh_token` exist. Initial Flow consent is always separate.
 
@@ -176,7 +343,7 @@ For the token lifecycle, failure behavior, and current limitations, read [Authen
 
 ## Configuration reference
 
-`.env` is loaded by both `index.js` and `outlook-auth-server.js`. Variables supplied by the MCP client are process environment variables and take precedence over `.env` through dotenv's default behavior.
+For the npm path, `index.js` and `outlook-auth-server.js` load the project `.env`. For a pre-built executable, the dispatcher loads `.env` beside the executable before starting either mode. In both paths, existing process environment variables, including values supplied by an MCP client's `env` block, take precedence over file values.
 
 | Variable                | Consumer                                     | Default / precedence                   | Notes                                                                                             |
 | ----------------------- | -------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------- |

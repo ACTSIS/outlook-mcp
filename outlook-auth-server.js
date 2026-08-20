@@ -462,8 +462,12 @@ function createRequestHandler(deps = {}) {
   };
 }
 
-// Only start the HTTP server when this file is run directly (not during tests)
-if (require.main === module) {
+/**
+ * Start the authentication callback server on port 3333.
+ * Exported so the dispatcher (bin/m365-mcp.js) and direct runs share one path.
+ * @returns {import('http').Server} The started HTTP server
+ */
+function startAuthServer() {
   // Log to console
   console.log('Starting M365 MCP Authentication Server');
 
@@ -495,6 +499,14 @@ if (require.main === module) {
     console.log('Authentication server shutting down');
     process.exit(0);
   });
+
+  return server;
+}
+
+// Only start the HTTP server when this file is run directly (not during tests
+// or when required by the dispatcher).
+if (require.main === module) {
+  startAuthServer();
 }
 
 module.exports = {
@@ -502,4 +514,5 @@ module.exports = {
   exchangeCodeForTokens,
   pendingStates,
   cleanupInterval,
+  startAuthServer,
 };

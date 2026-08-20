@@ -8,6 +8,20 @@ const AUTH_SERVER_URL = config.AUTH_CONFIG.authServerUrl;
 
 let authServerProcess = null;
 
+// Launcher override for packaged executables. When set, the callback server is
+// launched through this command/args pair (e.g. the dispatcher `auth` mode);
+// the source npm path keeps launching `node outlook-auth-server.js`.
+let launcher = null;
+
+/**
+ * Select how the callback server process is launched.
+ * @param {{command: string, args: string[]}|null} value - Dispatcher launcher,
+ *   or null/undefined to restore the source `node outlook-auth-server.js` default.
+ */
+function setLauncher(value) {
+  launcher = value || null;
+}
+
 function checkAuthServer() {
   return new Promise((resolve) => {
     const req = http.get(AUTH_SERVER_URL, (res) => {
@@ -43,7 +57,10 @@ async function startAuthServer() {
     };
   }
 
-  authServerProcess = spawn(process.execPath, [AUTH_SERVER_PATH], {
+  const command = launcher ? launcher.command : process.execPath;
+  const args = launcher ? launcher.args : [AUTH_SERVER_PATH];
+
+  authServerProcess = spawn(command, args, {
     cwd: path.dirname(AUTH_SERVER_PATH),
     env: process.env,
     detached: false,
@@ -104,4 +121,5 @@ module.exports = {
   startAuthServer,
   stopAuthServer,
   checkAuthServer,
+  setLauncher,
 };

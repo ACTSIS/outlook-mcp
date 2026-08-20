@@ -17,6 +17,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "package": "node build/package.js",
     "prepare": "husky"
   },
   "keywords": [
@@ -42,6 +43,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "@modelcontextprotocol/inspector": "^0.22.0",
+    "@vercel/ncc": "0.45.0",
     "eslint": "^9.39.5",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.6",
@@ -49,8 +51,10 @@
     "husky": "^9.1.7",
     "jest": "^29.7.0",
     "lint-staged": "^17.2.0",
+    "postject": "1.0.0-alpha.6",
     "prettier": "^3.9.6",
-    "supertest": "^7.0.0"
+    "supertest": "^7.0.0",
+    "yaml": "2.9.0"
   },
   "engines": {
     "node": ">=22.22.1"

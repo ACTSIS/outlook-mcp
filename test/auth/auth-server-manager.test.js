@@ -87,4 +87,83 @@ describe('auth-server-manager', () => {
       message: 'Authentication server stopped (pid 4322).',
     });
   });
+
+  it('uses the dispatcher launcher when the launcher selection is set', async () => {
+    jest.resetModules();
+    jest.clearAllMocks();
+    const { spawn: freshSpawn } = require('child_process');
+    const http = require('http');
+    const child = new EventEmitter();
+    child.pid = 4323;
+    child.unref = jest.fn();
+    freshSpawn.mockReturnValue(child);
+
+    let firstProbe = true;
+    http.get.mockImplementation((_url, callback) => {
+      const request = new EventEmitter();
+      request.setTimeout = jest.fn();
+      request.destroy = jest.fn();
+
+      if (firstProbe) {
+        firstProbe = false;
+        process.nextTick(() => request.emit('error', new Error('not running')));
+      } else {
+        process.nextTick(() => callback({ statusCode: 200, resume: jest.fn() }));
+      }
+      return request;
+    });
+
+    const managerWithLauncher = require('../../auth/auth-server-manager');
+    managerWithLauncher.setLauncher({ command: process.execPath, args: ['auth'] });
+
+    const result = await managerWithLauncher.startAuthServer();
+
+    expect(freshSpawn).toHaveBeenCalledWith(
+      process.execPath,
+      expect.arrayContaining([expect.stringMatching(/auth$/)]),
+      expect.objectContaining({ detached: false })
+    );
+    expect(result).toEqual({
+      started: true,
+      running: true,
+      pid: 4323,
+      message: 'Authentication server started.',
+    });
+  });
+
+  it('preserves the source launcher (node script path) when no launcher is set', async () => {
+    jest.resetModules();
+    jest.clearAllMocks();
+    const { spawn: freshSpawn } = require('child_process');
+    const http = require('http');
+    const child = new EventEmitter();
+    child.pid = 4324;
+    child.unref = jest.fn();
+    freshSpawn.mockReturnValue(child);
+
+    let firstProbe = true;
+    http.get.mockImplementation((_url, callback) => {
+      const request = new EventEmitter();
+      request.setTimeout = jest.fn();
+      request.destroy = jest.fn();
+
+      if (firstProbe) {
+        firstProbe = false;
+        process.nextTick(() => request.emit('error', new Error('not running')));
+      } else {
+        process.nextTick(() => callback({ statusCode: 200, resume: jest.fn() }));
+      }
+      return request;
+    });
+
+    const manager = require('../../auth/auth-server-manager');
+
+    await manager.startAuthServer();
+
+    expect(freshSpawn).toHaveBeenCalledWith(
+      process.execPath,
+      expect.arrayContaining([expect.stringMatching(/outlook-auth-server\.js$/)]),
+      expect.objectContaining({ detached: false, stdio: ['ignore', 'ignore', 'ignore'] })
+    );
+  });
 });

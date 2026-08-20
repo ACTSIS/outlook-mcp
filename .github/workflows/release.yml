@@ -1,0 +1,172 @@
+name: Release
+
+# Only an explicitly pushed tag may publish a release. Branch pushes and
+# pull requests never trigger this workflow (threat: pushed-tag state).
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Package ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        target: ['win-x64', 'linux-x64']
+        include:
+          - target: win-x64
+            os: windows-latest
+          - target: linux-x64
+            os: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.1
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Package target
+        run: npm run package -- --target ${{ matrix.target }}
+
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifact-${{ matrix.target }}
+          path: dist/${{ matrix.target }}/
+          if-no-files-found: error
+
+  validate:
+    name: Validate modes (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    needs: [build]
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - target: win-x64
+            os: windows-latest
+            artifact: dist/win-x64/outlook-mcp-win-x64.exe
+          - target: linux-x64
+            os: ubuntu-latest
+            artifact: dist/linux-x64/outlook-mcp-linux-x64
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download packaged artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: artifact-${{ matrix.target }}
+          path: dist/${{ matrix.target }}
+
+      - name: Validate mcp mode boots
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOG="$(mktemp)"
+          "${{ matrix.artifact }}" mcp >"$LOG" 2>&1 &
+          PID=$!
+          for _ in $(seq 1 30); do
+            if grep -q "connected and listening" "$LOG"; then break; fi
+            if ! kill -0 "$PID" 2>/dev/null; then
+              echo "mcp mode exited early:"; cat "$LOG"; exit 1
+            fi
+            sleep 1
+          done
+          grep -q "connected and listening" "$LOG"
+          kill "$PID" 2>/dev/null || true
+          wait "$PID" 2>/dev/null || true
+
+      - name: Validate auth mode serves the callback endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOG="$(mktemp)"
+          "${{ matrix.artifact }}" auth >"$LOG" 2>&1 &
+          PID=$!
+          for _ in $(seq 1 30); do
+            if curl -s -o /dev/null -w "%{http_code}" http://localhost:3333/ | grep -q 200; then
+              break
+            fi
+            if ! kill -0 "$PID" 2>/dev/null; then
+              echo "auth mode exited early:"; cat "$LOG"; exit 1
+            fi
+            sleep 1
+          done
+          curl -sf http://localhost:3333/ >/dev/null
+          kill "$PID" 2>/dev/null || true
+          wait "$PID" 2>/dev/null || true
+
+  scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    needs: [build, validate]
+    permissions:
+      contents: read
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Scan dist artifacts for embedded credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e "const { scanDirectory, canPublish, report } = require('./build/secret-scan'); const findings = scanDirectory('dist'); console.log(report(findings)); if (!canPublish(findings)) process.exit(1);"
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build, validate, scan]
+    permissions:
+      contents: write
+    timeout-minutes: 15
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Verify complete artifact set before publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          for FILE in dist/outlook-mcp-win-x64.exe dist/outlook-mcp-linux-x64; do
+            if [ ! -f "$FILE" ]; then
+              echo "missing required artifact: $FILE"; exit 1
+            fi
+          done
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/outlook-mcp-win-x64.exe dist/outlook-mcp-linux-x64 --generate-notes
