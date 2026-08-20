@@ -105,6 +105,26 @@ describe('release workflow', () => {
       expect(steps).toMatch(/auth/);
     });
 
+    it('restores Linux execute permission after download and before mode validation', () => {
+      const steps = doc.jobs.validate.steps;
+      const downloadIndex = steps.findIndex((step) => step.name === 'Download packaged artifact');
+      const restoreIndex = steps.findIndex(
+        (step) => step.name === 'Restore Linux executable permission'
+      );
+      const mcpIndex = steps.findIndex((step) => step.name === 'Validate mcp mode boots');
+      const authIndex = steps.findIndex(
+        (step) => step.name === 'Validate auth mode serves the callback endpoint'
+      );
+      const restoreStep = steps[restoreIndex];
+
+      expect(restoreStep.if).toBe("matrix.target == 'linux-x64'");
+      expect(restoreStep.run).toMatch(/chmod \+x/);
+      expect(restoreStep.run).toContain('${{ matrix.artifact }}');
+      expect(restoreIndex).toBeGreaterThan(downloadIndex);
+      expect(restoreIndex).toBeLessThan(mcpIndex);
+      expect(restoreIndex).toBeLessThan(authIndex);
+    });
+
     it('runs the secret scan over the packaged artifacts (fail closed)', () => {
       const steps = stepsScript(doc, 'scan');
       expect(steps).toMatch(/secret-scan|secret_scan|secret scan/i);

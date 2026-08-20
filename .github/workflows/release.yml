@@ -73,6 +73,11 @@ jobs:
           name: artifact-${{ matrix.target }}
           path: dist/${{ matrix.target }}
 
+      - name: Restore Linux executable permission
+        if: matrix.target == 'linux-x64'
+        shell: bash
+        run: chmod +x "${{ matrix.artifact }}"
+
       - name: Validate mcp mode boots
         shell: bash
         run: |
