@@ -709,10 +709,12 @@ function openBrowser(authUrl, deps = {}) {
   const processModule = deps.childProcess || childProcess;
   let command;
   let args;
+  const spawnOptions = { detached: true, stdio: 'ignore' };
 
   if (platform === 'win32') {
-    command = 'explorer.exe';
-    args = [authUrl];
+    command = 'rundll32.exe';
+    args = ['url.dll,FileProtocolHandler', authUrl];
+    spawnOptions.windowsHide = true;
   } else if (platform === 'darwin') {
     command = 'open';
     args = [authUrl];
@@ -722,7 +724,7 @@ function openBrowser(authUrl, deps = {}) {
   }
 
   try {
-    const child = processModule.spawn(command, args, { detached: true, stdio: 'ignore' });
+    const child = processModule.spawn(command, args, spawnOptions);
     if (child && typeof child.unref === 'function') child.unref();
     return true;
   } catch {
