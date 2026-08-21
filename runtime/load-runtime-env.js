@@ -113,6 +113,7 @@ async function loadRuntimeEnv(options = {}) {
       enabled: true,
       loaded,
       source: result && result.source ? result.source : undefined,
+      ...(result && result.cache ? { cache: result.cache } : {}),
     };
   }
 

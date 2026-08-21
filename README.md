@@ -68,6 +68,8 @@ Standalone executables are published as GitHub Release assets. They include the 
 | Windows x64 | `outlook-mcp-win-x64.exe` | Windows 10/11, x64     |
 | Linux x64   | `outlook-mcp-linux-x64`   | Linux x64, glibc 2.28+ |
 
+Windows file Properties identify the executable as **M365 Assistant MCP Server** from **ACTSIS** and show the package/release version. The embedded Node.js runtime is an implementation detail of the standalone build.
+
 1. Open the [Releases](https://github.com/rafaga2469/outlook-mcp/releases) page and pick a release whose version matches your needs. Releases are created only from pushed tags; branches never publish.
 2. Download the artifact for your platform. On Linux, make it executable:
 
@@ -119,22 +121,58 @@ Vault mode keeps OAuth values outside the public executable and outside develope
 
 Set `VAULT_ADDR` to enable Vault mode. The other settings are optional:
 
-| Variable                    | Default                 | Purpose                                                                                      |
-| --------------------------- | ----------------------- | -------------------------------------------------------------------------------------------- |
-| `VAULT_ADDR`                | Disabled when unset     | Intranet Vault HTTP(S) address; enables Vault mode                                           |
-| `VAULT_AUTH_MOUNT`          | `oidc`                  | Vault JWT/OIDC auth mount                                                                    |
-| `VAULT_ROLE`                | `outlook-mcp-developer` | OIDC role used for developer login                                                           |
-| `VAULT_OIDC_PORT`           | `8250`                  | Loopback callback port                                                                       |
-| `VAULT_KV_MOUNT`            | `kv`                    | KV v2 mount                                                                                  |
-| `VAULT_SECRET_PATH`         | `outlook-mcp/actsis`    | KV v2 secret path                                                                            |
-| `VAULT_NAMESPACE`           | Unset                   | Optional Vault Enterprise namespace                                                          |
-| `VAULT_SKIP_BROWSER`        | `false`                 | Set to `true` for manual URL flow; the URL is printed to stderr and the callback stays local |
-| `VAULT_CUSTOM_HEADER_NAME`  | Unset                   | Optional custom HTTP header name sent with every Vault API request                           |
-| `VAULT_CUSTOM_HEADER_VALUE` | Unset                   | Sensitive value paired with `VAULT_CUSTOM_HEADER_NAME`; never logged or persisted            |
-| `VAULT_TOKEN`               | Unset                   | Automation/testing escape hatch; no browser flow, never persisted or logged                  |
+| Variable                              | Default                 | Purpose                                                                                      |
+| ------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------- |
+| `VAULT_ADDR`                          | Disabled when unset     | Intranet Vault HTTP(S) address; enables Vault mode                                           |
+| `VAULT_AUTH_MOUNT`                    | `oidc`                  | Vault JWT/OIDC auth mount                                                                    |
+| `VAULT_ROLE`                          | `outlook-mcp-developer` | OIDC role used for developer login                                                           |
+| `VAULT_OIDC_PORT`                     | `8250`                  | Loopback callback port                                                                       |
+| `VAULT_KV_MOUNT`                      | `kv`                    | KV v2 mount                                                                                  |
+| `VAULT_SECRET_PATH`                   | `outlook-mcp/actsis`    | KV v2 secret path                                                                            |
+| `VAULT_NAMESPACE`                     | Unset                   | Optional Vault Enterprise namespace                                                          |
+| `VAULT_SKIP_BROWSER`                  | `false`                 | Set to `true` for manual URL flow; the URL is printed to stderr and the callback stays local |
+| `VAULT_CUSTOM_HEADER_NAME`            | Unset                   | Optional custom HTTP header name sent with every Vault API request                           |
+| `VAULT_CUSTOM_HEADER_VALUE`           | Unset                   | Sensitive value paired with `VAULT_CUSTOM_HEADER_NAME`; never logged or persisted            |
+| `VAULT_TOKEN_CACHE_PATH`              | OS-specific             | Optional local path override for the per-user Vault token cache                              |
+| `VAULT_TOKEN_RENEW_THRESHOLD_SECONDS` | `300`                   | Renew a renewable cached token when this many seconds or less remain                         |
+| `VAULT_TOKEN`                         | Unset                   | Automation/testing escape hatch; no browser flow, never persisted or logged                  |
 
-When `VAULT_TOKEN` is absent, the runtime requests a short-lived Vault token through the Vault OIDC browser flow. The local listener accepts only `GET http://127.0.0.1:<port>/oidc/callback`; the Vault role and the OIDC provider must allow the matching `http://localhost:<port>/oidc/callback` URI. With the defaults, configure `http://localhost:8250/oidc/callback` exactly. Static `VAULT_TOKEN` values are not recommended for developer installs.
+When `VAULT_TOKEN` is absent, the first startup requests a short-lived Vault token through the Vault OIDC browser flow. The runtime stores that Vault token and safe lease metadata in a per-user local cache. Later OpenCode/MCP launches validate the cached token with Vault, renew it when it is renewable and near expiry, and read the KV values without opening a browser. The local listener accepts only `GET http://127.0.0.1:<port>/oidc/callback`; the Vault role and the OIDC provider must allow the matching `http://localhost:<port>/oidc/callback` URI. With the defaults, configure `http://localhost:8250/oidc/callback` exactly. Static `VAULT_TOKEN` values are not recommended for developer installs.
 After sign-in, the identity-provider redirect must return the matching `state` and a `code`. The client retains the `nonce` from Vault's authorization URL for the callback exchange; if the provider returns a nonce too, it must match.
+
+#### Vault token cache
+
+The cache contains only the short-lived Vault client token, its expiration/TTL metadata, its renewable flag, and a save timestamp. It never contains `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `MS_TENANT_ID`, or any other KV value. Those values are fetched from Vault into process memory on every startup.
+
+Default cache locations are:
+
+| Platform    | Path                                                                                                 |
+| ----------- | ---------------------------------------------------------------------------------------------------- |
+| Windows     | `%LOCALAPPDATA%\m365-mcp\vault-token.json` (falls back to `%APPDATA%`, then the user home directory) |
+| Linux/POSIX | `${XDG_CONFIG_HOME:-~/.config}/m365-mcp/vault-token.json`                                            |
+
+Set `VAULT_TOKEN_CACHE_PATH` to choose another local path for tests or administrator-managed installations. The cache is written atomically; POSIX systems use mode `0600`, and Windows applies restrictive best-effort file handling under the current user profile.
+
+To force another Vault login, delete the cache file. Revoking the cached Vault token also causes the next startup to discard it and run OIDC once more.
+
+Windows PowerShell:
+
+```powershell
+$cachePath = $env:VAULT_TOKEN_CACHE_PATH
+if (-not $cachePath) {
+  $base = $env:LOCALAPPDATA
+  if (-not $base) { $base = $env:APPDATA }
+  if (-not $base) { $base = $HOME }
+  $cachePath = Join-Path (Join-Path $base 'm365-mcp') 'vault-token.json'
+}
+Remove-Item -LiteralPath $cachePath -Force -ErrorAction SilentlyContinue
+```
+
+Linux:
+
+```bash
+rm -f "${VAULT_TOKEN_CACHE_PATH:-${XDG_CONFIG_HOME:-$HOME/.config}/m365-mcp/vault-token.json}"
+```
 
 The code default for `VAULT_SECRET_PATH` remains `outlook-mcp/actsis` for compatibility with existing installations. For the Actsis Vault, set the path explicitly:
 
@@ -148,7 +186,7 @@ VAULT_CUSTOM_HEADER_VALUE=replace-with-local-secret
 
 Replace `replace-with-local-secret` locally through the process environment, OpenCode secret configuration, or a protected local `.env` file. The header value is sensitive: never commit it, put it in a fixture or release workflow, or embed it in the executable. If either custom-header variable is set without the other, startup fails with `VAULT_CONFIG_INVALID`.
 
-The custom header is sent only on the server-side HTTP requests to Vault: the OIDC authorization URL request, the OIDC callback exchange, and the KV v2 read. Its value is never placed in the OAuth browser URL or sent to the identity provider by the browser. `VAULT_CUSTOM_HEADER_NAME` must be a legal HTTP header token and cannot replace Vault-controlled authentication or namespace headers.
+The custom header is sent only on the server-side HTTP requests to Vault: the OIDC authorization URL request, the OIDC callback exchange, token lookup/renewal, and the KV v2 read. Its value is never placed in the OAuth browser URL or sent to the identity provider by the browser. `VAULT_CUSTOM_HEADER_NAME` must be a legal HTTP header token and cannot replace Vault-controlled authentication or namespace headers.
 
 Store the following fields in KV v2 at `kv/data/apps/outlook-mcp/prod` for the Actsis configuration:
 
@@ -441,6 +479,10 @@ MS_TENANT_ID = "your-directory-tenant-id"
 ```
 
 OpenCode uses a command array instead:
+
+The environment block needs only non-secret Vault connection settings and the
+protected gateway header. It intentionally contains no Microsoft OAuth values
+and no `VAULT_TOKEN`; the OIDC token is cached locally after the first login.
 
 ```jsonc
 {

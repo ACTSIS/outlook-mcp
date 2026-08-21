@@ -17,6 +17,7 @@ dist/
 *.key
 *.cert
 *.token.json
+vault-token.json
 .outlook-mcp-tokens.json
 
 # Editor directories and files

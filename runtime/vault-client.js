@@ -1,14 +1,16 @@
 /**
  * Minimal HashiCorp Vault HTTP client used by the runtime bootstrap.
  *
- * This module intentionally uses only Node built-ins. Vault tokens remain in
- * memory for the duration of a read and are never logged or persisted.
+ * This module intentionally uses only Node built-ins. Vault tokens are never
+ * logged; the companion cache module persists only the Vault token and lease
+ * metadata, never the values read from KV.
  */
 
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
 const childProcess = require('child_process');
+const vaultTokenCache = require('./vault-token-cache');
 
 const DEFAULTS = Object.freeze({
   authMount: 'oidc',
@@ -18,6 +20,8 @@ const DEFAULTS = Object.freeze({
   secretPath: 'outlook-mcp/actsis',
   requestTimeoutMs: 10000,
   callbackTimeoutMs: 5 * 60 * 1000,
+  tokenRenewThresholdSeconds: 5 * 60,
+  tokenRenewIncrementSeconds: 60 * 60,
 });
 
 const VAULT_ENV_KEYS = Object.freeze([
@@ -117,6 +121,18 @@ function parsePort(value) {
   return parsed;
 }
 
+function parseSeconds(value, name, fallback) {
+  if (value === undefined || value === '') return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new VaultError(
+      `${name} must be a non-negative number of seconds.`,
+      'VAULT_CONFIG_INVALID'
+    );
+  }
+  return parsed;
+}
+
 function normalizeCustomHeader(env) {
   const rawName = env.VAULT_CUSTOM_HEADER_NAME;
   const rawValue = env.VAULT_CUSTOM_HEADER_VALUE;
@@ -180,6 +196,11 @@ function getVaultConfig(env = process.env) {
     skipBrowser: parseBoolean(env.VAULT_SKIP_BROWSER),
     requestTimeoutMs: DEFAULTS.requestTimeoutMs,
     callbackTimeoutMs: DEFAULTS.callbackTimeoutMs,
+    tokenCachePath: isNonEmpty(env.VAULT_TOKEN_CACHE_PATH)
+      ? env.VAULT_TOKEN_CACHE_PATH.trim()
+      : null,
+    tokenRenewThresholdSeconds: DEFAULTS.tokenRenewThresholdSeconds,
+    tokenRenewIncrementSeconds: DEFAULTS.tokenRenewIncrementSeconds,
   };
 
   if (!address) return baseConfig;
@@ -191,6 +212,11 @@ function getVaultConfig(env = process.env) {
     oidcPort: parsePort(env.VAULT_OIDC_PORT || DEFAULTS.oidcPort),
     kvMount: normalizeVaultPath(env.VAULT_KV_MOUNT, 'VAULT_KV_MOUNT', DEFAULTS.kvMount),
     secretPath: normalizeVaultPath(env.VAULT_SECRET_PATH, 'VAULT_SECRET_PATH', DEFAULTS.secretPath),
+    tokenRenewThresholdSeconds: parseSeconds(
+      env.VAULT_TOKEN_RENEW_THRESHOLD_SECONDS,
+      'VAULT_TOKEN_RENEW_THRESHOLD_SECONDS',
+      DEFAULTS.tokenRenewThresholdSeconds
+    ),
   };
 }
 
@@ -239,11 +265,14 @@ function buildHeaders(config, extra = {}) {
   return headers;
 }
 
-function getSafeErrorMessage(error, config) {
+function getSafeErrorMessage(error, config, extraSecrets = []) {
   const message =
     error && typeof error.message === 'string' ? error.message : 'Unknown Vault error.';
-  const secret = config && config.customHeaderValue;
-  return isNonEmpty(secret) ? message.split(secret).join('[REDACTED]') : message;
+  const secrets = [config && config.customHeaderValue, ...extraSecrets].filter(isNonEmpty);
+  return secrets.reduce(
+    (safeMessage, secret) => safeMessage.split(secret).join('[REDACTED]'),
+    message
+  );
 }
 
 function networkError() {
@@ -534,6 +563,126 @@ async function exchangeOidcCallback(config, callback, deps = {}) {
   return token;
 }
 
+function parseTokenMetadata(payload, errorCode, message) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new VaultError(message, errorCode);
+  }
+
+  const expireTime =
+    typeof payload.expire_time === 'string' && Number.isFinite(Date.parse(payload.expire_time))
+      ? payload.expire_time
+      : null;
+  const ttlValue = Number.isInteger(payload.ttl) ? payload.ttl : payload.lease_duration;
+  const ttl = Number.isInteger(ttlValue) && ttlValue >= 0 ? ttlValue : null;
+  const metadata = {
+    expireTime,
+    ttl,
+    renewable: payload.renewable === true,
+  };
+
+  if (Array.isArray(payload.policies)) {
+    metadata.policies = payload.policies.filter(isNonEmpty);
+  }
+
+  return metadata;
+}
+
+/**
+ * Validate a Vault client token through the token lookup endpoint.
+ * @param {object} config - Normalized Vault configuration
+ * @param {string} token - Vault client token
+ * @param {object} [deps] - Injectable request implementation
+ * @returns {Promise<object>} Safe token lease metadata
+ */
+async function lookupSelf(config, token, deps = {}) {
+  if (!isNonEmpty(token)) {
+    throw new VaultError('Vault token lookup requires a Vault token.', 'VAULT_TOKEN_MISSING');
+  }
+
+  let response;
+  try {
+    response = await requestVaultJson(
+      {
+        method: 'GET',
+        url: buildVaultUrl(config, ['auth', 'token', 'lookup-self']),
+        headers: buildHeaders(config, { 'X-Vault-Token': token }),
+      },
+      deps
+    );
+  } catch (error) {
+    throw new VaultError(
+      `Vault token lookup failed: ${getSafeErrorMessage(error, config, [token])}`,
+      error.code || 'VAULT_TOKEN_LOOKUP_FAILED',
+      error.status
+    );
+  }
+
+  return parseTokenMetadata(
+    response && response.data,
+    'VAULT_RESPONSE_INVALID',
+    'Vault token lookup returned invalid metadata.'
+  );
+}
+
+function getRenewIncrement(config) {
+  const configured = Number.isInteger(config.tokenRenewIncrementSeconds)
+    ? Math.max(0, config.tokenRenewIncrementSeconds)
+    : DEFAULTS.tokenRenewIncrementSeconds;
+  return Math.min(configured, DEFAULTS.tokenRenewIncrementSeconds);
+}
+
+/**
+ * Renew a renewable Vault client token through the token renew endpoint.
+ * @param {object} config - Normalized Vault configuration
+ * @param {string} token - Vault client token
+ * @param {object} [deps] - Injectable request implementation
+ * @returns {Promise<object>} New token and safe lease metadata
+ */
+async function renewSelf(config, token, deps = {}) {
+  if (!isNonEmpty(token)) {
+    throw new VaultError('Vault token renewal requires a Vault token.', 'VAULT_TOKEN_MISSING');
+  }
+
+  const body = JSON.stringify({ increment: getRenewIncrement(config) });
+  let response;
+  try {
+    response = await requestVaultJson(
+      {
+        method: 'POST',
+        url: buildVaultUrl(config, ['auth', 'token', 'renew-self']),
+        headers: buildHeaders(config, {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+          'X-Vault-Token': token,
+        }),
+        body,
+      },
+      deps
+    );
+  } catch (error) {
+    throw new VaultError(
+      `Vault token renewal failed: ${getSafeErrorMessage(error, config, [token])}`,
+      error.code || 'VAULT_TOKEN_RENEW_FAILED',
+      error.status
+    );
+  }
+
+  const auth = response && response.auth;
+  const renewedToken = auth && auth.client_token;
+  if (!isNonEmpty(renewedToken)) {
+    throw new VaultError('Vault token renewal returned no client token.', 'VAULT_RESPONSE_INVALID');
+  }
+
+  return {
+    token: renewedToken,
+    ...parseTokenMetadata(
+      auth,
+      'VAULT_RESPONSE_INVALID',
+      'Vault token renewal returned invalid metadata.'
+    ),
+  };
+}
+
 function sendCallbackResponse(response, statusCode, text) {
   response.writeHead(statusCode, {
     'Content-Type': 'text/plain; charset=utf-8',
@@ -798,7 +947,7 @@ async function readKvV2(config, token, deps = {}) {
     );
   } catch (error) {
     throw new VaultError(
-      `Vault KV read failed: ${getSafeErrorMessage(error, config)}`,
+      `Vault KV read failed: ${getSafeErrorMessage(error, config, [token])}`,
       error.code || 'VAULT_KV_READ_FAILED',
       error.status
     );
@@ -830,24 +979,195 @@ function mapVaultEnvironment(fields) {
   return values;
 }
 
+function isVaultAuthorizationFailure(error) {
+  return Boolean(
+    error && (error.code === 'VAULT_UNAUTHORIZED' || error.status === 401 || error.status === 403)
+  );
+}
+
+function getCurrentTime(deps) {
+  const value = typeof deps.now === 'function' ? deps.now() : deps.now;
+  if (value instanceof Date) return value.getTime();
+  if (Number.isFinite(value)) return value;
+  return Date.now();
+}
+
+function isTokenExpired(metadata, now) {
+  if (metadata && metadata.expireTime && Date.parse(metadata.expireTime) <= now) return true;
+  return metadata && metadata.ttl !== null && metadata.ttl !== undefined && metadata.ttl <= 0;
+}
+
+function isTokenNearExpiry(metadata, config, now) {
+  const threshold = Number.isInteger(config.tokenRenewThresholdSeconds)
+    ? Math.max(0, config.tokenRenewThresholdSeconds)
+    : DEFAULTS.tokenRenewThresholdSeconds;
+  if (metadata && metadata.expireTime) {
+    const remainingMs = Date.parse(metadata.expireTime) - now;
+    if (Number.isFinite(remainingMs)) return remainingMs <= threshold * 1000;
+  }
+  return metadata && metadata.ttl !== null && metadata.ttl !== undefined
+    ? metadata.ttl <= threshold
+    : false;
+}
+
+function getTokenCache(deps) {
+  return deps.tokenCache || vaultTokenCache;
+}
+
+function getTokenCacheOptions(config, deps) {
+  const options = { ...(deps.tokenCacheOptions || {}) };
+  if (
+    !Object.prototype.hasOwnProperty.call(options, 'filePath') &&
+    Object.prototype.hasOwnProperty.call(config, 'tokenCachePath')
+  ) {
+    options.filePath = config.tokenCachePath;
+  }
+  return options;
+}
+
+function readCachedToken(config, deps) {
+  const cache = getTokenCache(deps);
+  const read = cache.readVaultTokenCache || cache.read;
+  if (typeof read !== 'function') return null;
+
+  try {
+    return read(config, getTokenCacheOptions(config, deps));
+  } catch {
+    // Cache failures are never allowed to block a fresh OIDC login.
+    return null;
+  }
+}
+
+function saveCachedToken(config, token, metadata, deps) {
+  const cache = getTokenCache(deps);
+  const write = cache.writeVaultTokenCache || cache.write;
+  if (typeof write !== 'function') {
+    return {
+      saved: false,
+      warning: 'Vault token cache is unavailable; this startup will require login again.',
+    };
+  }
+
+  try {
+    const result = write(config, token, metadata, getTokenCacheOptions(config, deps));
+    if (result && result.saved === false) {
+      return {
+        saved: false,
+        warning: 'Vault token cache could not be saved; this startup will continue safely.',
+      };
+    }
+    return { saved: true };
+  } catch {
+    return {
+      saved: false,
+      warning: 'Vault token cache could not be saved; this startup will continue safely.',
+    };
+  }
+}
+
+function invalidateCachedToken(config, deps) {
+  const cache = getTokenCache(deps);
+  const remove = cache.deleteVaultTokenCache || cache.delete || cache.remove;
+  if (typeof remove !== 'function') {
+    return {
+      deleted: false,
+      warning: 'Vault token cache could not be invalidated; reauthentication will continue safely.',
+    };
+  }
+
+  try {
+    const result = remove(config, getTokenCacheOptions(config, deps));
+    const deleted = !result || result.deleted !== false;
+    return {
+      deleted,
+      ...(deleted
+        ? {}
+        : {
+            warning:
+              'Vault token cache could not be invalidated; reauthentication will continue safely.',
+          }),
+    };
+  } catch {
+    return {
+      deleted: false,
+      warning: 'Vault token cache could not be invalidated; reauthentication will continue safely.',
+    };
+  }
+}
+
+async function readVaultEnvironmentWithToken(config, token, source, deps) {
+  let activeToken = token;
+  let metadata;
+  let shouldSave = source === 'oidc';
+
+  if (source === 'cache') {
+    const lookup = deps.lookupSelf || lookupSelf;
+    metadata = await lookup(config, activeToken, deps);
+    const now = getCurrentTime(deps);
+    if (isTokenExpired(metadata, now)) {
+      throw new VaultError(
+        'The cached Vault token is expired or revoked. Reauthenticate with Vault.',
+        'VAULT_UNAUTHORIZED',
+        401
+      );
+    }
+
+    if (metadata.renewable && isTokenNearExpiry(metadata, config, now)) {
+      const renew = deps.renewSelf || renewSelf;
+      const renewed = await renew(config, activeToken, deps);
+      activeToken = renewed.token;
+      metadata = renewed;
+      shouldSave = true;
+    }
+  } else if (source === 'oidc') {
+    const lookup = deps.lookupSelf || lookupSelf;
+    metadata = await lookup(config, activeToken, deps);
+  }
+
+  const fields = await readKvV2(config, activeToken, deps);
+  const result = { values: mapVaultEnvironment(fields), source };
+  if (shouldSave) result.cache = saveCachedToken(config, activeToken, metadata, deps);
+  return result;
+}
+
+async function authenticateAndReadVaultEnvironment(config, deps) {
+  const authenticate = deps.authenticateWithOidc || authenticateWithOidc;
+  const token = await authenticate(config, deps);
+  return readVaultEnvironmentWithToken(config, token, 'oidc', deps);
+}
+
 /**
  * Authenticate with Vault and read the allowlisted runtime environment.
  * @param {object} config - Normalized Vault configuration
  * @param {object} [deps] - Injectable functions
- * @returns {Promise<{values: object, source: string}>}
+ * @returns {Promise<{values: object, source: string, cache?: object}>}
  */
 async function loadVaultEnvironment(config, deps = {}) {
   let token = config.token;
-  let source = 'token';
 
   try {
-    if (!token) {
-      source = 'oidc';
-      token = await (deps.authenticateWithOidc || authenticateWithOidc)(config, deps);
+    if (token) {
+      return readVaultEnvironmentWithToken(config, token, 'token', deps);
     }
 
-    const fields = await readKvV2(config, token, deps);
-    return { values: mapVaultEnvironment(fields), source };
+    const cached = readCachedToken(config, deps);
+    if (cached) {
+      try {
+        return await readVaultEnvironmentWithToken(config, cached.token, 'cache', deps);
+      } catch (error) {
+        if (!isVaultAuthorizationFailure(error)) throw error;
+        const invalidation = invalidateCachedToken(config, deps);
+        const result = await authenticateAndReadVaultEnvironment(config, deps);
+        result.cache = {
+          ...(result.cache || {}),
+          invalidated: invalidation.deleted,
+          ...(invalidation.warning ? { warning: invalidation.warning } : {}),
+        };
+        return result;
+      }
+    }
+
+    return authenticateAndReadVaultEnvironment(config, deps);
   } finally {
     token = null;
   }
@@ -863,6 +1183,8 @@ module.exports = {
   requestJson,
   requestAuthUrl,
   exchangeOidcCallback,
+  lookupSelf,
+  renewSelf,
   listenForOidcCallback,
   authenticateWithOidc,
   openBrowser,

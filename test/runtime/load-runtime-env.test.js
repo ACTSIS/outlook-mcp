@@ -52,6 +52,26 @@ describe('runtime/load-runtime-env', () => {
     expect(JSON.stringify(result)).not.toContain('value-from-kv-must-be-ignored');
   });
 
+  it('propagates only the safe cache result from Vault bootstrap', async () => {
+    const env = { VAULT_ADDR: 'https://vault.example.test' };
+    const loadVault = jest.fn().mockResolvedValue({
+      source: 'oidc',
+      values: { MS_TENANT_ID: 'vault-tenant-id' },
+      cache: {
+        saved: false,
+        warning: 'Vault token cache could not be saved; this startup will continue safely.',
+      },
+    });
+
+    const result = await loadRuntimeEnv({ env, loadVaultEnvironment: loadVault });
+
+    expect(result.vault.cache).toEqual({
+      saved: false,
+      warning: 'Vault token cache could not be saved; this startup will continue safely.',
+    });
+    expect(JSON.stringify(result)).not.toContain('vault-tenant-id');
+  });
+
   it('loads the adjacent .env when Vault is not configured', async () => {
     const env = {};
     const envPath = writeEnv(
@@ -140,5 +160,26 @@ describe('runtime/load-runtime-env', () => {
     await expect(loadRuntimeEnv({ env, loadVaultEnvironment: loadVault })).rejects.toThrow(
       'intranet/VPN'
     );
+  });
+
+  it('skips duplicate Vault bootstrap in the inherited auth child environment', async () => {
+    const marker = 'M365_MCP_RUNTIME_BOOTSTRAP_COMPLETE';
+    const previous = process.env[marker];
+    process.env[marker] = '1';
+    const loadVault = jest.fn();
+
+    try {
+      const result = await loadRuntimeEnv({ loadVaultEnvironment: loadVault });
+
+      expect(result).toEqual({
+        envFile: null,
+        loadedFromFile: 0,
+        vault: { enabled: true, skipped: true, loaded: 0 },
+      });
+      expect(loadVault).not.toHaveBeenCalled();
+    } finally {
+      if (previous === undefined) delete process.env[marker];
+      else process.env[marker] = previous;
+    }
   });
 });
