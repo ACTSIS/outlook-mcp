@@ -28,6 +28,8 @@ function resolveEnvPath(options = {}) {
     path.join(path.dirname(execPath), ENV_FILENAME),
     // Source run: `.env` beside the module source tree
     path.join(sourceDir, ENV_FILENAME),
+    // Source dispatcher: `.env` at the repository root beside the source tree
+    path.join(sourceDir, '..', ENV_FILENAME),
   ];
 
   for (const candidate of candidates) {
@@ -44,11 +46,13 @@ function resolveEnvPath(options = {}) {
  * @param {object} options - Overrides (for tests)
  * @param {object} options.env - Target environment object
  * @param {string} options.envPath - Absolute path to the `.env` file
+ * @param {Set<string>} options.loadedKeys - Receives keys loaded from the file
  * @returns {object|null} { path, loaded } or null when no file exists
  */
 function loadEnv(options = {}) {
   const env = options.env || process.env;
   const envPath = options.envPath || resolveEnvPath();
+  const loadedKeys = options.loadedKeys;
 
   if (!envPath || !fs.existsSync(envPath)) return null;
 
@@ -67,6 +71,7 @@ function loadEnv(options = {}) {
 
     if (key && env[key] === undefined) {
       env[key] = value;
+      if (loadedKeys) loadedKeys.add(key);
       loaded += 1;
     }
   }

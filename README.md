@@ -42,7 +42,7 @@ You need Node.js 22.22.1 or later and a Microsoft Entra app registration.
      "mcpServers": {
        "m365-assistant": {
          "command": "node",
-         "args": ["/absolute/path/to/outlook-mcp/index.js"],
+         "args": ["/absolute/path/to/outlook-mcp/bin/m365-mcp.js", "mcp"],
          "env": {
            "OUTLOOK_CLIENT_ID": "your-application-client-id",
            "OUTLOOK_CLIENT_SECRET": "your-client-secret-value",
@@ -113,13 +113,76 @@ The server can start without credentials, but the first Graph or Power Automate 
 
 `MS_SCOPES`, `MS_REDIRECT_URI`, and `MS_TOKEN_ENDPOINT` are refresh/exchange overrides, not complete replacements for the active initial acquisition flow. Leave them unset unless you specifically need those `TokenStorage` behaviors.
 
+#### HashiCorp Vault for intranet developers
+
+Vault mode keeps OAuth values outside the public executable and outside developer MCP configuration. It is **intranet-only**: the developer machine must be able to reach `VAULT_ADDR` through the corporate network, VPN, or NetBird as required by the local environment. GitHub Actions does not connect to Vault, ProGet, or NetBird for the public release.
+
+Set `VAULT_ADDR` to enable Vault mode. The other settings are optional:
+
+| Variable                    | Default                 | Purpose                                                                                      |
+| --------------------------- | ----------------------- | -------------------------------------------------------------------------------------------- |
+| `VAULT_ADDR`                | Disabled when unset     | Intranet Vault HTTP(S) address; enables Vault mode                                           |
+| `VAULT_AUTH_MOUNT`          | `oidc`                  | Vault JWT/OIDC auth mount                                                                    |
+| `VAULT_ROLE`                | `outlook-mcp-developer` | OIDC role used for developer login                                                           |
+| `VAULT_OIDC_PORT`           | `8250`                  | Loopback callback port                                                                       |
+| `VAULT_KV_MOUNT`            | `kv`                    | KV v2 mount                                                                                  |
+| `VAULT_SECRET_PATH`         | `outlook-mcp/actsis`    | KV v2 secret path                                                                            |
+| `VAULT_NAMESPACE`           | Unset                   | Optional Vault Enterprise namespace                                                          |
+| `VAULT_SKIP_BROWSER`        | `false`                 | Set to `true` for manual URL flow; the URL is printed to stderr and the callback stays local |
+| `VAULT_CUSTOM_HEADER_NAME`  | Unset                   | Optional custom HTTP header name sent with every Vault API request                           |
+| `VAULT_CUSTOM_HEADER_VALUE` | Unset                   | Sensitive value paired with `VAULT_CUSTOM_HEADER_NAME`; never logged or persisted            |
+| `VAULT_TOKEN`               | Unset                   | Automation/testing escape hatch; no browser flow, never persisted or logged                  |
+
+When `VAULT_TOKEN` is absent, the runtime requests a short-lived Vault token through the Vault OIDC browser flow. The local listener accepts only `GET http://127.0.0.1:<port>/oidc/callback`; the Vault role and the OIDC provider must allow the matching `http://localhost:<port>/oidc/callback` URI. With the defaults, configure `http://localhost:8250/oidc/callback` exactly. Static `VAULT_TOKEN` values are not recommended for developer installs.
+
+The code default for `VAULT_SECRET_PATH` remains `outlook-mcp/actsis` for compatibility with existing installations. For the Actsis Vault, set the path explicitly:
+
+```dotenv
+VAULT_ADDR=https://vault.edge.actsis.com
+VAULT_KV_MOUNT=kv
+VAULT_SECRET_PATH=apps/outlook-mcp/prod
+VAULT_CUSTOM_HEADER_NAME=X-ACCESS-TOKEN
+VAULT_CUSTOM_HEADER_VALUE=replace-with-local-secret
+```
+
+Replace `replace-with-local-secret` locally through the process environment, OpenCode secret configuration, or a protected local `.env` file. The header value is sensitive: never commit it, put it in a fixture or release workflow, or embed it in the executable. If either custom-header variable is set without the other, startup fails with `VAULT_CONFIG_INVALID`.
+
+The custom header is sent only on the server-side HTTP requests to Vault: the OIDC authorization URL request, the OIDC callback exchange, and the KV v2 read. Its value is never placed in the OAuth browser URL or sent to the identity provider by the browser. `VAULT_CUSTOM_HEADER_NAME` must be a legal HTTP header token and cannot replace Vault-controlled authentication or namespace headers.
+
+Store the following fields in KV v2 at `kv/data/apps/outlook-mcp/prod` for the Actsis configuration:
+
+```text
+MS_CLIENT_ID
+MS_CLIENT_SECRET
+MS_TENANT_ID
+```
+
+The runtime also accepts the existing optional overrides `OUTLOOK_CLIENT_ID`, `OUTLOOK_CLIENT_SECRET`, `MS_AUTHORITY_HOST`, `MS_SCOPES`, `MS_REDIRECT_URI`, and `MS_TOKEN_ENDPOINT`. Unrelated KV fields are ignored. A least-privilege policy should grant read access only to this secret path:
+
+```hcl
+path "kv/data/apps/outlook-mcp/prod" {
+  capabilities = ["read"]
+}
+```
+
+Attach that policy to the `outlook-mcp-developer` OIDC role. Configure the Vault OIDC provider and role according to HashiCorp's [JWT/OIDC API](https://developer.hashicorp.com/vault/api-docs/auth/jwt) and [Azure OIDC provider guide](https://developer.hashicorp.com/vault/docs/auth/jwt/oidc-providers/azuread); use query response mode and the exact localhost callback URI. Do not put an OIDC client secret or a Vault token in this repository.
+
+The runtime precedence is explicit:
+
+1. Parent process and MCP-client environment values win, including intentionally empty values.
+2. Vault values override only values that came from the adjacent `.env` file and fill missing runtime values.
+3. The adjacent `.env` file fills values not supplied by the process or Vault.
+
+If `VAULT_ADDR` is unset, Vault is skipped and the existing adjacent `.env`/process-environment behavior remains available.
+
 #### Precedence
 
-The server sees MCP-client values and shell/OS values together as `process.env`; it does not distinguish their origin. The effective order is:
+The server sees MCP-client values and shell/OS values together as `process.env`; it does not distinguish their origin. With Vault enabled, the effective order is:
 
-1. Existing process environment values win. An MCP client's `env` block is passed into `process.env`, so it overrides a value from the `.env` file beside the executable.
-2. The packaged dispatcher reads `.env` beside the executable and fills only variables that are not already set. It does not overwrite an existing value, including an intentionally empty value.
-3. If both names in an alias pair are non-empty, `OUTLOOK_CLIENT_ID` wins over `MS_CLIENT_ID`, and `OUTLOOK_CLIENT_SECRET` wins over `MS_CLIENT_SECRET`. The alias fallback uses JavaScript's `||`, so an empty `OUTLOOK_*` value falls back to its `MS_*` alias even though the `.env` loader does not replace that empty process value.
+1. Existing process environment values win. An MCP client's `env` block is passed into `process.env`, so it overrides both Vault and the adjacent `.env` file, including an intentionally empty value.
+2. Vault values replace values loaded from the adjacent `.env` and fill missing runtime values.
+3. The dispatcher reads the adjacent `.env` and fills only variables not supplied by the process or Vault.
+4. If both names in an alias pair are non-empty, `OUTLOOK_CLIENT_ID` wins over `MS_CLIENT_ID`, and `OUTLOOK_CLIENT_SECRET` wins over `MS_CLIENT_SECRET`. The alias fallback uses JavaScript's `||`, so an empty `OUTLOOK_*` value falls back to its `MS_*` alias when that alias is also supplied by the process.
 
 For a packaged executable, `.env` is resolved by the executable's directory, not by the MCP client's working directory. Keep the file beside the downloaded binary.
 
@@ -224,7 +287,7 @@ The MCP client supplies these values when it starts the process. Do not place a 
 - The inspected workflows use no OAuth client secrets. The release job uses GitHub's built-in `github.token` only to publish the release; it is not a Microsoft credential and is not embedded in the binary.
 - Build-time GitHub Actions credentials, if a future maintenance workflow needs them, are CI/release infrastructure credentials. They must never be used as substitutes for the end user's runtime Microsoft Entra values.
 
-The existing npm installation above remains fully supported and unchanged. Its `.env` lives in the project directory, while a pre-built executable reads `.env` beside the binary. Both paths use the same `OUTLOOK_*`/`MS_*` variables, and both `mcp` and `auth` modes use the same runtime environment.
+The existing npm installation remains supported through `bin/m365-mcp.js`, which bootstraps the same runtime environment as the pre-built executable. Its `.env` lives in the project directory, while a pre-built executable reads `.env` beside the binary. Both paths use the same `OUTLOOK_*`/`MS_*` variables, and both `mcp` and `auth` modes use the same runtime environment.
 
 ## What the server can do
 
@@ -343,7 +406,7 @@ For the token lifecycle, failure behavior, and current limitations, read [Authen
 
 ## Configuration reference
 
-For the npm path, `index.js` and `outlook-auth-server.js` load the project `.env`. For a pre-built executable, the dispatcher loads `.env` beside the executable before starting either mode. In both paths, existing process environment variables, including values supplied by an MCP client's `env` block, take precedence over file values.
+For the npm path, `bin/m365-mcp.js` loads the project `.env` before starting either mode. For a pre-built executable, the same dispatcher loads `.env` beside the executable. In both paths, existing process environment variables, including values supplied by an MCP client's `env` block, take precedence over file values; see the Vault precedence section when Vault mode is enabled.
 
 | Variable                | Consumer                                     | Default / precedence                   | Notes                                                                                             |
 | ----------------------- | -------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------- |
@@ -362,13 +425,13 @@ The standalone auth server always listens on port `3333`; there is no environmen
 
 ## Other MCP clients
 
-Use the same absolute `node /path/to/outlook-mcp/index.js` command and environment values:
+Use the same absolute `node /path/to/outlook-mcp/bin/m365-mcp.js` command and environment values:
 
 ```toml
 # ~/.codex/config.toml
 [mcp_servers.m365-assistant]
 command = "node"
-args = ["/absolute/path/to/outlook-mcp/index.js"]
+args = ["/absolute/path/to/outlook-mcp/bin/m365-mcp.js", "mcp"]
 
 [mcp_servers.m365-assistant.env]
 OUTLOOK_CLIENT_ID = "your-application-client-id"
@@ -383,17 +446,25 @@ OpenCode uses a command array instead:
   "mcp": {
     "m365-assistant": {
       "type": "local",
-      "command": ["node", "/absolute/path/to/outlook-mcp/index.js"],
+      "command": ["node", "/absolute/path/to/outlook-mcp/bin/m365-mcp.js"],
+      "args": ["mcp"],
       "enabled": true,
       "environment": {
-        "OUTLOOK_CLIENT_ID": "your-application-client-id",
-        "OUTLOOK_CLIENT_SECRET": "your-client-secret-value",
-        "MS_TENANT_ID": "your-directory-tenant-id",
+        "VAULT_ADDR": "https://vault.edge.actsis.com",
+        "VAULT_AUTH_MOUNT": "oidc",
+        "VAULT_ROLE": "outlook-mcp-developer",
+        "VAULT_OIDC_PORT": "8250",
+        "VAULT_KV_MOUNT": "kv",
+        "VAULT_SECRET_PATH": "apps/outlook-mcp/prod",
+        "VAULT_CUSTOM_HEADER_NAME": "X-ACCESS-TOKEN",
+        "VAULT_CUSTOM_HEADER_VALUE": "replace-with-local-secret",
       },
     },
   },
 }
 ```
+
+Replace the custom-header placeholder locally with the protected secret value. Keep it in OpenCode's local secret configuration, the process environment, or a protected local `.env`; do not commit it or embed it in the executable. The value is used only for Vault API requests and is not included in the OAuth browser URL.
 
 ## Troubleshooting
 

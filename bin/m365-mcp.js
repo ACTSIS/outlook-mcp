@@ -32,51 +32,55 @@ function resolveMode(args) {
  * Run the dispatcher for the given arguments.
  * @param {string[]} args - Process arguments after the executable/script
  * @param {object} deps - Dependencies (overridable for tests)
- * @param {Function} deps.loadEnv - Loads external environment configuration
+ * @param {Function} deps.loadRuntimeEnv - Loads external environment configuration
+ * @param {Function} deps.loadEnv - Backward-compatible test dependency alias
  * @param {Function} deps.startMCP - Starts the MCP server entry point
  * @param {Function} deps.startAuth - Starts the auth callback server entry point
  * @param {Function} deps.setAuthLauncher - Points auth-server-manager at this executable
  * @param {Function} deps.isPackagedExecutable - True when running as a standalone binary
  * @param {string} deps.execPath - Path of the running executable
  * @param {object} deps.stderr - Stream receiving usage output
- * @returns {number} Process exit code
+ * @returns {Promise<number>} Process exit code
  */
-function run(args, deps = {}) {
+async function run(args, deps = {}) {
   const stderr = deps.stderr || process.stderr;
 
   const mode = resolveMode(args);
 
+  if (!mode) {
+    stderr.write(`Usage: m365-mcp [${MODES.join('|')}]\n`);
+    stderr.write(`  ${MODES[0]}      start the MCP server (default)\n`);
+    stderr.write(`  ${MODES[1]}     start the authentication callback server (port 3333)\n`);
+    return 2;
+  }
+
+  const loadRuntimeEnv =
+    deps.loadRuntimeEnv || deps.loadEnv || require('../runtime/load-runtime-env').loadRuntimeEnv;
+  await loadRuntimeEnv();
+
   if (mode === 'mcp') {
-    const loadEnv = deps.loadEnv || require('../runtime/load-env').loadEnv;
     const startMCP = deps.startMCP || require('../index').startMCP;
     const setAuthLauncher =
       deps.setAuthLauncher || require('../auth/auth-server-manager').setLauncher;
     const execPath = deps.execPath || process.execPath;
     const isPackagedExecutable = deps.isPackagedExecutable || isStandaloneExecutable;
 
-    loadEnv();
-    // Packaged executables relaunch themselves in `auth` mode for the callback
-    // server; source runs keep the current `node outlook-auth-server.js`.
-    if (isPackagedExecutable(execPath)) {
-      setAuthLauncher({ command: execPath, args: ['auth'] });
-    }
-    startMCP();
+    // Both packaged and source runs relaunch through this dispatcher so the
+    // auth child receives the same runtime bootstrap and environment.
+    const launcher = isPackagedExecutable(execPath)
+      ? { command: execPath, args: ['auth'] }
+      : { command: process.execPath, args: [path.join(__dirname, 'm365-mcp.js'), 'auth'] };
+    setAuthLauncher(launcher);
+    await startMCP();
     return 0;
   }
 
   if (mode === 'auth') {
-    const loadEnv = deps.loadEnv || require('../runtime/load-env').loadEnv;
     const startAuth = deps.startAuth || require('../outlook-auth-server').startAuthServer;
 
-    loadEnv();
-    startAuth();
+    await startAuth();
     return 0;
   }
-
-  stderr.write(`Usage: m365-mcp [${MODES.join('|')}]\n`);
-  stderr.write(`  ${MODES[0]}      start the MCP server (default)\n`);
-  stderr.write(`  ${MODES[1]}     start the authentication callback server (port 3333)\n`);
-  return 2;
 }
 
 /**
@@ -114,8 +118,14 @@ function shouldDispatch(probes = {}) {
 // The SEA probe is checked first so bundled executables never evaluate the
 // require.main comparison (see shouldDispatch).
 if (shouldDispatch()) {
-  const code = run(process.argv.slice(2));
-  if (code !== 0) process.exit(code);
+  run(process.argv.slice(2))
+    .then((code) => {
+      if (code !== 0) process.exitCode = code;
+    })
+    .catch((error) => {
+      process.stderr.write(`Startup failed: ${error.message}\n`);
+      process.exitCode = 1;
+    });
 }
 
 module.exports = { run, resolveMode, MODES, shouldDispatch };

@@ -1,6 +1,6 @@
 {
   "name": "m365-mcp",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "MCP server for Microsoft 365 mail, calendar, OneDrive, inbox rules, and Power Automate",
   "main": "index.js",
   "bin": {
@@ -8,10 +8,10 @@
     "m365-mcp-auth": "./outlook-auth-server.js"
   },
   "scripts": {
-    "start": "node index.js",
-    "auth-server": "node outlook-auth-server.js",
-    "test-mode": "USE_TEST_MODE=true node index.js",
-    "inspect": "npx @modelcontextprotocol/inspector node index.js",
+    "start": "node bin/m365-mcp.js",
+    "auth-server": "node bin/m365-mcp.js auth",
+    "test-mode": "USE_TEST_MODE=true node bin/m365-mcp.js",
+    "inspect": "npx @modelcontextprotocol/inspector node bin/m365-mcp.js",
     "test": "jest",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

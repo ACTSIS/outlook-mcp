@@ -58,8 +58,12 @@ describe('auth-server-manager', () => {
 
     expect(spawn).toHaveBeenCalledWith(
       process.execPath,
-      expect.arrayContaining([expect.stringMatching(/outlook-auth-server\.js$/)]),
-      expect.objectContaining({ detached: false, stdio: ['ignore', 'ignore', 'ignore'] })
+      expect.arrayContaining([expect.stringMatching(/bin[\\/]m365-mcp\.js$/), 'auth']),
+      expect.objectContaining({
+        detached: false,
+        env: process.env,
+        stdio: ['ignore', 'ignore', 'ignore'],
+      })
     );
     expect(child.unref).toHaveBeenCalledTimes(1);
     expect(result).toEqual({
@@ -162,7 +166,7 @@ describe('auth-server-manager', () => {
 
     expect(freshSpawn).toHaveBeenCalledWith(
       process.execPath,
-      expect.arrayContaining([expect.stringMatching(/outlook-auth-server\.js$/)]),
+      expect.arrayContaining([expect.stringMatching(/bin[\\/]m365-mcp\.js$/), 'auth']),
       expect.objectContaining({ detached: false, stdio: ['ignore', 'ignore', 'ignore'] })
     );
   });

@@ -8,15 +8,16 @@ const AUTH_SERVER_URL = config.AUTH_CONFIG.authServerUrl;
 
 let authServerProcess = null;
 
+const AUTH_DISPATCHER_PATH = path.join(__dirname, '..', 'bin', 'm365-mcp.js');
+
 // Launcher override for packaged executables. When set, the callback server is
-// launched through this command/args pair (e.g. the dispatcher `auth` mode);
-// the source npm path keeps launching `node outlook-auth-server.js`.
+// launched through this command/args pair (e.g. the dispatcher `auth` mode).
 let launcher = null;
 
 /**
  * Select how the callback server process is launched.
  * @param {{command: string, args: string[]}|null} value - Dispatcher launcher,
- *   or null/undefined to restore the source `node outlook-auth-server.js` default.
+ *   or null/undefined to restore the source dispatcher default.
  */
 function setLauncher(value) {
   launcher = value || null;
@@ -58,7 +59,7 @@ async function startAuthServer() {
   }
 
   const command = launcher ? launcher.command : process.execPath;
-  const args = launcher ? launcher.args : [AUTH_SERVER_PATH];
+  const args = launcher ? launcher.args : [AUTH_DISPATCHER_PATH, 'auth'];
 
   authServerProcess = spawn(command, args, {
     cwd: path.dirname(AUTH_SERVER_PATH),
