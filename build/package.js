@@ -3,7 +3,8 @@
  *
  * Strategy (from design): bundle the CommonJS graph with `@vercel/ncc` into a
  * single script, build a Node 22 SEA blob, copy the target platform's Node 22
- * executable, and inject the blob with `postject`.
+ * executable, apply Windows VERSIONINFO metadata, and inject the blob with
+ * `postject`.
  *
  * Contract:
  *   npm run package -- --target win-x64|linux-x64|all
@@ -28,6 +29,8 @@ const TARGET_DEFS = {
   'linux-x64': { exeSuffix: '' },
 };
 
+const WINDOWS_VERSION_COMPONENT_MAX = 65535;
+
 /**
  * Resolve the requested targets from the CLI value.
  * @param {string|undefined} target - 'win-x64', 'linux-x64', or 'all'
@@ -49,6 +52,93 @@ function artifactNames(target) {
   const combined = [`outlook-mcp-${target}${suffix}`];
   const fallback = [`outlook-mcp-${target}-mcp${suffix}`, `outlook-mcp-${target}-auth${suffix}`];
   return { combined, fallback };
+}
+
+/**
+ * Normalize a package version into the four numeric components accepted by
+ * Windows VERSIONINFO resources.
+ * @param {unknown} packageVersion - The version from package.json
+ * @returns {string} Numeric Windows version such as `2.2.3.0`
+ * @throws {Error} When the version cannot be represented safely
+ */
+function normalizeWindowsVersion(packageVersion) {
+  const match =
+    typeof packageVersion === 'string' &&
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(packageVersion);
+  if (!match) {
+    throw new Error(
+      '[package] package.json version must use numeric major.minor.patch form for Windows metadata'
+    );
+  }
+
+  const components = match.slice(1).map(Number);
+  if (
+    components.some(
+      (component) => !Number.isSafeInteger(component) || component > WINDOWS_VERSION_COMPONENT_MAX
+    )
+  ) {
+    throw new Error(
+      '[package] package.json version cannot be represented as a Windows file version; each component must be between 0 and 65535'
+    );
+  }
+
+  return `${components.join('.')}.0`;
+}
+
+/**
+ * Read the package version used to identify generated artifacts.
+ * @param {string} repoRoot - Absolute repository root
+ * @returns {string} The package.json version
+ */
+function readPackageVersion(repoRoot) {
+  const packagePath = path.join(repoRoot, 'package.json');
+  let packageJson;
+  try {
+    packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+  } catch {
+    throw new Error('[package] unable to read package.json version for Windows metadata');
+  }
+
+  if (!packageJson || typeof packageJson.version !== 'string') {
+    throw new Error('[package] package.json must contain a version for Windows metadata');
+  }
+  return packageJson.version;
+}
+
+/**
+ * Build the Windows resource metadata for a generated executable.
+ * @param {string} packageVersion - The version from package.json
+ * @param {string} artifactName - The generated executable basename
+ * @returns {object} rcedit options
+ */
+function buildWindowsMetadata(packageVersion, artifactName) {
+  const windowsVersion = normalizeWindowsVersion(packageVersion);
+  return {
+    'file-version': windowsVersion,
+    'product-version': windowsVersion,
+    'version-string': {
+      CompanyName: 'ACTSIS',
+      FileDescription: 'M365 Assistant MCP Server',
+      InternalName: artifactName,
+      OriginalFilename: artifactName,
+      ProductName: 'M365 Assistant MCP Server',
+      FileVersion: windowsVersion,
+      ProductVersion: windowsVersion,
+    },
+  };
+}
+
+/**
+ * Apply Windows VERSIONINFO resources through the Electron-maintained rcedit
+ * package. The import remains lazy so non-Windows targets never load it.
+ * @param {string} exePath - Executable to update
+ * @param {object} metadata - rcedit options
+ * @param {Function|undefined} rceditImpl - Injectable editor for tests
+ * @returns {Promise<void>}
+ */
+async function applyWindowsMetadata(exePath, metadata, rceditImpl) {
+  const editResources = rceditImpl || (await import('rcedit')).rcedit;
+  await editResources(exePath, metadata);
 }
 
 /**
@@ -120,22 +210,22 @@ function parseArgs(args) {
  * Runs on the native platform for its matching target; cross-target builds
  * fail closed with a clear message (integration phase runs native matrices).
  * @param {string} target - 'win-x64' or 'linux-x64'
- * @param {object} context - { repoRoot, stagedDir, log, stageArtifacts, commitArtifacts }
+ * @param {object} context - Build paths, callbacks, and optional test dependencies
  * @returns {Promise<boolean>} True when artifacts were staged and committed
  */
 async function buildTarget(target, context) {
   const { repoRoot, stagedDir, log, stageArtifacts, commitArtifacts } = context;
   log(`[package] building ${target}`);
 
-  const platformMatch =
-    target === 'win-x64' ? process.platform === 'win32' : process.platform === 'linux';
+  const platform = context.platform || process.platform;
+  const platformMatch = target === 'win-x64' ? platform === 'win32' : platform === 'linux';
   if (!platformMatch) {
     log(`[package] ${target} requires its native runner; aborting`);
     return false;
   }
 
-  const ncc = require('@vercel/ncc');
-  const { execFileSync } = require('child_process');
+  const ncc = context.ncc || require('@vercel/ncc');
+  const execFileSync = context.execFileSync || require('child_process').execFileSync;
 
   const entries = resolveEntryFiles(repoRoot);
   if (entries.length === 0) {
@@ -147,7 +237,9 @@ async function buildTarget(target, context) {
   const blobName = 'sea.blob';
   const seaConfig = path.join(stagedDir, 'sea-config.json');
   const nodeBin =
-    resolveSeaNodeBinary([process.execPath, process.env.M365_SEA_NODE_BIN].filter(Boolean)) || null;
+    context.nodeBin ||
+    resolveSeaNodeBinary([process.execPath, process.env.M365_SEA_NODE_BIN].filter(Boolean)) ||
+    null;
   if (!nodeBin) {
     log(
       '[package] no fuse-bearing Node executable found; set M365_SEA_NODE_BIN to a Node 22+ binary that contains the SEA fuse sentinel'
@@ -172,17 +264,36 @@ async function buildTarget(target, context) {
     stdio: 'inherit',
   });
 
-  // 3. Copy the platform Node executable and inject the blob with postject.
-  const postject = require('postject');
+  // 3. Copy the platform Node executable and make the copy writable.
   const outPath = path.join(stagedDir, combinedName);
-  fs.copyFileSync(nodeBin, outPath);
-  ensureWritable(outPath);
+  const copyFile = context.copyFileSync || fs.copyFileSync;
+  const makeWritable = context.ensureWritable || ensureWritable;
+  copyFile(nodeBin, outPath);
+  makeWritable(outPath);
+
+  // 4. Replace Node's inherited VERSIONINFO before postject changes the PE.
+  if (target === 'win-x64') {
+    try {
+      const metadata = buildWindowsMetadata(readPackageVersion(repoRoot), path.basename(outPath));
+      const applyMetadata =
+        context.applyWindowsMetadata ||
+        ((file, options) => applyWindowsMetadata(file, options, context.rcedit));
+      await applyMetadata(outPath, metadata);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown resource-editing error';
+      log(`[package] Windows metadata update failed; target was not published: ${message}`);
+      return false;
+    }
+  }
+
+  // 5. Inject the blob after the copied executable has its final metadata.
+  const postject = context.postject || require('postject');
   await postject.inject(outPath, 'NODE_SEA_BLOB', fs.readFileSync(path.join(stagedDir, blobName)), {
     machoSegmentName: 'NODE_SEA',
     sentinelFuse: 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2',
   });
 
-  // 4. Stage and commit; never expose an incomplete target.
+  // 6. Stage and commit; never expose an incomplete target.
   await stageArtifacts();
   return commitArtifacts();
 }
@@ -373,6 +484,10 @@ module.exports = {
   ensureWritable,
   hasSeaFuse,
   resolveSeaNodeBinary,
+  normalizeWindowsVersion,
+  readPackageVersion,
+  buildWindowsMetadata,
+  applyWindowsMetadata,
   main,
   buildTarget,
 };

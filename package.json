@@ -1,6 +1,6 @@
 {
   "name": "m365-mcp",
-  "version": "2.2.3",
+  "version": "2.3.0",
   "description": "MCP server for Microsoft 365 mail, calendar, OneDrive, inbox rules, and Power Automate",
   "main": "index.js",
   "bin": {
@@ -53,6 +53,7 @@
     "lint-staged": "^17.2.0",
     "postject": "1.0.0-alpha.6",
     "prettier": "^3.9.6",
+    "rcedit": "5.0.2",
     "supertest": "^7.0.0",
     "yaml": "2.9.0"
   },

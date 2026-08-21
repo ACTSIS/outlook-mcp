@@ -7,7 +7,6 @@
  * - Git repository selection: the repository root is resolved explicitly for
  *   relative, absolute, and `git -C`-style invocations; a wrong cwd fails
  *   closed.
- * Production code does not exist yet (RED).
  */
 const fs = require('fs');
 const os = require('os');
@@ -61,6 +60,31 @@ describe('build/package', () => {
         'outlook-mcp-linux-x64-mcp',
         'outlook-mcp-linux-x64-auth',
       ]);
+    });
+  });
+
+  describe('Windows executable metadata', () => {
+    it('normalizes the package version and identifies the actual artifact', () => {
+      expect(pkg.normalizeWindowsVersion('2.3.0')).toBe('2.3.0.0');
+      expect(pkg.buildWindowsMetadata('2.3.0', 'outlook-mcp-win-x64.exe')).toEqual({
+        'file-version': '2.3.0.0',
+        'product-version': '2.3.0.0',
+        'version-string': {
+          CompanyName: 'ACTSIS',
+          FileDescription: 'M365 Assistant MCP Server',
+          InternalName: 'outlook-mcp-win-x64.exe',
+          OriginalFilename: 'outlook-mcp-win-x64.exe',
+          ProductName: 'M365 Assistant MCP Server',
+          FileVersion: '2.3.0.0',
+          ProductVersion: '2.3.0.0',
+        },
+      });
+    });
+
+    it('rejects invalid and unrepresentable package versions safely', () => {
+      expect(() => pkg.normalizeWindowsVersion('2.2')).toThrow(/major\.minor\.patch/);
+      expect(() => pkg.normalizeWindowsVersion('2.2.3-beta.1')).toThrow(/major\.minor\.patch/);
+      expect(() => pkg.normalizeWindowsVersion('65536.0.0')).toThrow(/Windows file version/);
     });
   });
 
@@ -228,6 +252,102 @@ describe('build/package', () => {
       );
 
       return expect(Promise.resolve(code)).resolves.toBe(1);
+    });
+  });
+
+  describe('Windows metadata application ordering', () => {
+    const SEA_FUSE = 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2';
+
+    function buildContext(target, events, applyMetadata) {
+      const stagedDir = path.join(tempDir, `staged-${target}`);
+      const nodeBin = path.join(tempDir, `node-${target}`);
+      const packageVersion = require('../../package.json').version;
+      fs.writeFileSync(
+        path.join(tempDir, 'package.json'),
+        JSON.stringify({ version: packageVersion })
+      );
+      fs.writeFileSync(path.join(tempDir, 'index.js'), '// entry\n');
+      fs.writeFileSync(nodeBin, SEA_FUSE);
+
+      return {
+        repoRoot: tempDir,
+        stagedDir,
+        platform: target === 'win-x64' ? 'win32' : 'linux',
+        nodeBin,
+        log: () => {},
+        ncc: jest.fn().mockResolvedValue({ code: '// bundle\n' }),
+        execFileSync: jest.fn(() => fs.writeFileSync(path.join(stagedDir, 'sea.blob'), 'blob')),
+        copyFileSync: jest.fn((source, destination) => {
+          events.push('copy');
+          fs.copyFileSync(source, destination);
+        }),
+        ensureWritable: jest.fn((file) => {
+          events.push('ensureWritable');
+          fs.chmodSync(file, 0o666);
+        }),
+        postject: {
+          inject: jest.fn(async () => events.push('injection')),
+        },
+        applyWindowsMetadata: applyMetadata,
+        stageArtifacts: jest.fn(async () => events.push('stage')),
+        commitArtifacts: jest.fn(async () => {
+          events.push('commit');
+          return true;
+        }),
+      };
+    }
+
+    it('applies Windows metadata after copy/writability and before injection/staging', async () => {
+      const events = [];
+      const applyMetadata = jest.fn(async (_exePath, metadata) => {
+        events.push('metadata');
+        expect(metadata).toEqual(
+          pkg.buildWindowsMetadata(require('../../package.json').version, 'outlook-mcp-win-x64.exe')
+        );
+      });
+      const context = buildContext('win-x64', events, applyMetadata);
+
+      await expect(pkg.buildTarget('win-x64', context)).resolves.toBe(true);
+
+      expect(events).toEqual([
+        'copy',
+        'ensureWritable',
+        'metadata',
+        'injection',
+        'stage',
+        'commit',
+      ]);
+      expect(applyMetadata).toHaveBeenCalledWith(
+        path.join(context.stagedDir, 'outlook-mcp-win-x64.exe'),
+        pkg.buildWindowsMetadata(require('../../package.json').version, 'outlook-mcp-win-x64.exe')
+      );
+    });
+
+    it('fails the target without staging or committing when metadata editing fails', async () => {
+      const events = [];
+      const applyMetadata = jest.fn(async () => {
+        events.push('metadata');
+        throw new Error('resource editor failed');
+      });
+      const context = buildContext('win-x64', events, applyMetadata);
+
+      await expect(pkg.buildTarget('win-x64', context)).resolves.toBe(false);
+
+      expect(events).toEqual(['copy', 'ensureWritable', 'metadata']);
+      expect(context.postject.inject).not.toHaveBeenCalled();
+      expect(context.stageArtifacts).not.toHaveBeenCalled();
+      expect(context.commitArtifacts).not.toHaveBeenCalled();
+    });
+
+    it('does not invoke Windows metadata editing for Linux targets', async () => {
+      const events = [];
+      const applyMetadata = jest.fn();
+      const context = buildContext('linux-x64', events, applyMetadata);
+
+      await expect(pkg.buildTarget('linux-x64', context)).resolves.toBe(true);
+
+      expect(applyMetadata).not.toHaveBeenCalled();
+      expect(events).toEqual(['copy', 'ensureWritable', 'injection', 'stage', 'commit']);
     });
   });
 
