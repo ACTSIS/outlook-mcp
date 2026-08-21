@@ -711,8 +711,8 @@ function openBrowser(authUrl, deps = {}) {
   let args;
 
   if (platform === 'win32') {
-    command = process.env.ComSpec || 'cmd.exe';
-    args = ['/c', 'start', '', authUrl];
+    command = 'explorer.exe';
+    args = [authUrl];
   } else if (platform === 'darwin') {
     command = 'open';
     args = [authUrl];

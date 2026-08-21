@@ -10,6 +10,7 @@ const {
   listenForOidcCallback,
   loadVaultEnvironment,
   mapVaultEnvironment,
+  openBrowser,
   readKvV2,
   requestAuthUrl,
 } = require('../../runtime/vault-client');
@@ -357,6 +358,24 @@ describe('runtime/vault-client', () => {
     );
     expect(stderr.write.mock.calls.join('')).not.toContain('opaque-vault-token');
     expect(stderr.write.mock.calls.join('')).not.toContain(CUSTOM_HEADER_VALUE);
+  });
+
+  it('passes the complete Windows provider URL to explorer without shell parsing', () => {
+    const authUrl =
+      'https://login.example.test/authorize?client_id=client-id&code_challenge=challenge&redirect_uri=http%3A%2F%2Flocalhost%3A8250%2Foidc%2Fcallback&scope=openid%20profile&state=state-value';
+    const unref = jest.fn();
+    const spawn = jest.fn(() => ({ unref }));
+
+    expect(openBrowser(authUrl, { platform: 'win32', childProcess: { spawn } })).toBe(true);
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawn).toHaveBeenCalledWith('explorer.exe', [authUrl], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    expect(spawn.mock.calls[0][1]).toEqual([authUrl]);
+    expect(spawn.mock.calls[0][0]).not.toMatch(/cmd\.exe/i);
+    expect(spawn.mock.calls[0][1]).not.toContain('start');
+    expect(unref).toHaveBeenCalledTimes(1);
   });
 
   it('redacts a custom header value from wrapped request errors', async () => {
