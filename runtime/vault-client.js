@@ -472,14 +472,12 @@ function valuesMatch(expected, actual, cryptoModule = crypto) {
 }
 
 function validateCallback(query, authRequest, cryptoModule = crypto) {
-  if (!isNonEmpty(query.state) || !isNonEmpty(query.nonce) || !isNonEmpty(query.code)) {
-    return false;
-  }
+  if (!isNonEmpty(query.state) || !isNonEmpty(query.code)) return false;
+  if (!valuesMatch(authRequest.state, query.state, cryptoModule)) return false;
 
-  return (
-    valuesMatch(authRequest.state, query.state, cryptoModule) &&
-    valuesMatch(authRequest.nonce, query.nonce, cryptoModule)
-  );
+  return query.nonce === undefined || query.nonce === null
+    ? true
+    : valuesMatch(authRequest.nonce, query.nonce, cryptoModule);
 }
 
 /**
@@ -614,7 +612,15 @@ function listenForOidcCallback(config, authRequest, deps = {}) {
       return;
     }
 
-    exchangeOidcCallback(config, { ...query, clientNonce: authRequest.clientNonce }, deps)
+    exchangeOidcCallback(
+      config,
+      {
+        ...query,
+        nonce: authRequest.nonce,
+        clientNonce: authRequest.clientNonce,
+      },
+      deps
+    )
       .then((token) => {
         sendCallbackResponse(
           response,

@@ -134,6 +134,7 @@ Set `VAULT_ADDR` to enable Vault mode. The other settings are optional:
 | `VAULT_TOKEN`               | Unset                   | Automation/testing escape hatch; no browser flow, never persisted or logged                  |
 
 When `VAULT_TOKEN` is absent, the runtime requests a short-lived Vault token through the Vault OIDC browser flow. The local listener accepts only `GET http://127.0.0.1:<port>/oidc/callback`; the Vault role and the OIDC provider must allow the matching `http://localhost:<port>/oidc/callback` URI. With the defaults, configure `http://localhost:8250/oidc/callback` exactly. Static `VAULT_TOKEN` values are not recommended for developer installs.
+After sign-in, the identity-provider redirect must return the matching `state` and a `code`. The client retains the `nonce` from Vault's authorization URL for the callback exchange; if the provider returns a nonce too, it must match.
 
 The code default for `VAULT_SECRET_PATH` remains `outlook-mcp/actsis` for compatibility with existing installations. For the Actsis Vault, set the path explicitly:
 

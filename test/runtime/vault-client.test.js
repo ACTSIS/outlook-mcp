@@ -266,7 +266,7 @@ describe('runtime/vault-client', () => {
     expect(requests[2].headers['X-Vault-Namespace']).toBe('engineering');
   });
 
-  it('listens only on loopback, validates state/nonce/code, and does not expose the Vault token', async () => {
+  it('accepts a state/code-only callback and exchanges with the stored nonce and client nonce', async () => {
     const requestJson = jest
       .fn()
       .mockResolvedValue({ auth: { client_token: 'opaque-vault-token' } });
@@ -284,7 +284,6 @@ describe('runtime/vault-client', () => {
     const address = callback.server.address();
     const response = await requestLocalCallback(address.port, {
       state: 'state-value',
-      nonce: 'nonce-value',
       code: 'provider-code',
     });
 
@@ -292,9 +291,24 @@ describe('runtime/vault-client', () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).not.toContain('opaque-vault-token');
     await expect(callback.result).resolves.toBe('opaque-vault-token');
+
+    const request = requestJson.mock.calls[0][0];
+    expect(Object.fromEntries(new URL(request.url).searchParams)).toEqual({
+      state: 'state-value',
+      nonce: 'nonce-value',
+      code: 'provider-code',
+      client_nonce: 'client-nonce',
+    });
   });
 
-  it('rejects a callback with missing or mismatched required parameters', async () => {
+  it.each([
+    ['mismatched state', { state: 'wrong-state', code: 'provider-code' }],
+    ['missing code', { state: 'state-value' }],
+    [
+      'mismatched supplied nonce',
+      { state: 'state-value', nonce: 'wrong-nonce', code: 'provider-code' },
+    ],
+  ])('rejects a callback with %s', async (_caseName, query) => {
     const requestJson = jest.fn();
     const callback = listenForOidcCallback(
       createConfig({ oidcPort: 0, callbackTimeoutMs: 2000 }),
@@ -305,10 +319,7 @@ describe('runtime/vault-client', () => {
 
     await callback.ready;
     const address = callback.server.address();
-    const response = await requestLocalCallback(address.port, {
-      state: 'wrong-state',
-      code: 'provider-code',
-    });
+    const response = await requestLocalCallback(address.port, query);
 
     expect(response.statusCode).toBe(400);
     expect(requestJson).not.toHaveBeenCalled();
