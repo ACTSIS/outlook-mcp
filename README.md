@@ -53,6 +53,32 @@ You need Node.js 22.22.1 or later and a Microsoft Entra app registration.
    }
    ```
 
+4. With Vault:
+
+   ```json
+   {
+     "mcpServers": {
+       "outlook-assistant": {
+         "type": "local",
+         "command": [
+           "C:\\mcp\\outlook\\outlook-mcp-win-x64.exe",
+           "mcp"
+         ],
+         "environment": {
+           "VAULT_ADDR": "https://vault.com",
+           "VAULT_AUTH_MOUNT": "oidc",
+           "VAULT_ROLE": "entra",
+           "VAULT_OIDC_PORT": "8250",
+           "VAULT_KV_MOUNT": "kv",
+           "VAULT_SECRET_PATH": "apps/outlook-mcp/prod",
+           "VAULT_SKIP_BROWSER": "false"
+         },
+         "enabled": true
+       }
+     }
+   }
+   ```
+
    See [`claude-config-sample.json`](./claude-config-sample.json) for a copyable file. The server uses stdio, so restart the MCP client after changing its configuration.
 
 5. Call `authenticate`, copy the URL returned as the first response line, and open it in your browser. The browser is not opened automatically; the MCP tool starts the callback server automatically. Then call `check-auth-status` and use a Graph-backed tool such as `list-emails`.
