@@ -1025,6 +1025,28 @@ function getTokenCacheOptions(config, deps) {
   return options;
 }
 
+function getTokenCacheLock(deps) {
+  if (typeof deps.acquireVaultTokenCacheLock === 'function') {
+    return deps.acquireVaultTokenCacheLock;
+  }
+
+  const cache = getTokenCache(deps);
+  return cache.acquireVaultTokenCacheLock || cache.acquireLock;
+}
+
+async function withVaultTokenCacheLock(config, deps, operation) {
+  const acquire = getTokenCacheLock(deps);
+  if (typeof acquire !== 'function') return operation();
+
+  const release = await acquire(config, getTokenCacheOptions(config, deps));
+  try {
+    return await operation();
+  } finally {
+    if (typeof release === 'function') await release();
+    else if (release && typeof release.release === 'function') await release.release();
+  }
+}
+
 function readCachedToken(config, deps) {
   const cache = getTokenCache(deps);
   const read = cache.readVaultTokenCache || cache.read;
@@ -1150,24 +1172,26 @@ async function loadVaultEnvironment(config, deps = {}) {
       return readVaultEnvironmentWithToken(config, token, 'token', deps);
     }
 
-    const cached = readCachedToken(config, deps);
-    if (cached) {
-      try {
-        return await readVaultEnvironmentWithToken(config, cached.token, 'cache', deps);
-      } catch (error) {
-        if (!isVaultAuthorizationFailure(error)) throw error;
-        const invalidation = invalidateCachedToken(config, deps);
-        const result = await authenticateAndReadVaultEnvironment(config, deps);
-        result.cache = {
-          ...(result.cache || {}),
-          invalidated: invalidation.deleted,
-          ...(invalidation.warning ? { warning: invalidation.warning } : {}),
-        };
-        return result;
+    return withVaultTokenCacheLock(config, deps, async () => {
+      const cached = readCachedToken(config, deps);
+      if (cached) {
+        try {
+          return await readVaultEnvironmentWithToken(config, cached.token, 'cache', deps);
+        } catch (error) {
+          if (!isVaultAuthorizationFailure(error)) throw error;
+          const invalidation = invalidateCachedToken(config, deps);
+          const result = await authenticateAndReadVaultEnvironment(config, deps);
+          result.cache = {
+            ...(result.cache || {}),
+            invalidated: invalidation.deleted,
+            ...(invalidation.warning ? { warning: invalidation.warning } : {}),
+          };
+          return result;
+        }
       }
-    }
 
-    return authenticateAndReadVaultEnvironment(config, deps);
+      return authenticateAndReadVaultEnvironment(config, deps);
+    });
   } finally {
     token = null;
   }

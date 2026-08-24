@@ -4,7 +4,9 @@ const path = require('path');
 
 const {
   deleteVaultTokenCache,
+  acquireVaultTokenCacheLock,
   getVaultTokenCacheKey,
+  getVaultTokenCacheLockPath,
   getVaultTokenCachePath,
   readVaultTokenCache,
   writeVaultTokenCache,
@@ -112,6 +114,25 @@ describe('runtime/vault-token-cache', () => {
       expect(fs.statSync(filePath).mode & 0o777).toBe(0o600);
     }
     expect(readVaultTokenCache(config)).toEqual(entry);
+  });
+
+  it('recovers a sufficiently old lock left by a previous process', async () => {
+    const filePath = path.join(tempDir, 'vault-token.json');
+    const config = createConfig(filePath);
+    const lockPath = getVaultTokenCacheLockPath({ filePath });
+    fs.writeFileSync(lockPath, '', 'utf8');
+    const staleTime = new Date(Date.now() - 60_000);
+    fs.utimesSync(lockPath, staleTime, staleTime);
+
+    const release = await acquireVaultTokenCacheLock(config, {
+      lockStaleMs: 1000,
+      lockWaitTimeoutMs: 100,
+      lockPollIntervalMs: 1,
+    });
+
+    expect(fs.existsSync(lockPath)).toBe(true);
+    release();
+    expect(fs.existsSync(lockPath)).toBe(false);
   });
 
   it('ignores and deletes malformed entries without exposing their content', () => {

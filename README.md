@@ -177,7 +177,7 @@ Default cache locations are:
 | Windows     | `%LOCALAPPDATA%\m365-mcp\vault-token.json` (falls back to `%APPDATA%`, then the user home directory) |
 | Linux/POSIX | `${XDG_CONFIG_HOME:-~/.config}/m365-mcp/vault-token.json`                                            |
 
-Set `VAULT_TOKEN_CACHE_PATH` to choose another local path for tests or administrator-managed installations. The cache is written atomically; POSIX systems use mode `0600`, and Windows applies restrictive best-effort file handling under the current user profile.
+Set `VAULT_TOKEN_CACHE_PATH` to choose another local path for tests or administrator-managed installations. The cache is written atomically, and startup coordinates concurrent terminals with an exclusive `vault-token.json.lock` sidecar around cache validation, renewal, invalidation, and OIDC. POSIX systems use mode `0600`, and Windows applies restrictive best-effort file handling under the current user profile.
 
 To force another Vault login, delete the cache file. Revoking the cached Vault token also causes the next startup to discard it and run OIDC once more.
 

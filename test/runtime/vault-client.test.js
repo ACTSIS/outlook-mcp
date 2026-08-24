@@ -19,7 +19,11 @@ const {
   renewSelf,
   requestAuthUrl,
 } = require('../../runtime/vault-client');
-const { readVaultTokenCache, writeVaultTokenCache } = require('../../runtime/vault-token-cache');
+const {
+  getVaultTokenCacheLockPath,
+  readVaultTokenCache,
+  writeVaultTokenCache,
+} = require('../../runtime/vault-token-cache');
 
 const CUSTOM_HEADER_NAME = 'X-ACCESS-TOKEN';
 const CUSTOM_HEADER_VALUE = 'fake-header-value';
@@ -606,6 +610,48 @@ describe('runtime/vault-client', () => {
     expect(raw).not.toContain('MS_CLIENT_SECRET');
   });
 
+  it('waits for a concurrent startup and reuses the token saved by the first one', async () => {
+    const config = createConfig({ tokenCachePath: createCachePath() });
+    let resolveAuthentication;
+    const authenticate = jest
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveAuthentication = resolve;
+          })
+      )
+      .mockResolvedValue('unexpected-second-vault-token');
+    const lookup = jest.fn().mockResolvedValue({
+      expireTime: '2030-01-01T00:00:00Z',
+      ttl: 3600,
+      renewable: false,
+    });
+    const requestJson = jest.fn().mockResolvedValue({
+      data: { data: { MS_TENANT_ID: 'vault-tenant-id' } },
+    });
+    const deps = {
+      authenticateWithOidc: authenticate,
+      lookupSelf: lookup,
+      requestJson,
+      tokenCacheOptions: { lockPollIntervalMs: 1 },
+    };
+
+    const firstLoad = loadVaultEnvironment(config, deps);
+    await new Promise((resolve) => setImmediate(resolve));
+    const secondLoad = loadVaultEnvironment(config, deps);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    resolveAuthentication('fresh-vault-token');
+    const [firstResult, secondResult] = await Promise.all([firstLoad, secondLoad]);
+
+    expect(firstResult.source).toBe('oidc');
+    expect(secondResult.source).toBe('cache');
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    expect(readVaultTokenCache(config)).toMatchObject({ token: 'fresh-vault-token' });
+  });
+
   it('reuses a cached token on the next load without opening OIDC', async () => {
     const config = createConfig({ tokenCachePath: createCachePath() });
     writeVaultTokenCache(config, 'cached-vault-token', {
@@ -634,6 +680,22 @@ describe('runtime/vault-client', () => {
     expect(authenticate).not.toHaveBeenCalled();
     expect(lookup).toHaveBeenCalledTimes(1);
     expect(requestJson.mock.calls[0][0].headers['X-Vault-Token']).toBe('cached-vault-token');
+  });
+
+  it('fails on a cache lock timeout without falling back to OIDC', async () => {
+    const tokenCachePath = createCachePath();
+    const lockPath = getVaultTokenCacheLockPath({ filePath: tokenCachePath });
+    fs.writeFileSync(lockPath, '', 'utf8');
+    const authenticate = jest.fn();
+
+    await expect(
+      loadVaultEnvironment(createConfig({ tokenCachePath }), {
+        authenticateWithOidc: authenticate,
+        tokenCacheOptions: { lockWaitTimeoutMs: 10, lockPollIntervalMs: 1 },
+      })
+    ).rejects.toMatchObject({ code: 'VAULT_TOKEN_CACHE_LOCK_TIMEOUT' });
+
+    expect(authenticate).not.toHaveBeenCalled();
   });
 
   it('renews a renewable near-expiry cached token and saves the new metadata', async () => {

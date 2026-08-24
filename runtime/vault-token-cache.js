@@ -13,7 +13,11 @@ const path = require('path');
 const CACHE_VERSION = 1;
 const CACHE_DIRECTORY = 'm365-mcp';
 const CACHE_FILENAME = 'vault-token.json';
+const CACHE_LOCK_SUFFIX = '.lock';
 const CACHE_ENTRY_KEYS = new Set(['token', 'expireTime', 'ttl', 'renewable', 'savedAt']);
+const DEFAULT_LOCK_WAIT_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_LOCK_STALE_MS = 15 * 60 * 1000;
+const DEFAULT_LOCK_POLL_INTERVAL_MS = 50;
 
 class VaultTokenCacheError extends Error {
   constructor(message, code = 'VAULT_TOKEN_CACHE_ERROR') {
@@ -64,6 +68,10 @@ function resolveCachePath(options = {}) {
 
 function getVaultTokenCachePath(options = {}) {
   return resolveCachePath(options);
+}
+
+function getVaultTokenCacheLockPath(options = {}) {
+  return `${resolveCachePath(options)}${CACHE_LOCK_SUFFIX}`;
 }
 
 function normalizeAddress(address) {
@@ -176,6 +184,17 @@ function unlinkBestEffort(filePath, fsModule) {
   }
 }
 
+function ensureCacheDirectory(filePath, fsModule, platform) {
+  const pathModule = getPathModule(platform);
+  const parentDirectory = pathModule.dirname(filePath);
+  fsModule.mkdirSync(parentDirectory, { recursive: true, mode: 0o700 });
+  try {
+    fsModule.chmodSync(parentDirectory, 0o700);
+  } catch {
+    // Best effort on Windows; POSIX file mode remains enforced below.
+  }
+}
+
 function readDocument(filePath, fsModule) {
   let raw;
   try {
@@ -209,18 +228,11 @@ function applyRestrictiveMode(filePath, fsModule) {
 
 function writeDocumentAtomically(filePath, document, options = {}) {
   const fsModule = options.fs || fs;
-  const pathModule = getPathModule(options.platform || process.platform);
-  const parentDirectory = pathModule.dirname(filePath);
   const tempPath = makeTempPath(filePath, options);
   const payload = `${JSON.stringify(document, null, 2)}\n`;
 
   try {
-    fsModule.mkdirSync(parentDirectory, { recursive: true, mode: 0o700 });
-    try {
-      fsModule.chmodSync(parentDirectory, 0o700);
-    } catch {
-      // Best effort on Windows; POSIX file mode remains enforced below.
-    }
+    ensureCacheDirectory(filePath, fsModule, options.platform || process.platform);
     fsModule.writeFileSync(tempPath, payload, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
     applyRestrictiveMode(tempPath, fsModule);
     fsModule.renameSync(tempPath, filePath);
@@ -241,6 +253,169 @@ function getFileOptions(config, options = {}) {
     ...options,
     filePath,
   };
+}
+
+function getLockOption(options, name, fallback) {
+  return Number.isInteger(options[name]) && options[name] >= 0 ? options[name] : fallback;
+}
+
+function createLockError(message, code) {
+  return new VaultTokenCacheError(message, code);
+}
+
+function makeLockOwner() {
+  return JSON.stringify({
+    pid: process.pid,
+    nonce: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  });
+}
+
+function getLockOwnerPid(raw) {
+  try {
+    const owner = JSON.parse(raw);
+    return Number.isInteger(owner && owner.pid) && owner.pid > 0 ? owner.pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error && error.code !== 'ESRCH';
+  }
+}
+
+function recoverStaleLock(lockPath, fsModule, staleMs) {
+  let stats;
+  try {
+    stats = fsModule.statSync(lockPath);
+  } catch {
+    return false;
+  }
+
+  if (!Number.isFinite(stats.mtimeMs) || Date.now() - stats.mtimeMs < staleMs) return false;
+
+  let ownerPid = null;
+  try {
+    ownerPid = getLockOwnerPid(fsModule.readFileSync(lockPath, 'utf8'));
+  } catch {
+    return false;
+  }
+  if (ownerPid !== null && isProcessAlive(ownerPid)) return false;
+
+  const stalePath = `${lockPath}.${process.pid}.${Date.now()}.${Math.random()
+    .toString(16)
+    .slice(2)}.stale`;
+  try {
+    fsModule.renameSync(lockPath, stalePath);
+  } catch {
+    return false;
+  }
+  unlinkBestEffort(stalePath, fsModule);
+  return true;
+}
+
+function releaseVaultTokenCacheLock(lockPath, owner, descriptor, fsModule) {
+  let closeError;
+  try {
+    fsModule.closeSync(descriptor);
+  } catch (error) {
+    closeError = error;
+  }
+
+  let releaseError;
+  try {
+    const currentOwner = fsModule.readFileSync(lockPath, 'utf8');
+    if (currentOwner === owner) fsModule.unlinkSync(lockPath);
+  } catch (error) {
+    if (!error || error.code !== 'ENOENT') releaseError = error;
+  }
+
+  if (closeError || releaseError) {
+    throw createLockError(
+      'Unable to release the Vault token cache lock safely.',
+      'VAULT_TOKEN_CACHE_LOCK_RELEASE_FAILED'
+    );
+  }
+}
+
+/**
+ * Acquire the per-file lock used to coordinate Vault cache decisions.
+ * @param {object} config - Normalized Vault configuration
+ * @param {object} [options] - Injectable filesystem and lock timing settings
+ * @returns {Promise<Function>} Idempotent lock release function
+ */
+async function acquireVaultTokenCacheLock(config, options = {}) {
+  const fsModule = options.fs || fs;
+  const platform = options.platform || process.platform;
+  const filePath = resolveCachePath(getFileOptions(config, options));
+  const lockPath = `${filePath}${CACHE_LOCK_SUFFIX}`;
+  const waitTimeoutMs = getLockOption(options, 'lockWaitTimeoutMs', DEFAULT_LOCK_WAIT_TIMEOUT_MS);
+  const staleMs = getLockOption(options, 'lockStaleMs', DEFAULT_LOCK_STALE_MS);
+  const pollIntervalMs = getLockOption(
+    options,
+    'lockPollIntervalMs',
+    DEFAULT_LOCK_POLL_INTERVAL_MS
+  );
+
+  try {
+    ensureCacheDirectory(filePath, fsModule, platform);
+  } catch {
+    throw createLockError(
+      'Unable to prepare the Vault token cache lock.',
+      'VAULT_TOKEN_CACHE_LOCK_FAILED'
+    );
+  }
+
+  const deadline = Date.now() + waitTimeoutMs;
+  while (true) {
+    const owner = makeLockOwner();
+    let descriptor;
+    let created = false;
+    try {
+      descriptor = fsModule.openSync(lockPath, 'wx', 0o600);
+      created = true;
+      fsModule.writeSync(descriptor, owner, 0, 'utf8');
+      applyRestrictiveMode(lockPath, fsModule);
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        releaseVaultTokenCacheLock(lockPath, owner, descriptor, fsModule);
+      };
+    } catch (error) {
+      if (created) {
+        try {
+          fsModule.closeSync(descriptor);
+        } catch {
+          // The lock file cleanup below is still safe while this owner holds it.
+        }
+        unlinkBestEffort(lockPath, fsModule);
+      }
+
+      if (!error || error.code !== 'EEXIST') {
+        throw createLockError(
+          'Unable to acquire the Vault token cache lock.',
+          'VAULT_TOKEN_CACHE_LOCK_FAILED'
+        );
+      }
+    }
+
+    if (recoverStaleLock(lockPath, fsModule, staleMs)) continue;
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      throw createLockError(
+        'Timed out waiting for the Vault token cache lock.',
+        'VAULT_TOKEN_CACHE_LOCK_TIMEOUT'
+      );
+    }
+
+    const delayMs = Math.min(pollIntervalMs, remainingMs);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
 }
 
 /**
@@ -363,7 +538,9 @@ module.exports = {
   CACHE_FILENAME,
   VaultTokenCacheError,
   getVaultTokenCachePath,
+  getVaultTokenCacheLockPath,
   getVaultTokenCacheKey,
+  acquireVaultTokenCacheLock,
   readVaultTokenCache,
   writeVaultTokenCache,
   deleteVaultTokenCache,
