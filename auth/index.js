@@ -9,6 +9,16 @@ const { authTools } = require('./tools');
 const tokenStorage = new TokenStorage();
 
 /**
+ * Refresh the live authentication configuration after explicit Vault setup.
+ * The singleton is created before MCP tools run, so replacing process.env
+ * alone would otherwise leave stale credentials and endpoints in memory.
+ * @returns {object} Refreshed TokenStorage configuration
+ */
+function refreshRuntimeConfiguration() {
+  return tokenStorage.refreshRuntimeConfiguration();
+}
+
+/**
  * Ensures the user is authenticated and returns an access token.
  * Automatically refreshes expired tokens using the refresh_token grant.
  * @param {boolean} forceNew - Whether to force a new authentication
@@ -34,4 +44,5 @@ module.exports = {
   tokenStorage,
   authTools,
   ensureAuthenticated,
+  refreshRuntimeConfiguration,
 };

@@ -36,6 +36,8 @@ const VAULT_ENV_KEYS = Object.freeze([
   'MS_TOKEN_ENDPOINT',
 ]);
 
+const VAULT_SETUP_REQUIRED_MESSAGE = 'Vault setup is required. Call setup-vault to authenticate.';
+
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 const HTTP_HEADER_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const RESERVED_CUSTOM_HEADER_NAMES = new Set([
@@ -981,7 +983,10 @@ function mapVaultEnvironment(fields) {
 
 function isVaultAuthorizationFailure(error) {
   return Boolean(
-    error && (error.code === 'VAULT_UNAUTHORIZED' || error.status === 401 || error.status === 403)
+    error &&
+    (error.status === 401 ||
+      error.status === 403 ||
+      (error.status === undefined && error.code === 'VAULT_UNAUTHORIZED'))
   );
 }
 
@@ -1055,7 +1060,8 @@ function readCachedToken(config, deps) {
   try {
     return read(config, getTokenCacheOptions(config, deps));
   } catch {
-    // Cache failures are never allowed to block a fresh OIDC login.
+    // Cache failures are never allowed to block safe startup; setup-vault is
+    // the explicit path for a fresh OIDC login.
     return null;
   }
 }
@@ -1117,6 +1123,30 @@ function invalidateCachedToken(config, deps) {
   }
 }
 
+/**
+ * Invalidate only the configured Vault identity after a confirmed permanent
+ * Microsoft Entra OAuth failure. Cache access is serialized with ordinary
+ * startup and explicit setup so a concurrent writer cannot corrupt the cache.
+ *
+ * @param {object} config - Normalized Vault configuration
+ * @param {object} [deps] - Injectable cache and lock dependencies
+ * @returns {Promise<object>} Safe invalidation result
+ */
+async function invalidateVaultTokenCache(config, deps = {}) {
+  if (!config || !config.enabled || config.token) {
+    return { deleted: false, skipped: true };
+  }
+
+  try {
+    return await withVaultTokenCacheLock(config, deps, () => invalidateCachedToken(config, deps));
+  } catch {
+    return {
+      deleted: false,
+      warning: 'Vault token cache could not be invalidated safely.',
+    };
+  }
+}
+
 async function readVaultEnvironmentWithToken(config, token, source, deps) {
   let activeToken = token;
   let metadata;
@@ -1159,7 +1189,35 @@ async function authenticateAndReadVaultEnvironment(config, deps) {
 }
 
 /**
- * Authenticate with Vault and read the allowlisted runtime environment.
+ * Explicitly authenticate with Vault through OIDC, ignoring any cached token.
+ * A configured VAULT_TOKEN remains authoritative and is never cached.
+ *
+ * @param {object} config - Normalized Vault configuration
+ * @param {object} [deps] - Injectable functions
+ * @returns {Promise<{values: object, source: string, cache?: object}>}
+ */
+async function setupVaultEnvironment(config, deps = {}) {
+  if (!config || !config.enabled) {
+    return {
+      values: {},
+      source: 'disabled',
+      setupRequired: true,
+      message: 'Vault is disabled. Set VAULT_ADDR, then call setup-vault again.',
+    };
+  }
+
+  if (config.token) {
+    return readVaultEnvironmentWithToken(config, config.token, 'token', deps);
+  }
+
+  return withVaultTokenCacheLock(config, deps, () =>
+    authenticateAndReadVaultEnvironment(config, deps)
+  );
+}
+
+/**
+ * Load the allowlisted runtime environment from an explicit token or a
+ * validated cached token. This path never starts OIDC.
  * @param {object} config - Normalized Vault configuration
  * @param {object} [deps] - Injectable functions
  * @returns {Promise<{values: object, source: string, cache?: object}>}
@@ -1179,18 +1237,21 @@ async function loadVaultEnvironment(config, deps = {}) {
           return await readVaultEnvironmentWithToken(config, cached.token, 'cache', deps);
         } catch (error) {
           if (!isVaultAuthorizationFailure(error)) throw error;
-          const invalidation = invalidateCachedToken(config, deps);
-          const result = await authenticateAndReadVaultEnvironment(config, deps);
-          result.cache = {
-            ...(result.cache || {}),
-            invalidated: invalidation.deleted,
-            ...(invalidation.warning ? { warning: invalidation.warning } : {}),
+          return {
+            values: {},
+            source: 'setup-required',
+            setupRequired: true,
+            message: VAULT_SETUP_REQUIRED_MESSAGE,
           };
-          return result;
         }
       }
 
-      return authenticateAndReadVaultEnvironment(config, deps);
+      return {
+        values: {},
+        source: 'setup-required',
+        setupRequired: true,
+        message: VAULT_SETUP_REQUIRED_MESSAGE,
+      };
     });
   } finally {
     token = null;
@@ -1200,6 +1261,7 @@ async function loadVaultEnvironment(config, deps = {}) {
 module.exports = {
   DEFAULTS,
   VAULT_ENV_KEYS,
+  VAULT_SETUP_REQUIRED_MESSAGE,
   VaultError,
   getVaultConfig,
   buildRedirectUri,
@@ -1211,6 +1273,8 @@ module.exports = {
   renewSelf,
   listenForOidcCallback,
   authenticateWithOidc,
+  setupVaultEnvironment,
+  invalidateVaultTokenCache,
   openBrowser,
   readKvV2,
   mapVaultEnvironment,

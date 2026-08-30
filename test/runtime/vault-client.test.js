@@ -18,6 +18,8 @@ const {
   readKvV2,
   renewSelf,
   requestAuthUrl,
+  setupVaultEnvironment,
+  invalidateVaultTokenCache,
 } = require('../../runtime/vault-client');
 const {
   getVaultTokenCacheLockPath,
@@ -568,7 +570,7 @@ describe('runtime/vault-client', () => {
     expect(requestJson.mock.calls.join('')).not.toContain('opaque-vault-token');
   });
 
-  it('saves only Vault token metadata after the first OIDC load', async () => {
+  it('saves only Vault token metadata after explicit OIDC setup', async () => {
     const tokenCachePath = createCachePath();
     const config = createConfig({ tokenCachePath });
     const authenticate = jest.fn().mockResolvedValue('fresh-vault-token');
@@ -589,7 +591,7 @@ describe('runtime/vault-client', () => {
     });
 
     await expect(
-      loadVaultEnvironment(config, {
+      setupVaultEnvironment(config, {
         authenticateWithOidc: authenticate,
         lookupSelf: lookup,
         requestJson,
@@ -610,18 +612,10 @@ describe('runtime/vault-client', () => {
     expect(raw).not.toContain('MS_CLIENT_SECRET');
   });
 
-  it('waits for a concurrent startup and reuses the token saved by the first one', async () => {
+  it('does not start OIDC for concurrent startups without a cache', async () => {
     const config = createConfig({ tokenCachePath: createCachePath() });
-    let resolveAuthentication;
-    const authenticate = jest
-      .fn()
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveAuthentication = resolve;
-          })
-      )
-      .mockResolvedValue('unexpected-second-vault-token');
+    const authenticate = jest.fn();
+    const tokenCache = { readVaultTokenCache: jest.fn().mockReturnValue(null) };
     const lookup = jest.fn().mockResolvedValue({
       expireTime: '2030-01-01T00:00:00Z',
       ttl: 3600,
@@ -632,24 +626,21 @@ describe('runtime/vault-client', () => {
     });
     const deps = {
       authenticateWithOidc: authenticate,
+      tokenCache,
       lookupSelf: lookup,
       requestJson,
-      tokenCacheOptions: { lockPollIntervalMs: 1 },
+      tokenCacheOptions: { lockPollIntervalMs: 1, lockWaitTimeoutMs: 100 },
     };
 
     const firstLoad = loadVaultEnvironment(config, deps);
     await new Promise((resolve) => setImmediate(resolve));
     const secondLoad = loadVaultEnvironment(config, deps);
-    await new Promise((resolve) => setTimeout(resolve, 5));
-
-    expect(authenticate).toHaveBeenCalledTimes(1);
-    resolveAuthentication('fresh-vault-token');
     const [firstResult, secondResult] = await Promise.all([firstLoad, secondLoad]);
 
-    expect(firstResult.source).toBe('oidc');
-    expect(secondResult.source).toBe('cache');
-    expect(authenticate).toHaveBeenCalledTimes(1);
-    expect(readVaultTokenCache(config)).toMatchObject({ token: 'fresh-vault-token' });
+    expect(firstResult).toMatchObject({ source: 'setup-required', setupRequired: true });
+    expect(secondResult).toMatchObject({ source: 'setup-required', setupRequired: true });
+    expect(authenticate).not.toHaveBeenCalled();
+    expect(lookup).not.toHaveBeenCalled();
   });
 
   it('reuses a cached token on the next load without opening OIDC', async () => {
@@ -680,6 +671,35 @@ describe('runtime/vault-client', () => {
     expect(authenticate).not.toHaveBeenCalled();
     expect(lookup).toHaveBeenCalledTimes(1);
     expect(requestJson.mock.calls[0][0].headers['X-Vault-Token']).toBe('cached-vault-token');
+  });
+
+  it('forces OIDC during explicit setup and replaces an existing cached identity', async () => {
+    const config = createConfig({ tokenCachePath: createCachePath() });
+    writeVaultTokenCache(config, 'old-vault-token', {
+      expireTime: '2030-01-01T00:00:00Z',
+      ttl: 3600,
+      renewable: false,
+    });
+    const authenticate = jest.fn().mockResolvedValue('fresh-vault-token');
+    const lookup = jest.fn().mockResolvedValue({
+      expireTime: '2030-01-01T00:00:00Z',
+      ttl: 3600,
+      renewable: false,
+    });
+    const requestJson = jest.fn().mockResolvedValue({
+      data: { data: { MS_TENANT_ID: 'vault-tenant-id' } },
+    });
+
+    await expect(
+      setupVaultEnvironment(config, {
+        authenticateWithOidc: authenticate,
+        lookupSelf: lookup,
+        requestJson,
+      })
+    ).resolves.toMatchObject({ source: 'oidc', values: { MS_TENANT_ID: 'vault-tenant-id' } });
+
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    expect(readVaultTokenCache(config)).toMatchObject({ token: 'fresh-vault-token' });
   });
 
   it('fails on a cache lock timeout without falling back to OIDC', async () => {
@@ -741,7 +761,7 @@ describe('runtime/vault-client', () => {
     ['403', new VaultError('Vault rejected the token.', 'VAULT_UNAUTHORIZED', 403)],
     ['expired metadata', { expireTime: '2020-01-01T00:00:00Z', ttl: 0, renewable: false }],
   ])(
-    'deletes an invalid cached token and performs exactly one OIDC fallback (%s)',
+    'returns setup-required without deleting the cached token (%s)',
     async (_caseName, invalid) => {
       const config = createConfig();
       const tokenCache = {
@@ -764,10 +784,8 @@ describe('runtime/vault-client', () => {
           ttl: 3600,
           renewable: false,
         });
-      const authenticate = jest.fn().mockResolvedValue('fresh-vault-token');
-      const requestJson = jest.fn().mockResolvedValue({
-        data: { data: { MS_TENANT_ID: 'vault-tenant-id' } },
-      });
+      const authenticate = jest.fn();
+      const requestJson = jest.fn();
 
       await expect(
         loadVaultEnvironment(config, {
@@ -776,16 +794,16 @@ describe('runtime/vault-client', () => {
           authenticateWithOidc: authenticate,
           requestJson,
         })
-      ).resolves.toMatchObject({ source: 'oidc' });
+      ).resolves.toMatchObject({ source: 'setup-required', setupRequired: true });
 
-      expect(tokenCache.deleteVaultTokenCache).toHaveBeenCalledTimes(1);
-      expect(authenticate).toHaveBeenCalledTimes(1);
-      expect(lookup).toHaveBeenCalledTimes(2);
-      expect(tokenCache.writeVaultTokenCache).toHaveBeenCalledTimes(1);
+      expect(tokenCache.deleteVaultTokenCache).not.toHaveBeenCalled();
+      expect(authenticate).not.toHaveBeenCalled();
+      expect(lookup).toHaveBeenCalledTimes(1);
+      expect(tokenCache.writeVaultTokenCache).not.toHaveBeenCalled();
     }
   );
 
-  it('invalidates a cached token when the KV read is unauthorized, then retries OIDC once', async () => {
+  it('returns setup-required when the cached token cannot read KV', async () => {
     const config = createConfig();
     const tokenCache = {
       readVaultTokenCache: jest.fn().mockReturnValue({ token: 'cached-vault-token' }),
@@ -795,31 +813,32 @@ describe('runtime/vault-client', () => {
     const lookup = jest.fn().mockResolvedValue({ ttl: 3600, renewable: false });
     const requestJson = jest
       .fn()
-      .mockRejectedValueOnce(new VaultError('Vault rejected the token.', 'VAULT_UNAUTHORIZED', 401))
-      .mockResolvedValueOnce({ data: { data: { MS_TENANT_ID: 'vault-tenant-id' } } });
+      .mockRejectedValueOnce(
+        new VaultError('Vault rejected the token.', 'VAULT_UNAUTHORIZED', 401)
+      );
 
     await expect(
       loadVaultEnvironment(config, {
         tokenCache,
         lookupSelf: lookup,
-        authenticateWithOidc: jest.fn().mockResolvedValue('fresh-vault-token'),
+        authenticateWithOidc: jest.fn(),
         requestJson,
       })
-    ).resolves.toMatchObject({ source: 'oidc' });
+    ).resolves.toMatchObject({ source: 'setup-required', setupRequired: true });
 
-    expect(tokenCache.deleteVaultTokenCache).toHaveBeenCalledTimes(1);
-    expect(lookup).toHaveBeenCalledTimes(2);
-    expect(requestJson).toHaveBeenCalledTimes(2);
+    expect(tokenCache.deleteVaultTokenCache).not.toHaveBeenCalled();
+    expect(lookup).toHaveBeenCalledTimes(1);
+    expect(requestJson).toHaveBeenCalledTimes(1);
   });
 
-  it('continues the current startup when the token cache cannot be written', async () => {
+  it('continues explicit setup when the token cache cannot be written', async () => {
     const tokenCache = {
       readVaultTokenCache: jest.fn().mockReturnValue(null),
       writeVaultTokenCache: jest.fn(() => {
         throw new Error('permission denied');
       }),
     };
-    const result = await loadVaultEnvironment(createConfig(), {
+    const result = await setupVaultEnvironment(createConfig(), {
       tokenCache,
       authenticateWithOidc: jest.fn().mockResolvedValue('fresh-vault-token'),
       lookupSelf: jest.fn().mockResolvedValue({ ttl: 3600, renewable: false }),
@@ -833,5 +852,45 @@ describe('runtime/vault-client', () => {
       warning: 'Vault token cache could not be saved; this startup will continue safely.',
     });
     expect(JSON.stringify(result)).not.toContain('fresh-vault-token');
+  });
+
+  it('does not delete a cached identity on Vault network or gateway failures', async () => {
+    const tokenCache = {
+      readVaultTokenCache: jest.fn().mockReturnValue({ token: 'cached-vault-token' }),
+      deleteVaultTokenCache: jest.fn(),
+    };
+    const error = new VaultError(
+      'Vault request failed with HTTP status 503.',
+      'VAULT_NETWORK_ERROR',
+      503
+    );
+
+    await expect(
+      loadVaultEnvironment(createConfig(), {
+        tokenCache,
+        lookupSelf: jest.fn().mockRejectedValue(error),
+        authenticateWithOidc: jest.fn(),
+      })
+    ).rejects.toMatchObject({ status: 503 });
+
+    expect(tokenCache.deleteVaultTokenCache).not.toHaveBeenCalled();
+  });
+
+  it('invalidates one configured Vault identity under the cache lock', async () => {
+    const release = jest.fn();
+    const acquire = jest.fn().mockResolvedValue(release);
+    const remove = jest.fn().mockReturnValue({ deleted: true });
+    const config = createConfig({ tokenCachePath: createCachePath() });
+
+    await expect(
+      invalidateVaultTokenCache(config, {
+        acquireVaultTokenCacheLock: acquire,
+        tokenCache: { deleteVaultTokenCache: remove },
+      })
+    ).resolves.toEqual({ deleted: true });
+
+    expect(acquire).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledTimes(1);
   });
 });

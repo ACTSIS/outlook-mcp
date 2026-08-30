@@ -24,6 +24,89 @@ The productive authentication process MUST be `outlook-auth-server.js`, started 
 - THEN the server MUST respond with HTTP 500
 - AND the response MUST explain which credentials are required
 
+### Requirement: Vault Bootstrap and Explicit Setup
+
+When Vault mode is enabled, ordinary MCP startup MUST use an explicit
+`VAULT_TOKEN` or a valid per-user Vault token cache. It MUST NOT start the
+Vault OIDC browser flow because the cache is missing, stale, or unusable.
+The MCP server MUST remain available in a setup-required state so the agent
+can invoke the explicit `setup-vault` tool.
+
+#### Scenario: Vault cache is valid
+
+- GIVEN Vault mode is enabled and the per-user cache contains a valid token
+- WHEN normal MCP startup loads the runtime environment
+- THEN it MUST validate/renew the cached token and read the allowlisted KV values
+- AND it MUST NOT open a browser
+
+#### Scenario: Vault cache is missing or unusable
+
+- GIVEN Vault mode is enabled without `VAULT_TOKEN`
+- AND the cache is missing, expired, or rejected by Vault lookup/KV access with HTTP 401 or 403
+- WHEN normal MCP startup loads the runtime environment
+- THEN it MUST not start OIDC or delete the cache entry
+- AND it MUST start in a setup-required state
+
+#### Scenario: Vault has a transient or configuration failure
+
+- GIVEN Vault lookup, KV access, or cache coordination fails with a network, timeout, gateway, or configuration error
+- WHEN normal MCP startup loads the runtime environment
+- THEN it MUST preserve the cache
+- AND it MUST surface the safe hard failure where startup cannot safely continue
+
+#### Scenario: Explicit Vault setup is requested
+
+- GIVEN Vault mode is enabled without an explicit `VAULT_TOKEN`
+- WHEN `setup-vault` is invoked
+- THEN it MUST bypass the inherited bootstrap marker and force the Vault OIDC flow
+- AND it MUST save only the Vault token and lease metadata after KV loading succeeds
+- AND it MUST apply only allowlisted KV values and refresh the current configuration and `TokenStorage` singleton
+- AND it MUST return status text without tokens or KV values
+
+#### Scenario: Explicit Vault token is configured
+
+- GIVEN `VAULT_TOKEN` is configured
+- WHEN normal startup or `setup-vault` loads Vault values
+- THEN it MUST use that token without starting OIDC
+- AND it MUST NOT read or write the Vault token cache
+
+#### Scenario: Vault setup is disabled
+
+- GIVEN `VAULT_ADDR` is not configured
+- WHEN `setup-vault` is invoked
+- THEN it MUST return an actionable setup message
+- AND it MUST NOT open a browser
+
+#### Scenario: Setup replaces prior Vault-loaded values
+
+- GIVEN the current process previously loaded values from Vault
+- AND process/MCP environment credentials remain configured
+- WHEN `setup-vault` successfully loads a new Vault identity
+- THEN new Vault-loaded values MUST replace the previous Vault-loaded values
+- AND process/MCP values MUST remain authoritative
+
+### Requirement: Permanent Entra Failure Cache Invalidation
+
+The active Microsoft token acquisition and Graph refresh boundaries MUST use
+the same typed classifier for permanent Entra OAuth failures. Only a
+permanent token-endpoint rejection such as `invalid_grant`, `invalid_client`,
+`unauthorized_client`, or an equivalent permanent AADSTS response MAY
+invalidate the matching Vault identity cache entry. The invalidation MUST be
+per-identity and serialized with cache setup/validation.
+
+#### Scenario: Permanent Entra OAuth failure
+
+- GIVEN the active callback exchange or Graph refresh receives a permanent Entra OAuth rejection
+- WHEN the failure is classified
+- THEN it MUST invalidate only the configured Vault identity cache entry
+- AND it MUST not log token contents
+
+#### Scenario: Non-permanent or unrelated failure
+
+- GIVEN the failure is a network, timeout, parse, save, Vault authorization, Graph resource permission, user cancellation, or transient gateway failure
+- WHEN the failure is classified
+- THEN it MUST NOT invalidate the Vault identity cache
+
 ### Requirement: Graph Scope Configuration
 
 Productive Graph authorization MUST use `config.AUTH_CONFIG.scopes`. The scope list MUST contain `offline_access` and the delegated scopes required by the registered Graph tools.
@@ -134,6 +217,12 @@ The MCP server MUST expose separate `authenticate` and `authenticate-flow` tools
 - WHEN `authenticate-flow` is invoked
 - THEN it MUST return `http://localhost:3333/auth/flow` and instructions to complete authentication in a browser
 
+#### Scenario: Vault setup is requested
+
+- GIVEN Vault mode is enabled
+- WHEN `setup-vault` is invoked
+- THEN it MUST run the explicit Vault setup path and return safe status text
+
 ### Requirement: Shared Token File Compatibility
 
 TokenStorage MUST read the existing JSON token file at `~/.outlook-mcp-tokens.json`, preserve supported additive keys, and write it with owner-only permissions.
@@ -175,7 +264,6 @@ These observations describe current limitations; they are not requirements to pr
 
 - Productive initial Graph acquisition writes the token response as the whole file and can remove existing `flow_*` keys during Graph re-authentication.
 - Graph refresh failure clears the shared in-memory token object, including Flow data, but the attempted save is a no-op after the object becomes `null`; stale credentials can remain on disk.
-- `MS_SCOPES`, `MS_REDIRECT_URI`, and `MS_TOKEN_ENDPOINT` affect TokenStorage but are not consistently applied by the productive initial authorization server.
 - The advertised `authenticate.force` argument is currently ignored.
 - In test mode, `authenticate-flow` reports success after `createTestTokens()`, but that helper writes Graph-style test keys rather than `flow_*` keys.
 

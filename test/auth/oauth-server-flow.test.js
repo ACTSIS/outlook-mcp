@@ -239,6 +239,50 @@ describe('outlook-auth-server.js Flow support', () => {
       expect(writeFileSyncSpy).not.toHaveBeenCalled();
       expect(mockSaveFlowTokens).not.toHaveBeenCalled();
     });
+
+    it('does not invalidate the Vault cache when the user cancels Entra sign-in', async () => {
+      const localStates = new Map();
+      const invalidateVaultTokenCache = jest.fn().mockResolvedValue({ deleted: true });
+      const localHandler = createRequestHandler({
+        pendingStates: localStates,
+        exchangeCodeForTokens,
+        authConfig: {
+          clientId: 'test-client-id',
+          clientSecret: 'test-client-secret',
+          tenantId: 'common',
+          authorityHost: 'https://login.microsoftonline.com',
+          redirectUri: config.AUTH_CONFIG.redirectUri,
+          scopes: config.AUTH_CONFIG.scopes,
+        },
+        flowScope: FLOW_SCOPE,
+        tokenStorage: { saveFlowTokens: mockSaveFlowTokens },
+        https: { request: httpsMock },
+        getVaultConfig: jest.fn().mockReturnValue({
+          enabled: true,
+          address: 'https://vault.example.test',
+        }),
+        invalidateVaultTokenCache,
+      });
+      const startResponse = createMockResponse();
+      localHandler(createMockRequest('/auth'), startResponse);
+      const state = new URL(startResponse.writeHead.mock.calls[0][1].Location).searchParams.get(
+        'state'
+      );
+
+      const callbackResponse = createMockResponse();
+      localHandler(
+        createMockRequest(
+          `/auth/callback?state=${state}&error=access_denied&error_description=AADSTS65004%3A%20User%20declined%20to%20consent`
+        ),
+        callbackResponse
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(invalidateVaultTokenCache).not.toHaveBeenCalled();
+      expect(callbackResponse.writeHead).toHaveBeenCalledWith(400, {
+        'Content-Type': 'text/html',
+      });
+    });
   });
 
   describe('exchangeCodeForTokens', () => {
@@ -357,6 +401,71 @@ describe('outlook-auth-server.js Flow support', () => {
       const lastCall = httpsMock.mock.calls[httpsMock.mock.calls.length - 1];
       const postData = lastCall[0].body || lastCall[1];
       expect(querystring.parse(postData).scope).toBe(config.AUTH_CONFIG.scopes.join(' '));
+    });
+
+    it('invalidates the configured Vault cache for permanent Entra exchange failures', async () => {
+      httpsMock.mockImplementation(
+        createMockHttps(400, {
+          error: 'invalid_client',
+          error_description: 'Client authentication failed',
+        })
+      );
+      const invalidateVaultTokenCache = jest.fn().mockResolvedValue({ deleted: true });
+      const vaultConfig = { enabled: true, address: 'https://vault.example.test' };
+
+      await expect(
+        exchangeCodeForTokens('graph-code', false, {
+          authConfig: {
+            clientId: 'test-client-id',
+            clientSecret: 'test-client-secret',
+            tenantId: 'common',
+            authorityHost: 'https://login.microsoftonline.com',
+            redirectUri: config.AUTH_CONFIG.redirectUri,
+            scopes: config.AUTH_CONFIG.scopes,
+          },
+          flowScope: FLOW_SCOPE,
+          tokenStorage: { saveFlowTokens: mockSaveFlowTokens },
+          https: { request: httpsMock },
+          getVaultConfig: jest.fn().mockReturnValue(vaultConfig),
+          invalidateVaultTokenCache,
+        })
+      ).rejects.toMatchObject({
+        code: 'invalid_client',
+        isPermanentEntraAuthFailure: true,
+      });
+
+      expect(invalidateVaultTokenCache).toHaveBeenCalledWith(vaultConfig);
+    });
+
+    it('does not invalidate the Vault cache for transient exchange failures', async () => {
+      httpsMock.mockImplementation(createMockHttps(503, { error: 'invalid_grant' }));
+      const invalidateVaultTokenCache = jest.fn().mockResolvedValue({ deleted: true });
+
+      await expect(
+        exchangeCodeForTokens('graph-code', false, {
+          authConfig: {
+            clientId: 'test-client-id',
+            clientSecret: 'test-client-secret',
+            tenantId: 'common',
+            authorityHost: 'https://login.microsoftonline.com',
+            redirectUri: config.AUTH_CONFIG.redirectUri,
+            scopes: config.AUTH_CONFIG.scopes,
+          },
+          flowScope: FLOW_SCOPE,
+          tokenStorage: { saveFlowTokens: mockSaveFlowTokens },
+          https: { request: httpsMock },
+          getVaultConfig: jest.fn().mockReturnValue({
+            enabled: true,
+            address: 'https://vault.example.test',
+          }),
+          invalidateVaultTokenCache,
+        })
+      ).rejects.toMatchObject({
+        code: 'invalid_grant',
+        isPermanentEntraAuthFailure: false,
+      });
+
+      expect(invalidateVaultTokenCache).not.toHaveBeenCalled();
     });
   });
 });

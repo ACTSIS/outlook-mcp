@@ -3,9 +3,12 @@ const path = require('path');
 const https = require('https');
 const querystring = require('querystring');
 const appConfig = require('../config');
+const vaultClient = require('../runtime/vault-client');
+const { createEntraOAuthError, isPermanentEntraOAuthFailure } = require('./entra-error');
 
 class TokenStorage {
   constructor(config) {
+    const configOverrides = config || {};
     const tenantId = process.env.MS_TENANT_ID || 'common';
     const authorityHost = (
       process.env.MS_AUTHORITY_HOST || 'https://login.microsoftonline.com'
@@ -30,8 +33,9 @@ class TokenStorage {
       tokenEndpoint:
         process.env.MS_TOKEN_ENDPOINT || `${authorityHost}/${tenantId}/oauth2/v2.0/token`,
       refreshTokenBuffer: 5 * 60 * 1000, // 5 minutes buffer for token refresh
-      ...config, // Allow overriding default config
+      ...configOverrides, // Allow overriding default config
     };
+    this._runtimeConfigOverrides = new Set(Object.keys(configOverrides));
     this.tokens = null;
     this._loadPromise = null;
     this._refreshPromise = null;
@@ -47,6 +51,50 @@ class TokenStorage {
       console.warn(
         'MS_SCOPES override is missing offline_access — refresh tokens will not be issued.'
       );
+    }
+  }
+
+  /**
+   * Refresh environment-derived authentication settings after an explicit
+   * Vault setup updates process.env. Constructor overrides remain testable and
+   * continue to win over runtime values.
+   * @returns {object} The refreshed TokenStorage configuration
+   */
+  refreshRuntimeConfiguration() {
+    const authConfig = appConfig.refreshAuthConfig
+      ? appConfig.refreshAuthConfig()
+      : appConfig.AUTH_CONFIG;
+    const authorityHost = (
+      process.env.MS_AUTHORITY_HOST || 'https://login.microsoftonline.com'
+    ).replace(/\/+$/, '');
+    const tenantId = process.env.MS_TENANT_ID || 'common';
+    const runtimeValues = {
+      clientId: process.env.OUTLOOK_CLIENT_ID || process.env.MS_CLIENT_ID || '',
+      clientSecret: process.env.OUTLOOK_CLIENT_SECRET || process.env.MS_CLIENT_SECRET || '',
+      redirectUri: process.env.MS_REDIRECT_URI || authConfig.redirectUri,
+      scopes: process.env.MS_SCOPES
+        ? process.env.MS_SCOPES.split(/\s+/).filter(Boolean)
+        : authConfig.scopes,
+      tenantId,
+      tokenEndpoint:
+        process.env.MS_TOKEN_ENDPOINT || `${authorityHost}/${tenantId}/oauth2/v2.0/token`,
+      flowScope: appConfig.FLOW_SCOPE,
+    };
+
+    for (const [key, value] of Object.entries(runtimeValues)) {
+      if (!this._runtimeConfigOverrides.has(key)) this.config[key] = value;
+    }
+
+    return this.config;
+  }
+
+  async _invalidateVaultCacheOnPermanentEntraFailure(error) {
+    if (!isPermanentEntraOAuthFailure(error)) return;
+
+    try {
+      await vaultClient.invalidateVaultTokenCache(vaultClient.getVaultConfig());
+    } catch {
+      // Cache invalidation must never mask the original authentication error.
     }
   }
 
@@ -265,13 +313,14 @@ class TokenStorage {
                 );
               }
             } else {
-              console.error('Error refreshing token:', responseBody);
-              reject(
-                new Error(
-                  responseBody.error_description ||
-                    `Token refresh failed with status ${res.statusCode}`
-                )
+              const oauthError = createEntraOAuthError(
+                responseBody,
+                res.statusCode,
+                'Token refresh'
               );
+              await this._invalidateVaultCacheOnPermanentEntraFailure(oauthError);
+              console.error('Microsoft token refresh rejected:', oauthError.code);
+              reject(oauthError);
             }
           } catch (e) {
             // Catch any error during parsing or saving
@@ -350,10 +399,12 @@ class TokenStorage {
                 );
               }
             } else {
-              console.error('Error refreshing flow token:', responseBody);
-              // Only invalidate flow tokens for permanent OAuth failures
-              const isPermanentFailure =
-                res.statusCode === 400 && responseBody.error === 'invalid_grant';
+              const oauthError = createEntraOAuthError(
+                responseBody,
+                res.statusCode,
+                'Flow token refresh'
+              );
+              const isPermanentFailure = isPermanentEntraOAuthFailure(oauthError);
               if (isPermanentFailure) {
                 this.tokens.flow_access_token = null;
                 this.tokens.flow_refresh_token = null;
@@ -363,12 +414,8 @@ class TokenStorage {
                   console.error('Failed to save invalidated flow tokens:', saveError);
                 }
               }
-              reject(
-                new Error(
-                  responseBody.error_description ||
-                    `Flow token refresh failed with status ${res.statusCode}`
-                )
-              );
+              console.error('Microsoft Flow token refresh rejected:', oauthError.code);
+              reject(oauthError);
             }
           } catch (e) {
             console.error('Error processing flow refresh token response or saving tokens:', e);
@@ -445,13 +492,14 @@ class TokenStorage {
                 reject(new Error(`Tokens exchanged but failed to save: ${saveError.message}`));
               }
             } else {
-              console.error('Error exchanging code for tokens:', responseBody);
-              reject(
-                new Error(
-                  responseBody.error_description ||
-                    `Token exchange failed with status ${res.statusCode}`
-                )
+              const oauthError = createEntraOAuthError(
+                responseBody,
+                res.statusCode,
+                'Token exchange'
               );
+              await this._invalidateVaultCacheOnPermanentEntraFailure(oauthError);
+              console.error('Microsoft token exchange rejected:', oauthError.code);
+              reject(oauthError);
             }
           } catch (e) {
             // Catch any error during parsing or saving

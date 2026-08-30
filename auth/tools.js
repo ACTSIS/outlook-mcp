@@ -106,6 +106,59 @@ async function handleAuthenticateFlow(_args) {
   return buildAuthenticationResponse(authUrl, 'Power Automate', serverStatus);
 }
 
+function getSafeVaultSetupError(error) {
+  const rawCode = error && typeof error.code === 'string' ? error.code : 'VAULT_SETUP_FAILED';
+  const code = rawCode.replace(/[^a-z0-9_]/gi, '_').slice(0, 80);
+  return `Vault setup did not complete (${code}). Call setup-vault again after checking Vault connectivity and configuration.`;
+}
+
+/**
+ * Explicitly perform the one-time Vault OIDC setup for the current MCP
+ * process. This intentionally bypasses the inherited bootstrap marker.
+ * @returns {Promise<object>} Safe MCP response without tokens or KV values
+ */
+async function handleSetupVault() {
+  try {
+    const { loadRuntimeEnv } = require('../runtime/load-runtime-env');
+    const result = await loadRuntimeEnv({ force: true, vaultSetup: true });
+    const vault = result && result.vault ? result.vault : {};
+
+    if (!vault.enabled) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: 'Vault is disabled. Set VAULT_ADDR in the MCP environment, then call setup-vault again.',
+          },
+        ],
+      };
+    }
+
+    if (vault.setupRequired) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: 'Vault setup is still required. Call setup-vault again after checking the Vault configuration.',
+          },
+        ],
+      };
+    }
+
+    const { refreshRuntimeConfiguration } = require('./index');
+    if (typeof refreshRuntimeConfiguration === 'function') refreshRuntimeConfiguration();
+
+    const cacheWarning = vault.cache && vault.cache.saved === false;
+    const text = cacheWarning
+      ? 'Vault setup completed for this process, but the Vault identity cache could not be saved. Another setup may be required after restart. No secrets were returned.'
+      : `Vault setup completed and the current process was refreshed (${vault.loaded || 0} runtime values loaded). No secrets were returned.`;
+
+    return { content: [{ type: 'text', text }] };
+  } catch (error) {
+    return { content: [{ type: 'text', text: getSafeVaultSetupError(error) }] };
+  }
+}
+
 /**
  * Check authentication status tool handler
  * @returns {object} - MCP response
@@ -159,6 +212,17 @@ const authTools = [
     handler: handleAuthenticate,
   },
   {
+    name: 'setup-vault',
+    description:
+      'Run the one-time Vault OIDC setup, cache the Vault identity, and refresh this MCP process. Use this after a permanent Microsoft Entra authentication failure; normal startup never opens the Vault browser.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+    handler: handleSetupVault,
+  },
+  {
     name: 'check-auth-status',
     description: 'Check the current authentication status with Microsoft Graph API',
     inputSchema: {
@@ -196,6 +260,7 @@ module.exports = {
   handleAbout,
   handleAuthenticate,
   handleAuthenticateFlow,
+  handleSetupVault,
   handleCheckAuthStatus,
   handleStopAuthServer,
 };

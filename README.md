@@ -53,17 +53,14 @@ You need Node.js 22.22.1 or later and a Microsoft Entra app registration.
    }
    ```
 
-4. With Vault:
+5. With Vault:
 
    ```json
    {
      "mcpServers": {
        "outlook-assistant": {
          "type": "local",
-         "command": [
-           "C:\\mcp\\outlook\\outlook-mcp-win-x64.exe",
-           "mcp"
-         ],
+         "command": ["C:\\mcp\\outlook\\outlook-mcp-win-x64.exe", "mcp"],
          "environment": {
            "VAULT_ADDR": "https://vault.com",
            "VAULT_AUTH_MOUNT": "oidc",
@@ -79,9 +76,9 @@ You need Node.js 22.22.1 or later and a Microsoft Entra app registration.
    }
    ```
 
-   See [`claude-config-sample.json`](./claude-config-sample.json) for a copyable file. The server uses stdio, so restart the MCP client after changing its configuration.
+   See [`claude-config-sample.json`](./claude-config-sample.json) for a copyable file. The server uses stdio, so restart the MCP client after changing its configuration. With Vault enabled, call `setup-vault` once after the MCP server starts; later starts reuse the cache without opening a browser.
 
-5. Call `authenticate`, copy the URL returned as the first response line, and open it in your browser. The browser is not opened automatically; the MCP tool starts the callback server automatically. Then call `check-auth-status` and use a Graph-backed tool such as `list-emails`.
+6. Call `authenticate`, copy the URL returned as the first response line, and open it in your browser. The browser is not opened automatically; the MCP tool starts the callback server automatically. Then call `check-auth-status` and use a Graph-backed tool such as `list-emails`.
 
 Power Automate is optional and requires a second consent flow. Complete the Graph flow first, then call `authenticate-flow`. See [Power Automate](./docs/power-automate.md).
 
@@ -128,18 +125,18 @@ Runtime configuration is external. The build does not receive OAuth credentials,
 
 The server can start without credentials, but the first Graph or Power Automate authentication and any token refresh require a client ID and client secret. Use one name from each alias pair; when both non-empty aliases are set, the `OUTLOOK_*` value wins.
 
-| Variable                                      | Required?                               | Controls                                                                                                                                                                                                    |
-| --------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `OUTLOOK_CLIENT_ID` or `MS_CLIENT_ID`         | Required for authentication and refresh | Microsoft Entra application (client) ID. `OUTLOOK_CLIENT_ID` takes precedence over `MS_CLIENT_ID`.                                                                                                          |
-| `OUTLOOK_CLIENT_SECRET` or `MS_CLIENT_SECRET` | Required for authentication and refresh | Microsoft Entra client secret **value**, not the secret ID. `OUTLOOK_CLIENT_SECRET` takes precedence over `MS_CLIENT_SECRET`.                                                                               |
-| `MS_TENANT_ID`                                | Optional                                | Tenant used by the identity endpoints. Defaults to `common`; set a tenant GUID for a single-tenant app.                                                                                                     |
-| `MS_AUTHORITY_HOST`                           | Optional                                | Identity authority host. Defaults to `https://login.microsoftonline.com`; trailing slashes are removed.                                                                                                     |
-| `MS_SCOPES`                                   | Optional advanced override              | Space-separated scopes used by `TokenStorage` refresh and code-exchange operations. Include `offline_access` when overriding it. The active initial Graph auth server uses the built-in scope list instead. |
-| `MS_REDIRECT_URI`                             | Optional advanced override              | Redirect URI used by `TokenStorage` refresh and code-exchange operations. Initial acquisition remains fixed at `http://localhost:3333/auth/callback`.                                                       |
-| `MS_TOKEN_ENDPOINT`                           | Optional advanced override              | Token endpoint used by `TokenStorage` refresh and exchange operations. Initial acquisition derives its endpoint from `MS_AUTHORITY_HOST` and `MS_TENANT_ID`.                                                |
-| `USE_TEST_MODE`                               | Optional                                | Uses test API responses when set to `true`; defaults to `false` and should remain disabled for real accounts.                                                                                               |
+| Variable                                      | Required?                               | Controls                                                                                                                         |
+| --------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `OUTLOOK_CLIENT_ID` or `MS_CLIENT_ID`         | Required for authentication and refresh | Microsoft Entra application (client) ID. `OUTLOOK_CLIENT_ID` takes precedence over `MS_CLIENT_ID`.                               |
+| `OUTLOOK_CLIENT_SECRET` or `MS_CLIENT_SECRET` | Required for authentication and refresh | Microsoft Entra client secret **value**, not the secret ID. `OUTLOOK_CLIENT_SECRET` takes precedence over `MS_CLIENT_SECRET`.    |
+| `MS_TENANT_ID`                                | Optional                                | Tenant used by the identity endpoints. Defaults to `common`; set a tenant GUID for a single-tenant app.                          |
+| `MS_AUTHORITY_HOST`                           | Optional                                | Identity authority host. Defaults to `https://login.microsoftonline.com`; trailing slashes are removed.                          |
+| `MS_SCOPES`                                   | Optional advanced override              | Space-separated scopes used by the active auth server and `TokenStorage`. Include `offline_access` when overriding it.           |
+| `MS_REDIRECT_URI`                             | Optional advanced override              | Redirect URI used by the active auth server and `TokenStorage`; defaults to `http://localhost:3333/auth/callback`.               |
+| `MS_TOKEN_ENDPOINT`                           | Optional advanced override              | Token endpoint used by the active auth server and `TokenStorage`; defaults to the v2 endpoint derived from authority and tenant. |
+| `USE_TEST_MODE`                               | Optional                                | Uses test API responses when set to `true`; defaults to `false` and should remain disabled for real accounts.                    |
 
-`MS_SCOPES`, `MS_REDIRECT_URI`, and `MS_TOKEN_ENDPOINT` are refresh/exchange overrides, not complete replacements for the active initial acquisition flow. Leave them unset unless you specifically need those `TokenStorage` behaviors.
+`MS_SCOPES`, `MS_REDIRECT_URI`, and `MS_TOKEN_ENDPOINT` are optional overrides for both active acquisition and refresh/exchange. Leave them unset unless you specifically need a non-default configuration.
 
 #### HashiCorp Vault for intranet developers
 
@@ -163,12 +160,13 @@ Set `VAULT_ADDR` to enable Vault mode. The other settings are optional:
 | `VAULT_TOKEN_RENEW_THRESHOLD_SECONDS` | `300`                   | Renew a renewable cached token when this many seconds or less remain                         |
 | `VAULT_TOKEN`                         | Unset                   | Automation/testing escape hatch; no browser flow, never persisted or logged                  |
 
-When `VAULT_TOKEN` is absent, the first startup requests a short-lived Vault token through the Vault OIDC browser flow. The runtime stores that Vault token and safe lease metadata in a per-user local cache. Later OpenCode/MCP launches validate the cached token with Vault, renew it when it is renewable and near expiry, and read the KV values without opening a browser. The local listener accepts only `GET http://127.0.0.1:<port>/oidc/callback`; the Vault role and the OIDC provider must allow the matching `http://localhost:<port>/oidc/callback` URI. With the defaults, configure `http://localhost:8250/oidc/callback` exactly. Static `VAULT_TOKEN` values are not recommended for developer installs.
+When `VAULT_TOKEN` is absent, call the `setup-vault` MCP tool once to complete the Vault OIDC browser flow. The runtime stores that Vault token and safe lease metadata in a per-user local cache. Later OpenCode/MCP launches validate the cached token, renew it when it is renewable and near expiry, and read the KV values without opening a browser. If the cache is missing, stale, or unusable, normal startup remains available in a setup-required state and does not open a browser; call `setup-vault` explicitly. The local listener accepts only `GET http://127.0.0.1:<port>/oidc/callback`; the Vault role and the OIDC provider must allow the matching `http://localhost:<port>/oidc/callback` URI. With the defaults, configure `http://localhost:8250/oidc/callback` exactly. Static `VAULT_TOKEN` values are not recommended for developer installs.
+When `VAULT_TOKEN` is present, it remains the explicit non-cached automation/testing credential and takes precedence over the OIDC cache; neither normal startup nor `setup-vault` opens a browser for that mode.
 After sign-in, the identity-provider redirect must return the matching `state` and a `code`. The client retains the `nonce` from Vault's authorization URL for the callback exchange; if the provider returns a nonce too, it must match.
 
 #### Vault token cache
 
-The cache contains only the short-lived Vault client token, its expiration/TTL metadata, its renewable flag, and a save timestamp. It never contains `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `MS_TENANT_ID`, or any other KV value. Those values are fetched from Vault into process memory on every startup.
+The cache contains only the short-lived Vault client token, its expiration/TTL metadata, its renewable flag, and a save timestamp. It never contains `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `MS_TENANT_ID`, or any other KV value. Those values are fetched from Vault into process memory on every startup or explicit setup.
 
 Default cache locations are:
 
@@ -177,9 +175,9 @@ Default cache locations are:
 | Windows     | `%LOCALAPPDATA%\m365-mcp\vault-token.json` (falls back to `%APPDATA%`, then the user home directory) |
 | Linux/POSIX | `${XDG_CONFIG_HOME:-~/.config}/m365-mcp/vault-token.json`                                            |
 
-Set `VAULT_TOKEN_CACHE_PATH` to choose another local path for tests or administrator-managed installations. The cache is written atomically, and startup coordinates concurrent terminals with an exclusive `vault-token.json.lock` sidecar around cache validation, renewal, invalidation, and OIDC. POSIX systems use mode `0600`, and Windows applies restrictive best-effort file handling under the current user profile.
+Set `VAULT_TOKEN_CACHE_PATH` to choose another local path for tests or administrator-managed installations. The cache is written atomically, and startup coordinates concurrent terminals with an exclusive `vault-token.json.lock` sidecar around cache validation, renewal, and explicit setup. POSIX systems use mode `0600`, and Windows applies restrictive best-effort file handling under the current user profile.
 
-To force another Vault login, delete the cache file. Revoking the cached Vault token also causes the next startup to discard it and run OIDC once more.
+To force another Vault login, delete the cache file and call `setup-vault`; normal startup will not open OIDC automatically. If Microsoft Entra permanently rejects the configured OAuth grant or client during token exchange/refresh, the matching Vault identity cache entry is invalidated. Network errors, Vault 401/403 responses, Graph resource permissions, user cancellation, and other transient failures do not delete it. After a permanent Entra failure, call `setup-vault` in the current agent or restart OpenCode, then authenticate with Microsoft again if Graph tokens also need replacement. Setup responses contain status text only, never secrets.
 
 Windows PowerShell:
 
@@ -237,6 +235,7 @@ The runtime precedence is explicit:
 1. Parent process and MCP-client environment values win, including intentionally empty values.
 2. Vault values override only values that came from the adjacent `.env` file and fill missing runtime values.
 3. The adjacent `.env` file fills values not supplied by the process or Vault.
+4. An explicit `setup-vault` refresh replaces values previously loaded from Vault without overriding process/MCP-client values.
 
 If `VAULT_ADDR` is unset, Vault is skipped and the existing adjacent `.env`/process-environment behavior remains available.
 
@@ -473,18 +472,18 @@ For the token lifecycle, failure behavior, and current limitations, read [Authen
 
 For the npm path, `bin/m365-mcp.js` loads the project `.env` before starting either mode. For a pre-built executable, the same dispatcher loads `.env` beside the executable. In both paths, existing process environment variables, including values supplied by an MCP client's `env` block, take precedence over file values; see the Vault precedence section when Vault mode is enabled.
 
-| Variable                | Consumer                                     | Default / precedence                   | Notes                                                                                             |
-| ----------------------- | -------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `MS_CLIENT_ID`          | MCP runtime, auth server, and `TokenStorage` | Fallback after `OUTLOOK_CLIENT_ID`     | Standard `.env` name                                                                              |
-| `MS_CLIENT_SECRET`      | MCP runtime, auth server, and `TokenStorage` | Fallback after `OUTLOOK_CLIENT_SECRET` | Use the secret **value**, not its ID                                                              |
-| `OUTLOOK_CLIENT_ID`     | MCP runtime, auth server, and `TokenStorage` | Preferred over `MS_CLIENT_ID`          | Convenient for MCP client configuration                                                           |
-| `OUTLOOK_CLIENT_SECRET` | MCP runtime, auth server, and `TokenStorage` | Preferred over `MS_CLIENT_SECRET`      | Convenient for MCP client configuration                                                           |
-| `MS_TENANT_ID`          | Both                                         | `common`                               | Use the tenant GUID for single-tenant applications                                                |
-| `MS_AUTHORITY_HOST`     | Both                                         | `https://login.microsoftonline.com`    | Trailing slashes are removed                                                                      |
-| `MS_SCOPES`             | `TokenStorage` refresh/exchange methods      | Built-in ten-scope Graph list          | Space-separated; include `offline_access`; standalone initial Graph acquisition does not honor it |
-| `MS_REDIRECT_URI`       | `TokenStorage`                               | `http://localhost:3333/auth/callback`  | Standalone initial acquisition uses the fixed configured URI                                      |
-| `MS_TOKEN_ENDPOINT`     | `TokenStorage`                               | Derived v2 token endpoint              | Standalone initial acquisition derives its endpoint separately                                    |
-| `USE_TEST_MODE`         | MCP server                                   | `false`                                | Enables mocks; see test-mode limitation in the auth guide                                         |
+| Variable                | Consumer                                     | Default / precedence                   | Notes                                                     |
+| ----------------------- | -------------------------------------------- | -------------------------------------- | --------------------------------------------------------- |
+| `MS_CLIENT_ID`          | MCP runtime, auth server, and `TokenStorage` | Fallback after `OUTLOOK_CLIENT_ID`     | Standard `.env` name                                      |
+| `MS_CLIENT_SECRET`      | MCP runtime, auth server, and `TokenStorage` | Fallback after `OUTLOOK_CLIENT_SECRET` | Use the secret **value**, not its ID                      |
+| `OUTLOOK_CLIENT_ID`     | MCP runtime, auth server, and `TokenStorage` | Preferred over `MS_CLIENT_ID`          | Convenient for MCP client configuration                   |
+| `OUTLOOK_CLIENT_SECRET` | MCP runtime, auth server, and `TokenStorage` | Preferred over `MS_CLIENT_SECRET`      | Convenient for MCP client configuration                   |
+| `MS_TENANT_ID`          | Both                                         | `common`                               | Use the tenant GUID for single-tenant applications        |
+| `MS_AUTHORITY_HOST`     | Both                                         | `https://login.microsoftonline.com`    | Trailing slashes are removed                              |
+| `MS_SCOPES`             | Auth server and `TokenStorage`               | Built-in ten-scope Graph list          | Space-separated; include `offline_access`                 |
+| `MS_REDIRECT_URI`       | Auth server and `TokenStorage`               | `http://localhost:3333/auth/callback`  | Used by initial acquisition and refresh/exchange          |
+| `MS_TOKEN_ENDPOINT`     | Auth server and `TokenStorage`               | Derived v2 token endpoint              | Used by initial acquisition and refresh/exchange          |
+| `USE_TEST_MODE`         | MCP server                                   | `false`                                | Enables mocks; see test-mode limitation in the auth guide |
 
 The standalone auth server always listens on port `3333`; there is no environment-variable port override.
 

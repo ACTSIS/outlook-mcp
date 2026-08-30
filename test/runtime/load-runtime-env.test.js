@@ -32,6 +32,26 @@ describe('runtime/load-runtime-env', () => {
     expect(env).toEqual({});
   });
 
+  it('reports setup-required without opening a browser when the cache is unavailable', async () => {
+    const env = { VAULT_ADDR: 'https://vault.example.test' };
+    const loadVault = jest.fn().mockResolvedValue({
+      source: 'setup-required',
+      setupRequired: true,
+      message: 'Vault setup is required. Call setup-vault to authenticate.',
+      values: {},
+    });
+
+    const result = await loadRuntimeEnv({ env, loadVaultEnvironment: loadVault });
+
+    expect(result.vault).toMatchObject({
+      enabled: true,
+      loaded: 0,
+      source: 'setup-required',
+      setupRequired: true,
+    });
+    expect(loadVault).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the custom header value out of bootstrap summaries and KV mappings', async () => {
     const env = {
       VAULT_ADDR: 'https://vault.example.test',
@@ -141,6 +161,43 @@ describe('runtime/load-runtime-env', () => {
 
     expect(env.OUTLOOK_CLIENT_ID).toBeUndefined();
     expect(env.MS_CLIENT_ID).toBe('vault-client-id');
+  });
+
+  it('allows forced explicit setup to replace old Vault values while preserving process values', async () => {
+    const env = {
+      VAULT_ADDR: 'https://vault.example.test',
+      MS_CLIENT_ID: 'process-client-id',
+    };
+    const initialLoad = jest.fn().mockResolvedValue({
+      source: 'cache',
+      values: {
+        MS_CLIENT_ID: 'old-vault-client-id',
+        MS_CLIENT_SECRET: 'old-vault-client-secret',
+        MS_TENANT_ID: 'old-vault-tenant-id',
+      },
+    });
+    const explicitSetup = jest.fn().mockResolvedValue({
+      source: 'oidc',
+      values: {
+        MS_CLIENT_ID: 'new-vault-client-id',
+        MS_CLIENT_SECRET: 'new-vault-client-secret',
+        MS_TENANT_ID: 'new-vault-tenant-id',
+      },
+    });
+
+    await loadRuntimeEnv({ env, loadVaultEnvironment: initialLoad });
+    const result = await loadRuntimeEnv({
+      env,
+      force: true,
+      vaultSetup: true,
+      setupVaultEnvironment: explicitSetup,
+    });
+
+    expect(explicitSetup).toHaveBeenCalledTimes(1);
+    expect(result.vault.source).toBe('oidc');
+    expect(env.MS_CLIENT_ID).toBe('process-client-id');
+    expect(env.MS_CLIENT_SECRET).toBe('new-vault-client-secret');
+    expect(env.MS_TENANT_ID).toBe('new-vault-tenant-id');
   });
 
   it('fails with an actionable error when configured Vault is unreachable or unauthorized', async () => {
