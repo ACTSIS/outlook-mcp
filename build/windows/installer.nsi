@@ -65,7 +65,7 @@ SectionEnd
       ; suffix (or the exact-match case) covers every entry we ever wrote.
       ReadRegStr $6 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
       StrCpy $5 "$INSTDIR"
-      Call PathRemoveDir
+      Call un.PathRemoveDir
       WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" \
         "Path" $6
       SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
@@ -107,6 +107,31 @@ FunctionEnd
 ; appends at the end, so these two cases cover every entry it wrote.
 ; Clobbers $R0-$R4.
 Function PathRemoveDir
+  Push $R0
+  Push $R1
+  Push $R2
+  Push $R4
+  StrCmpS $6 $5 0 +2
+  StrCpy $6 ""
+  StrCpy $R0 ";$5"
+  StrLen $R1 $R0
+  StrLen $R2 $6
+  IntOp $R3 $R2 - $R1
+  IntCmp $R3 0 path_remove_end path_remove_end +1
+  StrCpy $R4 $6 $R1 $R3
+  StrCmpS $R4 $R0 path_remove_end +1
+  StrCpy $6 $6 $R3
+path_remove_end:
+  Pop $R4
+  Pop $R2
+  Pop $R1
+  Pop $R0
+FunctionEnd
+
+; Uninstall-section twin of PathRemoveDir: Call in an uninstall section
+; only accepts functions whose name starts with "un.".
+; $5 = directory, $6 = PATH. Same contract as PathRemoveDir.
+Function un.PathRemoveDir
   Push $R0
   Push $R1
   Push $R2
