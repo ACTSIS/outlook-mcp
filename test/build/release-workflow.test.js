@@ -207,6 +207,10 @@ describe('release workflow', () => {
       expect(needs).toHaveLength(4);
     });
 
+    it('publish-artifacts runs only in the ACTSIS repository and is skipped elsewhere', () => {
+      expect(doc.jobs['publish-artifacts']['if']).toBe("github.repository == 'ACTSIS/outlook-mcp'");
+    });
+
     it('publish-artifacts serializes same-version publications with a ref-keyed concurrency group', () => {
       expect(doc.jobs['publish-artifacts'].concurrency.group).toMatch(/proget-publish/);
       expect(doc.jobs['publish-artifacts'].concurrency.group).toMatch(
