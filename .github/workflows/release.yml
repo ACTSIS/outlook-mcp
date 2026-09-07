@@ -385,6 +385,10 @@ jobs:
     name: Publish to ProGet
     runs-on: ubuntu-latest
     needs: [release, installer-windows, installer-linux, provenance]
+    # ProGet/NetBird credentials exist only in the ACTSIS repository. Skip
+    # this job elsewhere (e.g. the public mirror) so tag runs there stay
+    # green with a skipped publication instead of failing the secret guard.
+    if: github.repository == 'ACTSIS/outlook-mcp'
     permissions:
       contents: read
     timeout-minutes: 20
