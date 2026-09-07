@@ -22,9 +22,9 @@ describe('README distribution documentation', () => {
 
   test('documents where ProGet assets and the manifest live', () => {
     expect(readme).toContain('https://artifacts.actsis.com');
-    expect(readme).toContain('actsis-ai-policy');
-    expect(readme).toContain('outlook-mcp/latest-stable.json');
-    expect(readme).toContain('outlook-mcp/<version>/');
+    expect(readme).toContain('endpoints/outlook-mcp/content/releases/');
+    expect(readme).toContain('releases/<version>/');
+    expect(readme).toContain('releases/latest-stable.json');
   });
 
   test('documents Windows NSIS installer steps', () => {

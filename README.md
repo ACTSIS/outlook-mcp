@@ -119,10 +119,10 @@ Windows file Properties identify the executable as **M365 Assistant MCP Server**
 
 ### Intranet installation (ACTSIS ProGet)
 
-ACTSIS collaborators can install releases from the corporate ProGet Asset Directory at `https://artifacts.actsis.com`. Assets live in the `actsis-ai-policy` asset directory:
+ACTSIS collaborators can install releases from the corporate ProGet Asset Directory at `https://artifacts.actsis.com`. Assets live in the dedicated `outlook-mcp` asset directory, under the `releases/` prefix:
 
-- Versioned assets: `https://artifacts.actsis.com/endpoints/actsis-ai-policy/content/outlook-mcp/<version>/<file>`
-- `latest-stable.json` manifest: `https://artifacts.actsis.com/endpoints/actsis-ai-policy/content/outlook-mcp/latest-stable.json`
+- Versioned assets: `https://artifacts.actsis.com/endpoints/outlook-mcp/content/releases/<version>/<file>`
+- `latest-stable.json` manifest: `https://artifacts.actsis.com/endpoints/outlook-mcp/content/releases/latest-stable.json`
 
 The public GitHub Releases channel remains available; use whichever channel your environment can reach. Both the raw Linux binary and the `.deb` require **glibc ≥ 2.39 (Ubuntu 24.04+)**.
 
