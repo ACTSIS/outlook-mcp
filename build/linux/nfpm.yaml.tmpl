@@ -1,0 +1,15 @@
+name: outlook-mcp
+arch: amd64
+version: '@VERSION@'
+maintainer: '@MAINTAINER@'
+description: MCP server for Microsoft 365 (packaged for ACTSIS intranet)
+depends:
+  - '@DEPENDS@'
+contents:
+  - src: '@BINARY@'
+    dst: /usr/bin/outlook-mcp
+    file_info:
+      mode: 0755
+scripts:
+  postinstall: '@SCRIPTS@/postinst'
+  postremove: '@SCRIPTS@/postrm'
