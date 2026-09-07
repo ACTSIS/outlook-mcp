@@ -428,9 +428,12 @@ describe('build/package', () => {
     });
 
     it('exits non-zero for a target that requires a different native runner', () => {
+      // Pick a target that never matches the current host platform so the
+      // cross-target abort path is exercised on Windows, macOS, and Linux alike.
+      const crossTarget = process.platform === 'win32' ? 'linux-x64' : 'win-x64';
       const result = spawnSync(
         process.execPath,
-        [path.join(__dirname, '../../build/package.js'), '--target', 'linux-x64'],
+        [path.join(__dirname, '../../build/package.js'), '--target', crossTarget],
         { encoding: 'utf8' }
       );
 
