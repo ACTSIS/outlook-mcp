@@ -154,11 +154,24 @@ describe('release workflow', () => {
     });
   });
 
-  describe('secret-free pipeline', () => {
-    it('never references or receives OAuth client secrets', () => {
+  describe('secret policy for intranet publication', () => {
+    it('forbids OAuth client secrets and any unlisted secrets', () => {
       expect(raw).not.toMatch(/OUTLOOK_CLIENT_SECRET/);
       expect(raw).not.toMatch(/MS_CLIENT_SECRET/);
-      expect(raw).not.toMatch(/\bsecrets\./);
+      expect(raw).not.toMatch(/\bsecrets\.(?!NETBIRD_SETUP_KEY|PROGET_API_KEY)\w/);
+    });
+
+    it('allows and consumes the two infrastructure secrets in publish-artifacts', () => {
+      expect(doc.jobs['publish-artifacts']).toBeDefined();
+      const paEnv = doc.jobs['publish-artifacts'].steps
+        .map((step) =>
+          Object.entries(step.env || {})
+            .map(([k, v]) => `${k}=${v}`)
+            .join('\n')
+        )
+        .join('\n');
+      expect(paEnv).toMatch(/\bsecrets\.NETBIRD_SETUP_KEY\b/);
+      expect(paEnv).toMatch(/\bsecrets\.PROGET_API_KEY\b/);
     });
 
     it('declares contents write only on the release job', () => {
@@ -169,6 +182,99 @@ describe('release workflow', () => {
           expect(job.permissions.contents).toBe('read');
         }
       }
+    });
+  });
+
+  describe('intranet distribution jobs', () => {
+    it('installer jobs depend on build', () => {
+      expect(doc.jobs['installer-windows'].needs).toEqual(['build']);
+      expect(doc.jobs['installer-linux'].needs).toEqual(['build']);
+    });
+
+    it('smoke depends on both installer jobs', () => {
+      expect(doc.jobs.smoke.needs).toEqual(['installer-windows', 'installer-linux']);
+    });
+
+    it('provenance depends on smoke', () => {
+      expect(doc.jobs.provenance.needs).toEqual(['smoke']);
+    });
+
+    it('publish-artifacts depends on release, both installers, and provenance', () => {
+      const needs = doc.jobs['publish-artifacts'].needs;
+      expect(needs).toEqual(
+        expect.arrayContaining(['release', 'installer-windows', 'installer-linux', 'provenance'])
+      );
+      expect(needs).toHaveLength(4);
+    });
+
+    it('publish-artifacts serializes same-version publications with a ref-keyed concurrency group', () => {
+      expect(doc.jobs['publish-artifacts'].concurrency.group).toMatch(/proget-publish/);
+      expect(doc.jobs['publish-artifacts'].concurrency.group).toMatch(
+        /\$\{\{\s*github\.ref\s*\}\}/
+      );
+      expect(doc.jobs['publish-artifacts'].concurrency['cancel-in-progress']).toBe(false);
+    });
+
+    it('publish-artifacts has a pre-upload secret guard and an always() netbird teardown', () => {
+      const paSteps = doc.jobs['publish-artifacts'].steps;
+      const guard = paSteps.find((step) => step.name && step.name.toLowerCase().includes('guard'));
+      expect(guard).toBeDefined();
+      const teardown = paSteps.find((step) => step.run && step.run.includes('netbird down'));
+      expect(teardown).toBeDefined();
+      expect(teardown.if).toBe('always()');
+    });
+
+    it('manifest is generated after asset uploads and references the four product assets', () => {
+      const paSteps = doc.jobs['publish-artifacts'].steps;
+      const manifestStep = paSteps.find(
+        (step) => step.run && step.run.includes('build/proget-manifest.js')
+      );
+      expect(manifestStep).toBeDefined();
+      const manifestRun = manifestStep.run;
+      expect(manifestRun).toMatch(/outlook-mcp-setup\.exe/);
+      expect(manifestRun).toMatch(/outlook-mcp_\$\{VERSION\}_amd64\.deb/);
+      expect(manifestRun).toMatch(/outlook-mcp-win-x64\.exe/);
+      expect(manifestRun).toMatch(/outlook-mcp-linux-x64/);
+    });
+
+    it('cleanup runs after every job and never gates outcomes', () => {
+      expect(doc.jobs.cleanup.needs).toEqual(
+        expect.arrayContaining([
+          'release',
+          'installer-windows',
+          'installer-linux',
+          'smoke',
+          'provenance',
+          'publish-artifacts',
+        ])
+      );
+      expect(doc.jobs.cleanup.if).toMatch(/always\(\)/);
+    });
+
+    it('installer jobs verify tag version drift before packaging', () => {
+      const windowsScript = stepsScript(doc, 'installer-windows');
+      const linuxScript = stepsScript(doc, 'installer-linux');
+      expect(windowsScript).toMatch(/package\.json.*version/);
+      expect(linuxScript).toMatch(/package\.json.*version/);
+      expect(windowsScript).toMatch(/GITHUB_REF_NAME/);
+      expect(linuxScript).toMatch(/GITHUB_REF_NAME/);
+    });
+
+    it('keeps the existing release job block byte-for-byte unchanged', () => {
+      expect(doc.jobs.release.needs).toEqual(['build', 'validate', 'scan']);
+      expect(doc.jobs.release.permissions).toEqual({ contents: 'write' });
+      expect(doc.jobs.release['timeout-minutes']).toBe(15);
+      expect(doc.jobs.release.concurrency).toEqual({
+        group: 'release-${{ github.ref }}',
+        'cancel-in-progress': false,
+      });
+      const stepNames = doc.jobs.release.steps.map((step) => step.name);
+      expect(stepNames).toEqual([
+        'Checkout repository',
+        'Download packaged artifacts',
+        'Verify complete artifact set before publishing',
+        'Create release',
+      ]);
     });
   });
 });
