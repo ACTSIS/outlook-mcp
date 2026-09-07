@@ -11,7 +11,6 @@ OutFile "outlook-mcp-setup.exe"
 InstallDir "$PROGRAMFILES64\outlook-mcp"
 RequestExecutionLevel admin
 SetCompressor lzma
-SetRegView 64
 
 ; Version is supplied on the makensis command line via -DVERSION=...
 !ifndef VERSION

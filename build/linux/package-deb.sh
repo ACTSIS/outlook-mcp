@@ -38,14 +38,20 @@ if [ ! -f "$BINARY_SRC" ]; then
 fi
 
 STAGE_DIR="$(mktemp -d)"
-trap 'rm -rf "$STAGE_DIR"' EXIT
+ANALYSIS_DIR=""
+trap 'rm -rf "$STAGE_DIR" "${ANALYSIS_DIR:-}"' EXIT
 
 STAGE_BIN="$STAGE_DIR/outlook-mcp"
 cp "$BINARY_SRC" "$STAGE_BIN"
 chmod 0755 "$STAGE_BIN"
 
 echo "[package-deb] deriving Depends with dpkg-shlibdeps" >&2
-DEPENDS=$(dpkg-shlibdeps -O "$STAGE_BIN" 2>/dev/null | sed -n 's/^shlibs:Depends=//p' || true)
+# dpkg-shlibdeps requires a Debian package context even with -O; build a
+# minimal throwaway one (same approach as the timetracker packaging).
+ANALYSIS_DIR="$(mktemp -d)"
+mkdir -p "$ANALYSIS_DIR/debian"
+printf 'Source: analysis\nSection: misc\nPriority: optional\nMaintainer: n/a <noreply@invalid.example>\nStandards-Version: 4.6.2\n\nPackage: analysis\nArchitecture: amd64\nDescription: dependency analysis\n' > "$ANALYSIS_DIR/debian/control"
+DEPENDS="$(cd "$ANALYSIS_DIR" && dpkg-shlibdeps -O -e "$STAGE_BIN" 2>/dev/null | sed -n 's/^shlibs:Depends=//p')"
 if [ -z "$DEPENDS" ]; then
   echo "[package-deb] dpkg-shlibdeps produced no Depends; failing closed" >&2
   exit 1
