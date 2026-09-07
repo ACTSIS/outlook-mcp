@@ -58,4 +58,20 @@ describe('build/linux packaging structure', () => {
       if (stderr) expect(stderr).toBe('');
     }
   });
+
+  it('commits executable scripts with the executable bit set', () => {
+    // A 100644 mode would fail CI with "Permission denied" (exit 126) the
+    // first time a runner executes the script directly.
+    const executable = [
+      'fetch-tools.sh',
+      'package-deb.sh',
+      'tests/container-smoke.sh',
+      'scripts/postinst',
+      'scripts/postrm',
+    ];
+    for (const file of executable) {
+      const stat = fs.statSync(path.join(LINUX_DIR, file));
+      expect(stat.mode & 0o111).not.toBe(0);
+    }
+  });
 });
