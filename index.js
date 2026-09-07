@@ -142,12 +142,26 @@ process.on('SIGTERM', () => {
   console.error('SIGTERM received but staying alive');
 });
 
-// Start the server
-const transport = new StdioServerTransport();
-server
-  .connect(transport)
-  .then(() => console.error(`${config.SERVER_NAME} connected and listening`))
-  .catch((error) => {
-    console.error(`Connection error: ${error.message}`);
-    process.exit(1);
-  });
+/**
+ * Start the MCP stdio server.
+ * Exported so the dispatcher (bin/m365-mcp.js) and direct runs share one path.
+ * @returns {Promise<void>}
+ */
+function startMCP() {
+  const transport = new StdioServerTransport();
+  return server
+    .connect(transport)
+    .then(() => console.error(`${config.SERVER_NAME} connected and listening`))
+    .catch((error) => {
+      console.error(`Connection error: ${error.message}`);
+      process.exit(1);
+    });
+}
+
+// Start the server only when this file is the entry point (direct run or npm
+// script). When required by the dispatcher, the dispatcher calls startMCP().
+if (require.main === module) {
+  startMCP();
+}
+
+module.exports = { startMCP };

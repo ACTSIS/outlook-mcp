@@ -6,6 +6,70 @@ const os = require('os');
 
 // Ensure we have a home directory path even if process.env.HOME is undefined
 const homeDir = process.env.HOME || process.env.USERPROFILE || os.homedir() || '/tmp';
+const DEFAULT_AUTH_SCOPES = Object.freeze([
+  'offline_access',
+  'User.Read',
+  'Mail.Read',
+  'Mail.ReadWrite',
+  'Mail.Send',
+  'Calendars.Read',
+  'Calendars.ReadWrite',
+  'Contacts.Read',
+  'Files.Read',
+  'Files.ReadWrite',
+]);
+
+function getAuthorityHost() {
+  return (process.env.MS_AUTHORITY_HOST || 'https://login.microsoftonline.com').replace(/\/+$/, '');
+}
+
+function getConfiguredScopes() {
+  return process.env.MS_SCOPES
+    ? process.env.MS_SCOPES.split(/\s+/).filter(Boolean)
+    : [...DEFAULT_AUTH_SCOPES];
+}
+
+const AUTH_CONFIG = {
+  clientId: process.env.OUTLOOK_CLIENT_ID || process.env.MS_CLIENT_ID || '',
+  clientSecret: process.env.OUTLOOK_CLIENT_SECRET || process.env.MS_CLIENT_SECRET || '',
+  redirectUri: process.env.MS_REDIRECT_URI || 'http://localhost:3333/auth/callback',
+  scopes: getConfiguredScopes(),
+  tenantId: process.env.MS_TENANT_ID || 'common',
+  authorityHost: getAuthorityHost(),
+  tokenEndpoint:
+    process.env.MS_TOKEN_ENDPOINT ||
+    `${getAuthorityHost()}/${process.env.MS_TENANT_ID || 'common'}/oauth2/v2.0/token`,
+  authEndpoint:
+    process.env.MS_AUTH_ENDPOINT ||
+    `${getAuthorityHost()}/${process.env.MS_TENANT_ID || 'common'}/oauth2/v2.0/authorize`,
+  tokenStorePath: path.join(homeDir, '.outlook-mcp-tokens.json'),
+  authServerUrl: 'http://localhost:3333',
+};
+
+/**
+ * Refresh the mutable authentication settings after Vault setup changes the
+ * allowlisted runtime environment in the current MCP process.
+ * @returns {object} The shared authentication configuration object
+ */
+function refreshAuthConfig() {
+  const authorityHost = getAuthorityHost();
+  const tenantId = process.env.MS_TENANT_ID || 'common';
+
+  Object.assign(AUTH_CONFIG, {
+    clientId: process.env.OUTLOOK_CLIENT_ID || process.env.MS_CLIENT_ID || '',
+    clientSecret: process.env.OUTLOOK_CLIENT_SECRET || process.env.MS_CLIENT_SECRET || '',
+    redirectUri: process.env.MS_REDIRECT_URI || 'http://localhost:3333/auth/callback',
+    scopes: getConfiguredScopes(),
+    tenantId,
+    authorityHost,
+    tokenEndpoint:
+      process.env.MS_TOKEN_ENDPOINT || `${authorityHost}/${tenantId}/oauth2/v2.0/token`,
+    authEndpoint:
+      process.env.MS_AUTH_ENDPOINT || `${authorityHost}/${tenantId}/oauth2/v2.0/authorize`,
+  });
+
+  return AUTH_CONFIG;
+}
 
 module.exports = {
   // Server information
@@ -16,28 +80,8 @@ module.exports = {
   USE_TEST_MODE: process.env.USE_TEST_MODE === 'true',
 
   // Authentication configuration
-  AUTH_CONFIG: {
-    // OUTLOOK_* is used by MCP client configuration; MS_* is used by .env and
-    // the standalone callback server. Accept both so the two entry points
-    // resolve the same credentials.
-    clientId: process.env.OUTLOOK_CLIENT_ID || process.env.MS_CLIENT_ID || '',
-    clientSecret: process.env.OUTLOOK_CLIENT_SECRET || process.env.MS_CLIENT_SECRET || '',
-    redirectUri: 'http://localhost:3333/auth/callback',
-    scopes: [
-      'offline_access',
-      'User.Read',
-      'Mail.Read',
-      'Mail.ReadWrite',
-      'Mail.Send',
-      'Calendars.Read',
-      'Calendars.ReadWrite',
-      'Contacts.Read',
-      'Files.Read',
-      'Files.ReadWrite',
-    ],
-    tokenStorePath: path.join(homeDir, '.outlook-mcp-tokens.json'),
-    authServerUrl: 'http://localhost:3333',
-  },
+  AUTH_CONFIG,
+  refreshAuthConfig,
 
   // Microsoft Graph API
   GRAPH_API_ENDPOINT: 'https://graph.microsoft.com/v1.0/',

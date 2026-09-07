@@ -10,7 +10,8 @@ console.error('==== END DEBUG INFO ====');
 
 // Load the real application
 try {
-  require('./index');
+  const { startMCP } = require('./index');
+  startMCP();
 } catch (error) {
   console.error('ERROR LOADING INDEX.JS:', error);
 }

@@ -49,13 +49,12 @@ The initial-acquisition delta described Flow detection by inspecting the token r
 
 These gaps are tracked here to keep the canonical requirements honest without converting defects into required behavior:
 
-| Gap                                                                               | Impact                                                                            | Desired invariant                                                                |
-| --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Initial Graph re-authentication raw-writes the token response                     | Existing `flow_*` keys can be erased                                              | Resource-specific writes preserve the other resource's credentials               |
-| Graph refresh failure nulls the shared object before persistence                  | Flow state is lost in memory while stale disk data can survive                    | Permanent/transient policy is explicit and invalidation is persisted selectively |
-| TokenStorage-only environment overrides differ from productive acquisition config | Initial auth and refresh can use inconsistent scopes, redirect URIs, or endpoints | Productive acquisition and refresh share one resolved configuration              |
-| `authenticate.force` is advertised but ignored                                    | Callers cannot request enforced re-authentication                                 | Implement the argument or remove it from the public schema                       |
-| Flow test authentication creates Graph-shaped test tokens                         | Test-mode success does not prove productive Flow credential behavior              | Create Flow-shaped fixtures or state the narrower simulation contract            |
+| Gap                                                              | Impact                                                               | Desired invariant                                                                |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Initial Graph re-authentication raw-writes the token response    | Existing `flow_*` keys can be erased                                 | Resource-specific writes preserve the other resource's credentials               |
+| Graph refresh failure nulls the shared object before persistence | Flow state is lost in memory while stale disk data can survive       | Permanent/transient policy is explicit and invalidation is persisted selectively |
+| `authenticate.force` is advertised but ignored                   | Callers cannot request enforced re-authentication                    | Implement the argument or remove it from the public schema                       |
+| Flow test authentication creates Graph-shaped test tokens        | Test-mode success does not prove productive Flow credential behavior | Create Flow-shaped fixtures or state the narrower simulation contract            |
 
 ## Maintenance Rule
 

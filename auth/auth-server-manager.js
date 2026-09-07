@@ -8,6 +8,21 @@ const AUTH_SERVER_URL = config.AUTH_CONFIG.authServerUrl;
 
 let authServerProcess = null;
 
+const AUTH_DISPATCHER_PATH = path.join(__dirname, '..', 'bin', 'm365-mcp.js');
+
+// Launcher override for packaged executables. When set, the callback server is
+// launched through this command/args pair (e.g. the dispatcher `auth` mode).
+let launcher = null;
+
+/**
+ * Select how the callback server process is launched.
+ * @param {{command: string, args: string[]}|null} value - Dispatcher launcher,
+ *   or null/undefined to restore the source dispatcher default.
+ */
+function setLauncher(value) {
+  launcher = value || null;
+}
+
 function checkAuthServer() {
   return new Promise((resolve) => {
     const req = http.get(AUTH_SERVER_URL, (res) => {
@@ -43,7 +58,10 @@ async function startAuthServer() {
     };
   }
 
-  authServerProcess = spawn(process.execPath, [AUTH_SERVER_PATH], {
+  const command = launcher ? launcher.command : process.execPath;
+  const args = launcher ? launcher.args : [AUTH_DISPATCHER_PATH, 'auth'];
+
+  authServerProcess = spawn(command, args, {
     cwd: path.dirname(AUTH_SERVER_PATH),
     env: process.env,
     detached: false,
@@ -104,4 +122,5 @@ module.exports = {
   startAuthServer,
   stopAuthServer,
   checkAuthServer,
+  setLauncher,
 };

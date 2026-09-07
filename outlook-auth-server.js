@@ -5,6 +5,8 @@ const querystring = require('querystring');
 const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
+const vaultClient = require('./runtime/vault-client');
+const { createEntraOAuthError, isPermanentEntraOAuthFailure } = require('./auth/entra-error');
 
 // Load environment variables from .env file
 require('dotenv').config();
@@ -52,8 +54,22 @@ const AUTH_CONFIG = {
   ),
   redirectUri: config.AUTH_CONFIG.redirectUri,
   scopes: config.AUTH_CONFIG.scopes,
+  tokenEndpoint: config.AUTH_CONFIG.tokenEndpoint,
   tokenStorePath: config.AUTH_CONFIG.tokenStorePath,
 };
+
+async function invalidateVaultCacheAfterPermanentEntraFailure(error, deps = {}) {
+  if (!isPermanentEntraOAuthFailure(error)) return;
+
+  const getConfig = deps.getVaultConfig || vaultClient.getVaultConfig;
+  const invalidate = deps.invalidateVaultTokenCache || vaultClient.invalidateVaultTokenCache;
+
+  try {
+    await invalidate(getConfig());
+  } catch {
+    // Cache invalidation must never mask the original authentication error.
+  }
+}
 
 /**
  * Exchange an authorization code for tokens.
@@ -67,6 +83,15 @@ function exchangeCodeForTokens(code, isFlow = false, deps = {}) {
   const flowScope = deps.flowScope || config.FLOW_SCOPE;
   const tokenStorageInstance = deps.tokenStorage || tokenStorage;
   const httpsModule = deps.https || https;
+  let tokenEndpoint;
+  try {
+    tokenEndpoint = new URL(
+      authConfig.tokenEndpoint ||
+        `${authConfig.authorityHost}/${authConfig.tenantId}/oauth2/v2.0/token`
+    );
+  } catch {
+    return Promise.reject(new Error('Configured Microsoft token endpoint is invalid.'));
+  }
   // tokenStorageInstance is used on the Flow branch below
   void tokenStorageInstance;
 
@@ -81,8 +106,9 @@ function exchangeCodeForTokens(code, isFlow = false, deps = {}) {
     });
 
     const options = {
-      hostname: authConfig.authorityHost.replace(/^https?:\/\//, '').split('/')[0],
-      path: `/${authConfig.tenantId}/oauth2/v2.0/token`,
+      hostname: tokenEndpoint.hostname,
+      ...(tokenEndpoint.port ? { port: tokenEndpoint.port } : {}),
+      path: `${tokenEndpoint.pathname}${tokenEndpoint.search}`,
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -126,7 +152,16 @@ function exchangeCodeForTokens(code, isFlow = false, deps = {}) {
             reject(new Error(`Error parsing token response: ${error.message}`));
           }
         } else {
-          reject(new Error(`Token exchange failed with status ${res.statusCode}: ${data}`));
+          let responseBody;
+          try {
+            responseBody = JSON.parse(data);
+          } catch {
+            responseBody = {};
+          }
+          const oauthError = createEntraOAuthError(responseBody, res.statusCode, 'Token exchange');
+          await invalidateVaultCacheAfterPermanentEntraFailure(oauthError, deps);
+          console.error('Microsoft token exchange rejected:', oauthError.code);
+          reject(oauthError);
         }
       });
     });
@@ -179,6 +214,14 @@ function createRequestHandler(deps = {}) {
 
       if (query.error) {
         console.error(`Authentication error: ${query.error}`);
+        void invalidateVaultCacheAfterPermanentEntraFailure(
+          {
+            error: query.error,
+            error_description: query.error_description,
+            status: 400,
+          },
+          deps
+        );
         res.writeHead(400, { 'Content-Type': 'text/html' });
         res.end(`
           <html>
@@ -462,8 +505,12 @@ function createRequestHandler(deps = {}) {
   };
 }
 
-// Only start the HTTP server when this file is run directly (not during tests)
-if (require.main === module) {
+/**
+ * Start the authentication callback server on port 3333.
+ * Exported so the dispatcher (bin/m365-mcp.js) and direct runs share one path.
+ * @returns {import('http').Server} The started HTTP server
+ */
+function startAuthServer() {
   // Log to console
   console.log('Starting M365 MCP Authentication Server');
 
@@ -495,6 +542,14 @@ if (require.main === module) {
     console.log('Authentication server shutting down');
     process.exit(0);
   });
+
+  return server;
+}
+
+// Only start the HTTP server when this file is run directly (not during tests
+// or when required by the dispatcher).
+if (require.main === module) {
+  startAuthServer();
 }
 
 module.exports = {
@@ -502,4 +557,5 @@ module.exports = {
   exchangeCodeForTokens,
   pendingStates,
   cleanupInterval,
+  startAuthServer,
 };

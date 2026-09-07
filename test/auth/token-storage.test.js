@@ -4,6 +4,7 @@ const path = require('path');
 const querystring = require('querystring');
 const config = require('../../config');
 const TokenStorage = require('../../auth/token-storage');
+const vaultClient = require('../../runtime/vault-client');
 
 jest.mock('fs', () => ({
   promises: {
@@ -95,6 +96,48 @@ describe('TokenStorage', () => {
       expect(tokenStorage.config.flowScope).toBe(config.FLOW_SCOPE);
       const customStorage = new TokenStorage({ ...baseConfig, flowScope: 'custom-flow-scope' });
       expect(customStorage.config.flowScope).toBe('custom-flow-scope');
+    });
+
+    it('refreshes environment-derived settings after Vault setup', () => {
+      const keys = [
+        'OUTLOOK_CLIENT_ID',
+        'OUTLOOK_CLIENT_SECRET',
+        'MS_CLIENT_ID',
+        'MS_CLIENT_SECRET',
+        'MS_TENANT_ID',
+        'MS_AUTHORITY_HOST',
+        'MS_SCOPES',
+        'MS_TOKEN_ENDPOINT',
+      ];
+      const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+
+      try {
+        delete process.env.OUTLOOK_CLIENT_ID;
+        delete process.env.OUTLOOK_CLIENT_SECRET;
+        process.env.MS_CLIENT_ID = 'vault-client-id';
+        process.env.MS_CLIENT_SECRET = 'vault-client-secret';
+        process.env.MS_TENANT_ID = 'vault-tenant-id';
+        process.env.MS_AUTHORITY_HOST = 'https://login.vault.example.test';
+        process.env.MS_SCOPES = 'offline_access User.Read';
+        process.env.MS_TOKEN_ENDPOINT = 'https://login.vault.example.test/token';
+
+        const storage = new TokenStorage({ tokenStorePath: tokenStorePath });
+        storage.refreshRuntimeConfiguration();
+
+        expect(storage.config.clientId).toBe('vault-client-id');
+        expect(storage.config.clientSecret).toBe('vault-client-secret');
+        expect(storage.config.tenantId).toBe('vault-tenant-id');
+        expect(storage.config.scopes).toEqual(['offline_access', 'User.Read']);
+        expect(storage.config.tokenEndpoint).toBe('https://login.vault.example.test/token');
+        expect(config.AUTH_CONFIG.clientId).toBe('vault-client-id');
+        expect(config.AUTH_CONFIG.scopes).toEqual(['offline_access', 'User.Read']);
+      } finally {
+        for (const key of keys) {
+          if (previous[key] === undefined) delete process.env[key];
+          else process.env[key] = previous[key];
+        }
+        config.refreshAuthConfig();
+      }
     });
   });
 
@@ -487,6 +530,74 @@ describe('TokenStorage', () => {
 
       await expect(refreshPromise).rejects.toThrow(errorResponse.error_description);
       expect(tokenStorage._refreshPromise).toBeNull();
+    });
+
+    it('invalidates the Vault cache only for a permanent Entra refresh rejection', async () => {
+      const previousVaultAddress = process.env.VAULT_ADDR;
+      const invalidateSpy = jest
+        .spyOn(vaultClient, 'invalidateVaultTokenCache')
+        .mockResolvedValue({ deleted: true });
+
+      try {
+        process.env.VAULT_ADDR = 'https://vault.example.test';
+        const refreshPromise = tokenStorage.refreshAccessToken();
+        const mockRes = {
+          statusCode: 400,
+          on: (event, cb) => {
+            if (event === 'data') {
+              cb(
+                Buffer.from(
+                  JSON.stringify({ error: 'invalid_grant', error_description: 'Grant expired' })
+                )
+              );
+            }
+            if (event === 'end') cb();
+          },
+        };
+        mockHttpsRequest.callback(mockRes);
+
+        await expect(refreshPromise).rejects.toMatchObject({
+          code: 'invalid_grant',
+          isPermanentEntraAuthFailure: true,
+        });
+        expect(invalidateSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        if (previousVaultAddress === undefined) delete process.env.VAULT_ADDR;
+        else process.env.VAULT_ADDR = previousVaultAddress;
+        invalidateSpy.mockRestore();
+      }
+    });
+
+    it('does not invalidate the Vault cache for a transient gateway response', async () => {
+      const previousVaultAddress = process.env.VAULT_ADDR;
+      const invalidateSpy = jest
+        .spyOn(vaultClient, 'invalidateVaultTokenCache')
+        .mockResolvedValue({ deleted: true });
+
+      try {
+        process.env.VAULT_ADDR = 'https://vault.example.test';
+        const refreshPromise = tokenStorage.refreshAccessToken();
+        const mockRes = {
+          statusCode: 503,
+          on: (event, cb) => {
+            if (event === 'data') {
+              cb(Buffer.from(JSON.stringify({ error: 'temporarily_unavailable' })));
+            }
+            if (event === 'end') cb();
+          },
+        };
+        mockHttpsRequest.callback(mockRes);
+
+        await expect(refreshPromise).rejects.toMatchObject({
+          code: 'temporarily_unavailable',
+          isPermanentEntraAuthFailure: false,
+        });
+        expect(invalidateSpy).not.toHaveBeenCalled();
+      } finally {
+        if (previousVaultAddress === undefined) delete process.env.VAULT_ADDR;
+        else process.env.VAULT_ADDR = previousVaultAddress;
+        invalidateSpy.mockRestore();
+      }
     });
 
     it('should throw if no refresh token is available', async () => {
