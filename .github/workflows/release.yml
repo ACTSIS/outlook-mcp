@@ -218,7 +218,7 @@ jobs:
         shell: pwsh
         run: |
           $env:Path += ";${env:ProgramFiles(x86)}\NSIS"
-          makensis -DVERSION=${{ steps.version.outputs.version }} build\windows\installer.nsi
+          makensis "-DVERSION=${{ steps.version.outputs.version }}" build\windows\installer.nsi
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4

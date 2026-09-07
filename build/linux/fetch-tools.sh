@@ -40,7 +40,7 @@ else
   EFFECTIVE_HOST="${EFFECTIVE_URL#*://}"
   EFFECTIVE_HOST="${EFFECTIVE_HOST%%/*}"
   case "$EFFECTIVE_HOST" in
-    github.com|*.github.com|objects.githubusercontent.com) ;;
+    github.com|*.github.com|objects.githubusercontent.com|release-assets.githubusercontent.com) ;;
     *)
       echo "[fetch-tools] refusing redirect to untrusted host: $EFFECTIVE_HOST" >&2
       rm -f "$TARBALL"
