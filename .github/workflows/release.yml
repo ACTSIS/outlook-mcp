@@ -175,3 +175,351 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" dist/outlook-mcp-win-x64.exe dist/outlook-mcp-linux-x64 --generate-notes
+
+  installer-windows:
+    name: Build Windows installer
+    runs-on: windows-latest
+    needs: [build]
+    permissions:
+      contents: read
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set version
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_version="${GITHUB_REF_NAME#v}"
+          pkg_version="$(node -e "console.log(require('./package.json').version)")"
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $pkg_version"
+            exit 1
+          fi
+
+      - name: Download packaged artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: artifact-win-x64
+          path: build/windows
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis --version=3.10 --yes --no-progress
+
+      - name: Build Windows installer
+        shell: cmd
+        run: makensis -DVERSION=${{ steps.version.outputs.version }} build\windows\installer.nsi
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-win-x64
+          path: outlook-mcp-setup.exe
+          if-no-files-found: error
+
+  installer-linux:
+    name: Build Linux .deb
+    runs-on: ubuntu-latest
+    needs: [build]
+    permissions:
+      contents: read
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set version
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_version="${GITHUB_REF_NAME#v}"
+          pkg_version="$(node -e "console.log(require('./package.json').version)")"
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $pkg_version"
+            exit 1
+          fi
+
+      - name: Download packaged artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: artifact-linux-x64
+          path: dist/linux-x64
+
+      - name: Fetch packaging tools
+        shell: bash
+        run: build/linux/fetch-tools.sh
+
+      - name: Build .deb package
+        shell: bash
+        run: build/linux/package-deb.sh
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_SHA: ${{ github.sha }}
+
+      - name: Scan .deb payload for secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          DEB_PATH="dist/linux-x64/outlook-mcp_${VERSION}_amd64.deb"
+          TMP_DIR="$(mktemp -d)"
+          export SCAN_DIR="$TMP_DIR"
+          trap 'rm -rf "$TMP_DIR"' EXIT
+          dpkg-deb --fsys-tarfile "$DEB_PATH" | tar -x -C "$TMP_DIR"
+          node -e "const { scanDirectory, canPublish, report } = require('./build/secret-scan'); const findings = scanDirectory(process.env.SCAN_DIR); console.log(report(findings)); if (!canPublish(findings)) process.exit(1);"
+
+      - name: Upload Linux installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-linux-x64
+          path: dist/linux-x64/outlook-mcp_${{ steps.version.outputs.version }}_amd64.deb
+          if-no-files-found: error
+
+  smoke:
+    name: Container smoke test
+    runs-on: ubuntu-latest
+    needs: [installer-windows, installer-linux]
+    permissions:
+      contents: read
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set version
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download installer artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/installers
+          pattern: installer-*
+          merge-multiple: true
+
+      - name: Run container smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          DEB_PATH="dist/installers/outlook-mcp_${VERSION}_amd64.deb"
+          docker run --rm \
+            -v "$PWD/$DEB_PATH:/tmp/outlook-mcp_amd64.deb" \
+            -v "$PWD/build/linux/tests/container-smoke.sh:/tmp/container-smoke.sh" \
+            ubuntu:24.04 \
+            bash /tmp/container-smoke.sh /tmp/outlook-mcp_amd64.deb
+
+  provenance:
+    name: Generate provenance
+    runs-on: ubuntu-latest
+    needs: [smoke]
+    permissions:
+      contents: read
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set version
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download raw product artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: artifact-*
+          merge-multiple: true
+
+      - name: Download installer artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: installer-*
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          cd dist
+          sha256sum outlook-mcp-win-x64.exe outlook-mcp-linux-x64 outlook-mcp-setup.exe "outlook-mcp_${VERSION}_amd64.deb" > SHA256SUMS
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: dist
+          format: spdx-json
+          output-file: dist/outlook-mcp-${{ steps.version.outputs.version }}-sbom.spdx.json
+          upload-artifact: false
+
+      - name: Upload provenance artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: provenance
+          path: |
+            dist/SHA256SUMS
+            dist/outlook-mcp-${{ steps.version.outputs.version }}-sbom.spdx.json
+          if-no-files-found: error
+
+  publish-artifacts:
+    name: Publish to ProGet
+    runs-on: ubuntu-latest
+    needs: [release, installer-windows, installer-linux, provenance]
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    concurrency:
+      group: proget-publish-${{ github.ref }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.1
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set version
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download raw product artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: artifact-*
+          merge-multiple: true
+
+      - name: Download installer artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: installer-*
+          merge-multiple: true
+
+      - name: Download provenance artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: provenance
+          path: dist/provenance
+
+      - name: Fail-closed secret guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${NETBIRD_SETUP_KEY}" ] || [ -z "${PROGET_API_KEY}" ]; then
+            echo "::error::missing publish secret"
+            exit 1
+          fi
+        env:
+          NETBIRD_SETUP_KEY: ${{ secrets.NETBIRD_SETUP_KEY }}
+          PROGET_API_KEY: ${{ secrets.PROGET_API_KEY }}
+
+      - name: Bring up NetBird tunnel
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://pkgs.netbird.io/install.sh | sudo sh
+          sudo netbird up --setup-key "${NETBIRD_SETUP_KEY}" --management-url "${NETBIRD_MANAGEMENT_URL}"
+        env:
+          NETBIRD_SETUP_KEY: ${{ secrets.NETBIRD_SETUP_KEY }}
+          NETBIRD_MANAGEMENT_URL: ${{ vars.NETBIRD_MANAGEMENT_URL }}
+
+      - name: Upload assets to ProGet
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          BASE_URL="${PROGET_BASE_URL}/endpoints/${PROGET_ASSET_DIRECTORY}/content/${PROGET_TARGET_PREFIX}/${VERSION}"
+          for FILE in outlook-mcp-setup.exe "outlook-mcp_${VERSION}_amd64.deb" outlook-mcp-win-x64.exe outlook-mcp-linux-x64 dist/provenance/SHA256SUMS dist/provenance/outlook-mcp-${VERSION}-sbom.spdx.json; do
+            NAME="$(basename "$FILE")"
+            echo "uploading $NAME"
+            curl --fail-with-body --retry 3 -X POST \
+              -H "X-ApiKey: ${PROGET_API_KEY}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$FILE" \
+              "${BASE_URL}/${NAME}"
+          done
+        env:
+          PROGET_BASE_URL: ${{ vars.PROGET_BASE_URL }}
+          PROGET_ASSET_DIRECTORY: ${{ vars.PROGET_ASSET_DIRECTORY }}
+          PROGET_TARGET_PREFIX: ${{ vars.PROGET_TARGET_PREFIX }}
+          PROGET_API_KEY: ${{ secrets.PROGET_API_KEY }}
+
+      - name: Generate and upload manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          ASSETS="outlook-mcp-setup.exe,outlook-mcp_${VERSION}_amd64.deb,outlook-mcp-win-x64.exe,outlook-mcp-linux-x64"
+          node build/proget-manifest.js --version "$VERSION" --date "$DATE" --assets "$ASSETS" < dist/provenance/SHA256SUMS > latest-stable.json
+          curl --fail-with-body --retry 3 -X POST \
+            -H "X-ApiKey: ${PROGET_API_KEY}" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @latest-stable.json \
+            "${PROGET_BASE_URL}/endpoints/${PROGET_ASSET_DIRECTORY}/content/${PROGET_TARGET_PREFIX}/latest-stable.json"
+        env:
+          PROGET_BASE_URL: ${{ vars.PROGET_BASE_URL }}
+          PROGET_ASSET_DIRECTORY: ${{ vars.PROGET_ASSET_DIRECTORY }}
+          PROGET_TARGET_PREFIX: ${{ vars.PROGET_TARGET_PREFIX }}
+          PROGET_API_KEY: ${{ secrets.PROGET_API_KEY }}
+
+      - name: Tear down NetBird tunnel
+        if: always()
+        shell: bash
+        run: sudo netbird down
+
+  cleanup:
+    name: Cleanup workflow artifacts
+    runs-on: ubuntu-latest
+    needs: [release, installer-windows, installer-linux, smoke, provenance, publish-artifacts]
+    if: always()
+    permissions:
+      contents: read
+      actions: write
+    timeout-minutes: 10
+
+    steps:
+      - name: Delete workflow artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          REPO="${{ github.repository }}"
+          RUN_ID="${{ github.run_id }}"
+          for NAME in artifact-win-x64 artifact-linux-x64 installer-win-x64 installer-linux-x64 provenance; do
+            echo "deleting artifacts named $NAME"
+            IDS="$(gh api --method GET "/repos/${REPO}/actions/runs/${RUN_ID}/artifacts" --jq '.artifacts[] | select(.name == "'"${NAME}"'") | .id')"
+            for ID in ${IDS}; do
+              gh api --method DELETE "/repos/${REPO}/actions/artifacts/${ID}"
+            done
+          done

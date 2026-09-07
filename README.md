@@ -86,10 +86,10 @@ Power Automate is optional and requires a second consent flow. Complete the Grap
 
 Standalone executables are published as GitHub Release assets. They include the MCP server and the authentication callback server in one file, and **do not require Node.js or npm** on the machine that runs them.
 
-| Target      | Artifact                  | Platform               |
-| ----------- | ------------------------- | ---------------------- |
-| Windows x64 | `outlook-mcp-win-x64.exe` | Windows 10/11, x64     |
-| Linux x64   | `outlook-mcp-linux-x64`   | Linux x64, glibc 2.28+ |
+| Target      | Artifact                  | Platform                                |
+| ----------- | ------------------------- | --------------------------------------- |
+| Windows x64 | `outlook-mcp-win-x64.exe` | Windows 10/11, x64                      |
+| Linux x64   | `outlook-mcp-linux-x64`   | Linux x64, glibc ≥ 2.39 (Ubuntu 24.04+) |
 
 Windows file Properties identify the executable as **M365 Assistant MCP Server** from **ACTSIS** and show the package/release version. The embedded Node.js runtime is an implementation detail of the standalone build.
 
@@ -116,6 +116,62 @@ Windows file Properties identify the executable as **M365 Assistant MCP Server**
    ```
 
    In MCP mode, the executable relaunches itself in `auth` mode when an authentication tool needs the callback server, so one file covers the whole flow. If a future release must use separate fallback artifacts, it will document `outlook-mcp-<target>-mcp` and `outlook-mcp-<target>-auth` names and the same mode-specific invocation.
+
+### Intranet installation (ACTSIS ProGet)
+
+ACTSIS collaborators can install releases from the corporate ProGet Asset Directory at `https://artifacts.actsis.com`. Assets live in the `actsis-ai-policy` asset directory:
+
+- Versioned assets: `https://artifacts.actsis.com/endpoints/actsis-ai-policy/content/outlook-mcp/<version>/<file>`
+- `latest-stable.json` manifest: `https://artifacts.actsis.com/endpoints/actsis-ai-policy/content/outlook-mcp/latest-stable.json`
+
+The public GitHub Releases channel remains available; use whichever channel your environment can reach. Both the raw Linux binary and the `.deb` require **glibc ≥ 2.39 (Ubuntu 24.04+)**.
+
+#### Windows
+
+1. Download `outlook-mcp-setup.exe` for the desired version from ProGet.
+2. Run the installer (administrator rights are required). It installs `outlook-mcp.exe` under `C:\Program Files\outlook-mcp`, appends that directory to the machine `PATH`, and registers an uninstall entry.
+3. Restart your terminal so the new `PATH` is available.
+4. Launch MCP mode:
+
+   ```text
+   outlook-mcp.exe mcp
+   ```
+
+   The `auth` mode serves the browser callback on `http://localhost:3333`:
+
+   ```text
+   outlook-mcp.exe auth
+   ```
+
+#### Linux
+
+1. Download `outlook-mcp_<version>_amd64.deb` from ProGet.
+2. Install it. `dpkg` is enough for a first install; `apt` resolves dependencies automatically if they are missing:
+
+   ```bash
+   sudo dpkg -i outlook-mcp_<version>_amd64.deb
+   ```
+
+   or
+
+   ```bash
+   sudo apt install ./outlook-mcp_<version>_amd64.deb
+   ```
+
+3. The package installs the executable at `/usr/bin/outlook-mcp`. Launch it directly:
+
+   ```bash
+   outlook-mcp mcp
+   outlook-mcp auth
+   ```
+
+#### Credential configuration for installed binaries
+
+Installed binaries cannot rely on a `.env` file beside the executable: `/usr/bin` and `C:\Program Files\outlook-mcp` are not user-writable without elevation. Instead, supply credentials through the MCP-client `env` block, or use Vault mode. See [Authentication](./docs/authentication.md) for the full Vault setup and the variable reference.
+
+#### Do not rename the executable
+
+The single-executable dispatch probe looks for the lowercase substring `outlook-mcp` in the file name. Renaming `outlook-mcp.exe` or `/usr/bin/outlook-mcp` will break startup. Keep the installed name exactly as the installer wrote it.
 
 ### Runtime configuration for pre-built executables
 
