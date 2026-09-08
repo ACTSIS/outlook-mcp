@@ -465,7 +465,7 @@ jobs:
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           BASE_URL="${PROGET_BASE_URL}/endpoints/${PROGET_ASSET_DIRECTORY}/content/${PROGET_TARGET_PREFIX}/${VERSION}"
-          for FILE in outlook-mcp-setup.exe "outlook-mcp_${VERSION}_amd64.deb" outlook-mcp-win-x64.exe outlook-mcp-linux-x64 dist/provenance/SHA256SUMS dist/provenance/outlook-mcp-${VERSION}-sbom.spdx.json; do
+          for FILE in dist/outlook-mcp-setup.exe "dist/outlook-mcp_${VERSION}_amd64.deb" dist/outlook-mcp-win-x64.exe dist/outlook-mcp-linux-x64 dist/provenance/SHA256SUMS dist/provenance/outlook-mcp-${VERSION}-sbom.spdx.json; do
             NAME="$(basename "$FILE")"
             echo "uploading $NAME"
             curl --fail-with-body --retry 3 -X POST \
