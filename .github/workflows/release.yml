@@ -224,7 +224,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: installer-win-x64
-          path: outlook-mcp-setup.exe
+          # NSIS 3 resolves the OutFile relative to the script directory.
+          path: build/windows/outlook-mcp-setup.exe
           if-no-files-found: error
 
   installer-linux:
