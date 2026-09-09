@@ -25,13 +25,19 @@ jest.mock('../../auth/auth-server-manager', () => ({
 jest.mock('../../runtime/load-runtime-env', () => ({
   loadRuntimeEnv: jest.fn(),
 }));
+jest.mock('../../runtime/vault-client', () => ({
+  getVaultConfig: jest.fn(),
+}));
 
 const authServerManager = require('../../auth/auth-server-manager');
 const { loadRuntimeEnv } = require('../../runtime/load-runtime-env');
+const { getVaultConfig } = require('../../runtime/vault-client');
+const { refreshRuntimeConfiguration } = require('../../auth/index');
 
 describe('auth/tools', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    getVaultConfig.mockReturnValue({ enabled: false });
     authServerManager.startAuthServer.mockResolvedValue({
       started: true,
       running: true,
@@ -42,15 +48,18 @@ describe('auth/tools', () => {
   describe('handleAuthenticate', () => {
     const originalUseTestMode = config.USE_TEST_MODE;
     const originalClientId = config.AUTH_CONFIG.clientId;
+    const originalClientSecret = config.AUTH_CONFIG.clientSecret;
 
     beforeEach(() => {
       config.USE_TEST_MODE = false;
       config.AUTH_CONFIG.clientId = 'test-client-id';
+      config.AUTH_CONFIG.clientSecret = 'test-client-secret';
     });
 
     afterEach(() => {
       config.USE_TEST_MODE = originalUseTestMode;
       config.AUTH_CONFIG.clientId = originalClientId;
+      config.AUTH_CONFIG.clientSecret = originalClientSecret;
     });
 
     it('starts the callback server and returns a complete auth URL', async () => {
@@ -79,17 +88,68 @@ describe('auth/tools', () => {
       );
       expect(result.content[1].text).toContain('Copy and open the URL shown above');
     });
+
+    it('runs explicit Vault setup before starting when OAuth credentials are missing', async () => {
+      config.AUTH_CONFIG.clientId = '';
+      config.AUTH_CONFIG.clientSecret = '';
+      getVaultConfig.mockReturnValue({ enabled: true });
+      loadRuntimeEnv.mockResolvedValue({
+        vault: { enabled: true, loaded: 2, source: 'oidc', cache: { saved: true } },
+      });
+      refreshRuntimeConfiguration.mockImplementationOnce(() => {
+        config.AUTH_CONFIG.clientId = 'vault-client-id';
+        config.AUTH_CONFIG.clientSecret = 'vault-client-secret';
+      });
+
+      const result = await handleAuthenticate({});
+
+      expect(loadRuntimeEnv).toHaveBeenCalledWith({ force: true, vaultSetup: true });
+      expect(refreshRuntimeConfiguration).toHaveBeenCalledTimes(1);
+      expect(authServerManager.startAuthServer).toHaveBeenCalledTimes(1);
+      expect(result.content[0].text).toBe('http://localhost:3333/auth?client_id=vault-client-id');
+    });
+
+    it('does not start the callback server when credentials are missing and Vault is disabled', async () => {
+      config.AUTH_CONFIG.clientId = '';
+      config.AUTH_CONFIG.clientSecret = '';
+
+      const result = await handleAuthenticate({});
+
+      expect(authServerManager.startAuthServer).not.toHaveBeenCalled();
+      expect(result.content[0].text).toContain('Vault is disabled');
+      expect(result.content[0].text).not.toContain('client_id=');
+    });
+
+    it('returns safe setup failure text without starting the callback server', async () => {
+      config.AUTH_CONFIG.clientId = '';
+      config.AUTH_CONFIG.clientSecret = '';
+      getVaultConfig.mockReturnValue({ enabled: true });
+      loadRuntimeEnv.mockRejectedValue(new Error('secret-value-and-token-value'));
+
+      const result = await handleAuthenticate({});
+
+      expect(authServerManager.startAuthServer).not.toHaveBeenCalled();
+      expect(result.content[0].text).toContain('VAULT_SETUP_FAILED');
+      expect(result.content[0].text).not.toContain('secret-value-and-token-value');
+      expect(result.content[0].text).not.toContain('client_id=');
+    });
   });
 
   describe('handleAuthenticateFlow', () => {
     const originalUseTestMode = config.USE_TEST_MODE;
+    const originalClientId = config.AUTH_CONFIG.clientId;
+    const originalClientSecret = config.AUTH_CONFIG.clientSecret;
 
     beforeEach(() => {
       config.USE_TEST_MODE = false;
+      config.AUTH_CONFIG.clientId = 'test-client-id';
+      config.AUTH_CONFIG.clientSecret = 'test-client-secret';
     });
 
     afterEach(() => {
       config.USE_TEST_MODE = originalUseTestMode;
+      config.AUTH_CONFIG.clientId = originalClientId;
+      config.AUTH_CONFIG.clientSecret = originalClientSecret;
     });
 
     it('returns URL containing /auth/flow for production mode', async () => {
@@ -125,6 +185,26 @@ describe('auth/tools', () => {
           },
         ],
       });
+    });
+
+    it('runs explicit Vault setup before starting Flow authentication when credentials are missing', async () => {
+      config.AUTH_CONFIG.clientId = '';
+      config.AUTH_CONFIG.clientSecret = '';
+      getVaultConfig.mockReturnValue({ enabled: true });
+      loadRuntimeEnv.mockResolvedValue({
+        vault: { enabled: true, loaded: 2, source: 'oidc', cache: { saved: true } },
+      });
+      refreshRuntimeConfiguration.mockImplementationOnce(() => {
+        config.AUTH_CONFIG.clientId = 'vault-client-id';
+        config.AUTH_CONFIG.clientSecret = 'vault-client-secret';
+      });
+
+      const result = await handleAuthenticateFlow({});
+
+      expect(loadRuntimeEnv).toHaveBeenCalledWith({ force: true, vaultSetup: true });
+      expect(refreshRuntimeConfiguration).toHaveBeenCalledTimes(1);
+      expect(authServerManager.startAuthServer).toHaveBeenCalledTimes(1);
+      expect(result.content[0].text).toBe('http://localhost:3333/auth/flow');
     });
   });
 

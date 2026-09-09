@@ -5,6 +5,14 @@ const querystring = require('querystring');
 const appConfig = require('../config');
 const vaultClient = require('../runtime/vault-client');
 const { createEntraOAuthError, isPermanentEntraOAuthFailure } = require('./entra-error');
+const { createContextualError } = require('../utils/network-error');
+
+function createTokenRequestError(operation, endpoint, error, secrets, fallbackCode) {
+  return createContextualError(operation, endpoint, error, {
+    fallbackCode,
+    secrets,
+  });
+}
 
 class TokenStorage {
   constructor(config) {
@@ -286,6 +294,11 @@ class TokenStorage {
       },
     };
 
+    const refreshOperation = 'Microsoft Graph token refresh';
+    const refreshErrorSecrets = [
+      this.config.clientSecret,
+      this.tokens && this.tokens.refresh_token,
+    ];
     this._refreshPromise = new Promise((resolve, reject) => {
       const req = https.request(this.config.tokenEndpoint, requestOptions, (res) => {
         let data = '';
@@ -319,13 +332,30 @@ class TokenStorage {
                 'Token refresh'
               );
               await this._invalidateVaultCacheOnPermanentEntraFailure(oauthError);
-              console.error('Microsoft token refresh rejected:', oauthError.code);
-              reject(oauthError);
+              const contextualError = createTokenRequestError(
+                refreshOperation,
+                this.config.tokenEndpoint,
+                oauthError,
+                refreshErrorSecrets,
+                'MICROSOFT_GRAPH_TOKEN_REFRESH_FAILED'
+              );
+              console.error('Microsoft token refresh rejected:', contextualError.code);
+              reject(contextualError);
             }
           } catch (e) {
             // Catch any error during parsing or saving
-            console.error('Error processing refresh token response or saving tokens:', e);
-            reject(e);
+            const contextualError = createTokenRequestError(
+              refreshOperation,
+              this.config.tokenEndpoint,
+              e,
+              refreshErrorSecrets,
+              'MICROSOFT_GRAPH_TOKEN_REFRESH_FAILED'
+            );
+            console.error(
+              'Error processing refresh token response or saving tokens:',
+              contextualError.message
+            );
+            reject(contextualError);
           } finally {
             this._refreshPromise = null; // Clear promise after completion
           }
@@ -335,8 +365,15 @@ class TokenStorage {
         req.destroy(new Error('Request timed out after 30 seconds'));
       });
       req.on('error', (error) => {
-        console.error('HTTP error during token refresh:', error);
-        reject(error);
+        const contextualError = createTokenRequestError(
+          refreshOperation,
+          this.config.tokenEndpoint,
+          error,
+          refreshErrorSecrets,
+          'MICROSOFT_GRAPH_TOKEN_REFRESH_FAILED'
+        );
+        console.error('HTTP error during token refresh:', contextualError.message);
+        reject(contextualError);
         this._refreshPromise = null; // Clear promise on error
       });
       req.write(postData);
@@ -374,6 +411,11 @@ class TokenStorage {
       },
     };
 
+    const refreshOperation = 'Power Automate token refresh';
+    const refreshErrorSecrets = [
+      this.config.clientSecret,
+      this.tokens && this.tokens.flow_refresh_token,
+    ];
     this._flowRefreshPromise = new Promise((resolve, reject) => {
       const req = https.request(this.config.tokenEndpoint, requestOptions, (res) => {
         let data = '';
@@ -414,12 +456,29 @@ class TokenStorage {
                   console.error('Failed to save invalidated flow tokens:', saveError);
                 }
               }
-              console.error('Microsoft Flow token refresh rejected:', oauthError.code);
-              reject(oauthError);
+              const contextualError = createTokenRequestError(
+                refreshOperation,
+                this.config.tokenEndpoint,
+                oauthError,
+                refreshErrorSecrets,
+                'POWER_AUTOMATE_TOKEN_REFRESH_FAILED'
+              );
+              console.error('Microsoft Flow token refresh rejected:', contextualError.code);
+              reject(contextualError);
             }
           } catch (e) {
-            console.error('Error processing flow refresh token response or saving tokens:', e);
-            reject(e);
+            const contextualError = createTokenRequestError(
+              refreshOperation,
+              this.config.tokenEndpoint,
+              e,
+              refreshErrorSecrets,
+              'POWER_AUTOMATE_TOKEN_REFRESH_FAILED'
+            );
+            console.error(
+              'Error processing flow refresh token response or saving tokens:',
+              contextualError.message
+            );
+            reject(contextualError);
           } finally {
             this._flowRefreshPromise = null; // Clear promise after completion
           }
@@ -429,9 +488,16 @@ class TokenStorage {
         req.destroy(new Error('Request timed out after 30 seconds'));
       });
       req.on('error', (error) => {
-        console.error('HTTP error during flow token refresh:', error);
+        const contextualError = createTokenRequestError(
+          refreshOperation,
+          this.config.tokenEndpoint,
+          error,
+          refreshErrorSecrets,
+          'POWER_AUTOMATE_TOKEN_REFRESH_FAILED'
+        );
+        console.error('HTTP error during flow token refresh:', contextualError.message);
         // Do not invalidate flow tokens on transient network errors
-        reject(error);
+        reject(contextualError);
         this._flowRefreshPromise = null; // Clear promise on error
       });
       req.write(postData);
@@ -465,6 +531,8 @@ class TokenStorage {
       },
     };
 
+    const exchangeOperation = 'Microsoft Graph token exchange';
+    const exchangeErrorSecrets = [this.config.clientSecret, authCode];
     return new Promise((resolve, reject) => {
       const req = https.request(this.config.tokenEndpoint, requestOptions, (res) => {
         let data = '';
@@ -498,21 +566,30 @@ class TokenStorage {
                 'Token exchange'
               );
               await this._invalidateVaultCacheOnPermanentEntraFailure(oauthError);
-              console.error('Microsoft token exchange rejected:', oauthError.code);
-              reject(oauthError);
+              const contextualError = createTokenRequestError(
+                exchangeOperation,
+                this.config.tokenEndpoint,
+                oauthError,
+                exchangeErrorSecrets,
+                'MICROSOFT_GRAPH_TOKEN_EXCHANGE_FAILED'
+              );
+              console.error('Microsoft token exchange rejected:', contextualError.code);
+              reject(contextualError);
             }
           } catch (e) {
+            const contextualError = createTokenRequestError(
+              exchangeOperation,
+              this.config.tokenEndpoint,
+              e,
+              exchangeErrorSecrets,
+              'MICROSOFT_GRAPH_TOKEN_EXCHANGE_FAILED'
+            );
             // Catch any error during parsing or saving
             console.error(
               'Error processing token exchange response or saving tokens:',
-              e.message,
-              `Response length: ${data.length}`
+              contextualError.message
             );
-            reject(
-              new Error(
-                `Error processing token response: ${e.message} (response length: ${data.length})`
-              )
-            );
+            reject(contextualError);
           }
         });
       });
@@ -520,8 +597,15 @@ class TokenStorage {
         req.destroy(new Error('Request timed out after 30 seconds'));
       });
       req.on('error', (error) => {
-        console.error('HTTP error during code exchange:', error);
-        reject(error);
+        const contextualError = createTokenRequestError(
+          exchangeOperation,
+          this.config.tokenEndpoint,
+          error,
+          exchangeErrorSecrets,
+          'MICROSOFT_GRAPH_TOKEN_EXCHANGE_FAILED'
+        );
+        console.error('HTTP error during code exchange:', contextualError.message);
+        reject(contextualError);
       });
       req.write(postData);
       req.end();

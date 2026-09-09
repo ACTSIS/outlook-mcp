@@ -2,9 +2,9 @@
  * Dispatcher routing tests (bin/m365-mcp.js).
  *
  * Contract from design: no argument or `mcp` starts the MCP server; `auth`
- * starts the port-3333 callback server; unsupported arguments print usage and
- * exit 2. Runtime environment bootstrap is awaited before either entry point
- * is loaded.
+ * starts the port-3333 callback server; `vault-setup` runs explicit Vault
+ * setup; unsupported arguments print usage and exit 2. Runtime environment
+ * bootstrap is awaited before either entry point is loaded.
  */
 describe('bin/m365-mcp dispatcher', () => {
   const { run, resolveMode, shouldDispatch } = require('../../bin/m365-mcp');
@@ -25,6 +25,10 @@ describe('bin/m365-mcp dispatcher', () => {
 
     it('routes the auth argument to the auth mode', () => {
       expect(resolveMode(['auth'])).toBe('auth');
+    });
+
+    it('routes the vault-setup argument to the explicit Vault setup mode', () => {
+      expect(resolveMode(['vault-setup'])).toBe('vault-setup');
     });
 
     it('rejects unsupported arguments', () => {
@@ -80,6 +84,53 @@ describe('bin/m365-mcp dispatcher', () => {
       );
       expect(startAuth).toHaveBeenCalledTimes(1);
       expect(startMCP).not.toHaveBeenCalled();
+    });
+
+    it('runs explicit Vault setup and returns a safe success status', async () => {
+      const out = captureStderr();
+      const loadRuntimeEnv = jest.fn().mockResolvedValue({
+        vault: {
+          enabled: true,
+          loaded: 3,
+          source: 'oidc',
+          cache: { saved: true },
+        },
+      });
+      const startMCP = jest.fn();
+      const startAuth = jest.fn();
+
+      await expect(
+        run(['vault-setup'], { ...out, loadRuntimeEnv, startMCP, startAuth })
+      ).resolves.toBe(0);
+
+      expect(loadRuntimeEnv).toHaveBeenCalledWith({ force: true, vaultSetup: true });
+      expect(out.text()).toContain('Vault setup completed');
+      expect(out.text()).toContain('3 allowlisted runtime values');
+      expect(startMCP).not.toHaveBeenCalled();
+      expect(startAuth).not.toHaveBeenCalled();
+    });
+
+    it('returns exit code 2 without starting anything when Vault is disabled', async () => {
+      const out = captureStderr();
+      const loadRuntimeEnv = jest.fn().mockResolvedValue({ vault: { enabled: false, loaded: 0 } });
+
+      await expect(run(['vault-setup'], { ...out, loadRuntimeEnv })).resolves.toBe(2);
+
+      expect(out.text()).toContain('Vault setup is disabled');
+    });
+
+    it('returns exit code 1 with safe status when explicit setup fails', async () => {
+      const out = captureStderr();
+      const loadRuntimeEnv = jest
+        .fn()
+        .mockRejectedValue(
+          Object.assign(new Error('secret-value'), { code: 'VAULT_NETWORK_ERROR' })
+        );
+
+      await expect(run(['vault-setup'], { ...out, loadRuntimeEnv })).resolves.toBe(1);
+
+      expect(out.text()).toContain('VAULT_NETWORK_ERROR');
+      expect(out.text()).not.toContain('secret-value');
     });
 
     it('awaits runtime environment configuration before either mode starts', async () => {
@@ -160,6 +211,7 @@ describe('bin/m365-mcp dispatcher', () => {
       expect(out.text()).toContain('Usage');
       expect(out.text()).toContain('mcp');
       expect(out.text()).toContain('auth');
+      expect(out.text()).toContain('vault-setup');
       expect(startMCP).not.toHaveBeenCalled();
       expect(startAuth).not.toHaveBeenCalled();
     });

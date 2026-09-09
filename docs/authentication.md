@@ -1,6 +1,6 @@
 # Authentication and token lifecycle
 
-This guide describes the behavior implemented by the active executables: `index.js`, `outlook-auth-server.js`, and `auth/token-storage.js`. Microsoft Graph and Power Automate use separate OAuth grants but share one local token file.
+This guide describes the behavior implemented by the active dispatcher and executables: `bin/m365-mcp.js`, `index.js`, `outlook-auth-server.js`, and `auth/token-storage.js`. Microsoft Graph and Power Automate use separate OAuth grants but share one local token file.
 
 ## Authenticate successfully
 
@@ -13,11 +13,29 @@ This guide describes the behavior implemented by the active executables: `index.
 
 `check-auth-status` is Graph-only. Validate Flow authentication with a Flow operation such as `flow-list-environments`.
 
+Network and TLS errors now identify the operation and safe endpoint target. For example, `Microsoft Graph token exchange failed while connecting to https://login.microsoftonline.com/common/oauth2/v2.0/token: self-signed certificate in certificate chain (SELF_SIGNED_CERT_IN_CHAIN). Check network TLS trust/proxy configuration.` identifies the Microsoft token endpoint; it is not automatically a Vault failure. Query strings and credential values are omitted from the diagnostic.
+
 ## Vault setup lifecycle
 
 When Vault mode is enabled, use the `setup-vault` MCP tool for the one-time OIDC browser setup. It saves only the Vault client token and lease metadata, loads the allowlisted Microsoft configuration into the current process, and returns status text without secrets.
 
 Later OpenCode/MCP starts reuse the cache and never open a browser automatically. A missing, expired, or Vault-side unauthorized cache enters a setup-required state; call `setup-vault` explicitly instead. When `VAULT_TOKEN` is configured, it remains the explicit non-cached credential and bypasses OIDC. A permanent Microsoft Entra OAuth failure invalidates the matching Vault cache entry so setup can replace the identity in the same agent or after a restart. Vault network/timeout/503 errors, Vault lookup/KV 401/403 responses, user cancellation, Graph resource permission failures, and save/parse errors do not silently revoke the Vault cache.
+If the Vault browser cannot be opened, the complete short-lived authorization URL is copied to the system clipboard and printed for manual use. Clipboard support is best-effort and does not fail the Vault setup itself.
+
+The repository-level manual setup command is:
+
+```powershell
+node bin/m365-mcp.js vault-setup
+npm run vault-setup
+```
+
+For a packaged Windows executable, run `outlook-mcp-win-x64.exe vault-setup`. The dispatcher loads the external `.env`, performs the existing browser/manual flow, persists the Vault identity cache, applies allowlisted values, and emits only safe status. It exits `0` on success, `1` on setup/runtime failure, and `2` when Vault is disabled or misconfigured. `opencode mcp auth <name>` is not a substitute: current OpenCode documentation describes that command for remote OAuth MCP servers, while a local stdio MCP entry cannot use it to invoke this repository subcommand. `m365-mcp-auth` remains the separate Microsoft callback-server entry point.
+
+When Vault is expected to supply Microsoft OAuth values, remove the corresponding `MS_*`/`OUTLOOK_*` OAuth keys from the MCP client's environment. Process/MCP values intentionally take precedence over Vault, so leaving those keys in the environment prevents Vault from supplying them.
+
+## TLS certificate trust
+
+Productive HTTPS clients merge Node's bundled public CA roots with the current Windows/system certificate store through the Node 22.22.1 TLS certificate APIs. TLS verification remains enabled. A customer does not need to export/import a PEM file or set `NODE_EXTRA_CA_CERTS` for a CA already installed in the system store. Do not use `NODE_TLS_REJECT_UNAUTHORIZED=0` or `rejectUnauthorized: false`.
 
 ## OAuth grants and scopes
 

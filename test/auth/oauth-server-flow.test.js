@@ -15,7 +15,12 @@ function createMockRequest(url) {
   return { url, method: 'GET' };
 }
 
-function createMockHttps(responseStatus, responseBody, shouldError = false) {
+function createMockHttps(
+  responseStatus,
+  responseBody,
+  shouldError = false,
+  requestError = new Error('Network error')
+) {
   return jest.fn((options, callback) => {
     const mockReq = {
       write: jest.fn((data) => {
@@ -24,7 +29,7 @@ function createMockHttps(responseStatus, responseBody, shouldError = false) {
       end: jest.fn(() => {
         if (shouldError) {
           const errorHandler = mockReq.on.mock.calls.find((call) => call[0] === 'error')?.[1];
-          if (errorHandler) errorHandler(new Error('Network error'));
+          if (errorHandler) errorHandler(requestError);
           return;
         }
 
@@ -239,6 +244,44 @@ describe('outlook-auth-server.js Flow support', () => {
       expect(writeFileSyncSpy).not.toHaveBeenCalled();
       expect(mockSaveFlowTokens).not.toHaveBeenCalled();
     });
+
+    it.each([
+      ['Graph', false, '/auth', 'Microsoft Graph token exchange'],
+      ['Flow', true, '/auth/flow', 'Power Automate token exchange'],
+    ])(
+      'contextualizes a certificate failure for %s token exchange',
+      async (_name, _isFlow, authPath, operation) => {
+        const startResponse = createMockResponse();
+        handler(createMockRequest(authPath), startResponse);
+        const state = new URL(startResponse.writeHead.mock.calls[0][1].Location).searchParams.get(
+          'state'
+        );
+        const certificateError = Object.assign(
+          new Error('self-signed certificate in certificate chain'),
+          { code: 'SELF_SIGNED_CERT_IN_CHAIN' }
+        );
+        httpsMock.mockImplementation(createMockHttps(0, {}, true, certificateError));
+
+        const callbackResponse = createMockResponse();
+        await new Promise((resolve) => {
+          handler(
+            createMockRequest(`/auth/callback?code=auth-code&state=${state}`),
+            callbackResponse
+          );
+          setImmediate(resolve);
+        });
+
+        const page = callbackResponse.end.mock.calls[0][0];
+        expect(page).toContain(`${operation} failed while connecting to`);
+        expect(page).toContain('https://login.microsoftonline.com/common/oauth2/v2.0/token');
+        expect(page).toContain('self-signed certificate in certificate chain');
+        expect(page).toContain('(SELF_SIGNED_CERT_IN_CHAIN)');
+        expect(page).toContain('Check network TLS trust/proxy configuration.');
+        expect(page).not.toContain('test-client-secret');
+        expect(page).not.toContain('auth-code');
+        expect(page).not.toContain('?');
+      }
+    );
 
     it('does not invalidate the Vault cache when the user cancels Entra sign-in', async () => {
       const localStates = new Map();

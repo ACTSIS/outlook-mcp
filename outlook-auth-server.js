@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const vaultClient = require('./runtime/vault-client');
 const { createEntraOAuthError, isPermanentEntraOAuthFailure } = require('./auth/entra-error');
+const { createContextualError, isContextualError } = require('./utils/network-error');
 
 // Load environment variables from .env file
 require('dotenv').config();
@@ -71,6 +72,29 @@ async function invalidateVaultCacheAfterPermanentEntraFailure(error, deps = {}) 
   }
 }
 
+function getTokenExchangeOperation(isFlow) {
+  return isFlow ? 'Power Automate token exchange' : 'Microsoft Graph token exchange';
+}
+
+function getTokenEndpointValue(authConfig) {
+  return (
+    authConfig.tokenEndpoint ||
+    `${authConfig.authorityHost}/${authConfig.tenantId}/oauth2/v2.0/token`
+  );
+}
+
+function contextualizeTokenExchangeError(error, authConfig, isFlow, authCode) {
+  const operation = getTokenExchangeOperation(isFlow);
+  if (isContextualError(error, operation)) return error;
+
+  return createContextualError(operation, getTokenEndpointValue(authConfig), error, {
+    fallbackCode: isFlow
+      ? 'POWER_AUTOMATE_TOKEN_EXCHANGE_FAILED'
+      : 'MICROSOFT_GRAPH_TOKEN_EXCHANGE_FAILED',
+    secrets: [authConfig.clientSecret, authCode],
+  });
+}
+
 /**
  * Exchange an authorization code for tokens.
  * @param {string} code - Authorization code
@@ -83,14 +107,20 @@ function exchangeCodeForTokens(code, isFlow = false, deps = {}) {
   const flowScope = deps.flowScope || config.FLOW_SCOPE;
   const tokenStorageInstance = deps.tokenStorage || tokenStorage;
   const httpsModule = deps.https || https;
+  const operation = getTokenExchangeOperation(isFlow);
+  const tokenEndpointValue = getTokenEndpointValue(authConfig);
   let tokenEndpoint;
   try {
-    tokenEndpoint = new URL(
-      authConfig.tokenEndpoint ||
-        `${authConfig.authorityHost}/${authConfig.tenantId}/oauth2/v2.0/token`
-    );
+    tokenEndpoint = new URL(tokenEndpointValue);
   } catch {
-    return Promise.reject(new Error('Configured Microsoft token endpoint is invalid.'));
+    const endpointError = new Error('Configured Microsoft token endpoint is invalid.');
+    endpointError.code = 'MICROSOFT_TOKEN_ENDPOINT_INVALID';
+    return Promise.reject(
+      createContextualError(operation, tokenEndpointValue, endpointError, {
+        fallbackCode: endpointError.code,
+        secrets: [authConfig.clientSecret, code],
+      })
+    );
   }
   // tokenStorageInstance is used on the Flow branch below
   void tokenStorageInstance;
@@ -149,7 +179,7 @@ function exchangeCodeForTokens(code, isFlow = false, deps = {}) {
 
             resolve(tokenResponse);
           } catch (error) {
-            reject(new Error(`Error parsing token response: ${error.message}`));
+            reject(contextualizeTokenExchangeError(error, authConfig, isFlow, code));
           }
         } else {
           let responseBody;
@@ -161,13 +191,13 @@ function exchangeCodeForTokens(code, isFlow = false, deps = {}) {
           const oauthError = createEntraOAuthError(responseBody, res.statusCode, 'Token exchange');
           await invalidateVaultCacheAfterPermanentEntraFailure(oauthError, deps);
           console.error('Microsoft token exchange rejected:', oauthError.code);
-          reject(oauthError);
+          reject(contextualizeTokenExchangeError(oauthError, authConfig, isFlow, code));
         }
       });
     });
 
     req.on('error', (error) => {
-      reject(error);
+      reject(contextualizeTokenExchangeError(error, authConfig, isFlow, code));
     });
 
     req.write(postData);
@@ -299,7 +329,13 @@ function createRequestHandler(deps = {}) {
             `);
           })
           .catch((error) => {
-            console.error(`Token exchange error: ${error.message}`);
+            const contextualError = contextualizeTokenExchangeError(
+              error,
+              authConfig,
+              isFlow,
+              query.code
+            );
+            console.error(`Token exchange error: ${contextualError.message}`);
             res.writeHead(500, { 'Content-Type': 'text/html' });
             if (isFlow) {
               res.end(`
@@ -315,7 +351,7 @@ function createRequestHandler(deps = {}) {
                   <body>
                     <h1>Flow authentication failed</h1>
                     <div class="error-box">
-                      <p>${escapeHtml(error.message)}</p>
+                      <p>${escapeHtml(contextualError.message)}</p>
                     </div>
                     <p>Please close this window and try again.</p>
                   </body>
@@ -336,7 +372,7 @@ function createRequestHandler(deps = {}) {
                 <body>
                   <h1>Token Exchange Error</h1>
                   <div class="error-box">
-                    <p>${escapeHtml(error.message)}</p>
+                    <p>${escapeHtml(contextualError.message)}</p>
                   </div>
                   <p>Please close this window and try again.</p>
                 </body>

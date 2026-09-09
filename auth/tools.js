@@ -26,6 +26,34 @@ function buildAuthenticationResponse(authUrl, provider, serverStatus) {
   };
 }
 
+function isNonEmpty(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function hasOAuthCredentials() {
+  return Boolean(
+    config.AUTH_CONFIG &&
+    isNonEmpty(config.AUTH_CONFIG.clientId) &&
+    isNonEmpty(config.AUTH_CONFIG.clientSecret)
+  );
+}
+
+function getVaultDisabledMessage() {
+  return [
+    'Microsoft OAuth credentials are not configured and Vault is disabled.',
+    'Set MS_CLIENT_ID and MS_CLIENT_SECRET (or the OUTLOOK_* equivalents) in the MCP environment,',
+    'or configure VAULT_ADDR, then try authentication again.',
+  ].join(' ');
+}
+
+function getVaultCredentialsMissingMessage() {
+  return [
+    'Vault setup completed, but the required Microsoft OAuth credentials were not found in the',
+    'allowlisted Vault values. Configure the Vault secret or provide the credentials through the',
+    'MCP environment, then try authentication again.',
+  ].join(' ');
+}
+
 /**
  * About tool handler
  * @returns {object} - MCP response
@@ -60,6 +88,11 @@ async function handleAuthenticate(_args) {
         },
       ],
     };
+  }
+
+  const configurationError = await ensureOAuthConfiguration();
+  if (configurationError) {
+    return { content: [{ type: 'text', text: configurationError }] };
   }
 
   const serverStatus = await authServerManager.startAuthServer();
@@ -100,6 +133,11 @@ async function handleAuthenticateFlow(_args) {
     };
   }
 
+  const configurationError = await ensureOAuthConfiguration();
+  if (configurationError) {
+    return { content: [{ type: 'text', text: configurationError }] };
+  }
+
   const serverStatus = await authServerManager.startAuthServer();
   const authUrl = `${config.AUTH_CONFIG.authServerUrl}/auth/flow`;
 
@@ -112,6 +150,51 @@ function getSafeVaultSetupError(error) {
   return `Vault setup did not complete (${code}). Call setup-vault again after checking Vault connectivity and configuration.`;
 }
 
+async function runExplicitVaultSetup() {
+  const { loadRuntimeEnv } = require('../runtime/load-runtime-env');
+  const result = await loadRuntimeEnv({ force: true, vaultSetup: true });
+  const vault = result && result.vault ? result.vault : {};
+
+  if (vault.enabled && !vault.setupRequired) {
+    const { refreshRuntimeConfiguration } = require('./index');
+    if (typeof refreshRuntimeConfiguration === 'function') refreshRuntimeConfiguration();
+  }
+
+  return vault;
+}
+
+/**
+ * Prepare credentials before either Microsoft authentication flow starts.
+ * Missing credentials may be supplied by an explicit Vault setup, but a
+ * callback server must never start with an empty client_id URL.
+ * @returns {Promise<string|null>} Safe error text, or null when configured
+ */
+async function ensureOAuthConfiguration() {
+  if (hasOAuthCredentials()) return null;
+
+  let vaultConfig;
+  try {
+    const { getVaultConfig } = require('../runtime/vault-client');
+    vaultConfig = getVaultConfig();
+  } catch (error) {
+    return getSafeVaultSetupError(error);
+  }
+
+  if (!vaultConfig.enabled) return getVaultDisabledMessage();
+
+  try {
+    const vault = await runExplicitVaultSetup();
+    if (!vault.enabled) return getVaultDisabledMessage();
+    if (vault.setupRequired) {
+      return 'Vault setup is still required. Call setup-vault again after checking the Vault configuration.';
+    }
+  } catch (error) {
+    return getSafeVaultSetupError(error);
+  }
+
+  return hasOAuthCredentials() ? null : getVaultCredentialsMissingMessage();
+}
+
 /**
  * Explicitly perform the one-time Vault OIDC setup for the current MCP
  * process. This intentionally bypasses the inherited bootstrap marker.
@@ -119,9 +202,7 @@ function getSafeVaultSetupError(error) {
  */
 async function handleSetupVault() {
   try {
-    const { loadRuntimeEnv } = require('../runtime/load-runtime-env');
-    const result = await loadRuntimeEnv({ force: true, vaultSetup: true });
-    const vault = result && result.vault ? result.vault : {};
+    const vault = await runExplicitVaultSetup();
 
     if (!vault.enabled) {
       return {
@@ -144,9 +225,6 @@ async function handleSetupVault() {
         ],
       };
     }
-
-    const { refreshRuntimeConfiguration } = require('./index');
-    if (typeof refreshRuntimeConfiguration === 'function') refreshRuntimeConfiguration();
 
     const cacheWarning = vault.cache && vault.cache.saved === false;
     const text = cacheWarning

@@ -4,12 +4,13 @@
   "description": "MCP server for Microsoft 365 mail, calendar, OneDrive, inbox rules, and Power Automate",
   "main": "index.js",
   "bin": {
-    "m365-mcp": "./index.js",
+    "m365-mcp": "./bin/m365-mcp.js",
     "m365-mcp-auth": "./outlook-auth-server.js"
   },
   "scripts": {
     "start": "node bin/m365-mcp.js",
     "auth-server": "node bin/m365-mcp.js auth",
+    "vault-setup": "node bin/m365-mcp.js vault-setup",
     "test-mode": "USE_TEST_MODE=true node bin/m365-mcp.js",
     "inspect": "npx @modelcontextprotocol/inspector node bin/m365-mcp.js",
     "test": "jest",

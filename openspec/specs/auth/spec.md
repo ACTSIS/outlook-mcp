@@ -24,6 +24,34 @@ The productive authentication process MUST be `outlook-auth-server.js`, started 
 - THEN the server MUST respond with HTTP 500
 - AND the response MUST explain which credentials are required
 
+### Requirement: Authentication Credential Preparation
+
+The `authenticate` and `authenticate-flow` tools MUST verify that both the
+Microsoft client ID and client secret are configured before starting the
+callback server. If either value is missing and Vault is enabled, the tool MUST
+run the explicit Vault setup path, refresh the current authentication
+configuration and `TokenStorage` singleton, and re-check both values. If the
+values remain unavailable, the tool MUST return safe actionable text and MUST
+NOT start port 3333 or return an authorization URL containing an empty
+`client_id`.
+
+#### Scenario: Credentials are supplied by Vault
+
+- GIVEN either Microsoft OAuth credential is missing from the current process
+- AND Vault mode is enabled
+- WHEN `authenticate` or `authenticate-flow` is invoked
+- THEN the tool MUST force the explicit Vault setup path before starting the callback server
+- AND it MUST refresh the current authentication configuration and token storage
+- AND it MUST return the corresponding Microsoft authentication URL only after both credentials are present
+
+#### Scenario: Credentials remain unavailable
+
+- GIVEN either Microsoft OAuth credential is missing
+- WHEN the explicit Vault setup is disabled, fails, or returns no allowlisted credentials
+- THEN the tool MUST return a safe actionable configuration message
+- AND it MUST NOT start the callback server
+- AND it MUST NOT return an empty `client_id` URL
+
 ### Requirement: Vault Bootstrap and Explicit Setup
 
 When Vault mode is enabled, ordinary MCP startup MUST use an explicit
@@ -76,6 +104,66 @@ can invoke the explicit `setup-vault` tool.
 - WHEN `setup-vault` is invoked
 - THEN it MUST return an actionable setup message
 - AND it MUST NOT open a browser
+
+#### Scenario: Repository-level manual setup command
+
+- GIVEN the dispatcher is invoked with `vault-setup`
+- WHEN the command loads the external environment
+- THEN it MUST call `loadRuntimeEnv({ force: true, vaultSetup: true })`
+- AND it MUST run the existing browser/manual Vault setup flow without waiting during normal MCP startup
+- AND it MUST persist the Vault identity cache and load only allowlisted runtime values
+- AND it MUST emit safe status only
+- AND it MUST exit `0` on success, `1` on setup/runtime failure, and `2` when Vault is disabled or misconfigured
+
+### Requirement: System Certificate Store Trust
+
+Productive Node HTTPS calls MUST trust certificates already installed in the
+Windows/system certificate store without requiring a PEM export or
+`NODE_EXTRA_CA_CERTS`. The implementation MUST preserve Node's bundled public
+roots by merging `tls.getCACertificates('default')` with
+`tls.getCACertificates('system')` and applying the result through
+`tls.setDefaultCACertificates()` when those APIs are available. TLS
+verification MUST remain enabled; the implementation MUST NOT set
+`NODE_TLS_REJECT_UNAUTHORIZED=0` or `rejectUnauthorized: false`.
+
+#### Scenario: System CA APIs are available
+
+- GIVEN the runtime exposes the Node TLS certificate APIs
+- WHEN productive HTTPS clients are initialized
+- THEN bundled public roots and system roots MUST be installed in the default CA set before requests
+- AND duplicate PEM entries MUST be removed
+- AND default certificate verification MUST remain active
+
+#### Scenario: System CA APIs are unavailable or fail
+
+- GIVEN the runtime does not expose the TLS certificate APIs or an API call fails
+- WHEN productive HTTPS clients are initialized
+- THEN the helper MUST no-op without disabling TLS verification or preventing startup
+
+### Requirement: Contextual Network Errors
+
+Productive Microsoft, Flow, and Vault request errors MUST identify the failed
+operation and a safe endpoint target containing only scheme, hostname,
+non-default port, and pathname. Query strings, hashes, client secrets,
+authorization codes, access/refresh tokens, and custom header values MUST NOT
+appear in the diagnostic. Original error codes and HTTP status metadata MUST
+be retained when available.
+
+#### Scenario: Microsoft token endpoint rejects the TLS connection
+
+- GIVEN a Graph or Flow token request fails with `SELF_SIGNED_CERT_IN_CHAIN`
+- WHEN the error reaches the callback page or token-storage caller
+- THEN the diagnostic MUST name Graph token exchange, Flow token exchange, or the corresponding refresh operation
+- AND it MUST identify the Microsoft token endpoint without its query string
+- AND it MUST mention network TLS trust/proxy configuration
+- AND it MUST NOT claim that Vault caused the failure unless the target is Vault
+
+#### Scenario: Vault request fails
+
+- GIVEN a Vault authorization, callback, token lookup/renewal, or KV request fails
+- WHEN the error is reported
+- THEN it MUST name the Vault operation and safe Vault endpoint target
+- AND it MUST preserve transient network/TLS behavior without triggering permanent Entra cache invalidation
 
 #### Scenario: Setup replaces prior Vault-loaded values
 

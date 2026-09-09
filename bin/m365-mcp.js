@@ -7,25 +7,73 @@
  *   m365-mcp          start the MCP server (default)
  *   m365-mcp mcp      start the MCP server
  *   m365-mcp auth     start the authentication callback server (port 3333)
+ *   m365-mcp vault-setup  explicitly complete the Vault setup flow
  *
  * Unsupported arguments print usage to stderr and exit 2.
  */
 
 const path = require('path');
 
-const MODES = ['mcp', 'auth'];
+const MODES = ['mcp', 'auth', 'vault-setup'];
 
 /**
  * Resolve the requested mode from the CLI arguments.
  * @param {string[]} args - Process arguments after the executable/script (e.g. process.argv.slice(2))
- * @returns {string|null} 'mcp', 'auth', or null when the arguments are unsupported
+ * @returns {string|null} A supported mode, or null when the arguments are unsupported
  */
 function resolveMode(args) {
   if (args.length > 1) return null;
   const [mode] = args;
   if (mode === undefined || mode === 'mcp') return 'mcp';
   if (mode === 'auth') return 'auth';
+  if (mode === 'vault-setup') return 'vault-setup';
   return null;
+}
+
+function safeVaultErrorCode(error) {
+  const rawCode = error && typeof error.code === 'string' ? error.code : 'VAULT_SETUP_FAILED';
+  return rawCode.replace(/[^a-z0-9_]/gi, '_').slice(0, 80);
+}
+
+async function runVaultSetup(loadRuntimeEnv, stderr) {
+  let result;
+
+  try {
+    result = await loadRuntimeEnv({ force: true, vaultSetup: true });
+  } catch (error) {
+    const code = safeVaultErrorCode(error);
+    const exitCode = code === 'VAULT_CONFIG_INVALID' ? 2 : 1;
+    stderr.write(
+      `Vault setup ${exitCode === 2 ? 'is misconfigured' : 'failed'} (${code}). Check the Vault configuration and connectivity, then retry.\n`
+    );
+    return exitCode;
+  }
+
+  const vault = result && result.vault ? result.vault : {};
+  if (!vault.enabled) {
+    stderr.write(
+      'Vault setup is disabled. Set VAULT_ADDR in the external environment, then retry.\n'
+    );
+    return 2;
+  }
+
+  if (vault.setupRequired) {
+    stderr.write(
+      'Vault setup did not complete. Check the Vault configuration and retry the explicit setup command.\n'
+    );
+    return 1;
+  }
+
+  if (vault.cache && vault.cache.saved === false) {
+    stderr.write(
+      'Vault setup loaded the runtime values, but the Vault identity cache could not be saved. Fix local cache permissions and retry.\n'
+    );
+    return 1;
+  }
+
+  const loaded = Number.isInteger(vault.loaded) && vault.loaded >= 0 ? vault.loaded : 0;
+  stderr.write(`Vault setup completed. Loaded ${loaded} allowlisted runtime values.\n`);
+  return 0;
 }
 
 /**
@@ -51,11 +99,17 @@ async function run(args, deps = {}) {
     stderr.write(`Usage: m365-mcp [${MODES.join('|')}]\n`);
     stderr.write(`  ${MODES[0]}      start the MCP server (default)\n`);
     stderr.write(`  ${MODES[1]}     start the authentication callback server (port 3333)\n`);
+    stderr.write(`  ${MODES[2]}  perform explicit Vault setup\n`);
     return 2;
   }
 
   const loadRuntimeEnv =
     deps.loadRuntimeEnv || deps.loadEnv || require('../runtime/load-runtime-env').loadRuntimeEnv;
+
+  if (mode === 'vault-setup') {
+    return runVaultSetup(loadRuntimeEnv, stderr);
+  }
+
   await loadRuntimeEnv();
 
   if (mode === 'mcp') {

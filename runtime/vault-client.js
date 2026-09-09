@@ -11,6 +11,12 @@ const https = require('https');
 const crypto = require('crypto');
 const childProcess = require('child_process');
 const vaultTokenCache = require('./vault-token-cache');
+const { configureSystemCa } = require('./system-ca');
+const { createContextualError, isContextualError } = require('../utils/network-error');
+
+// Load system-installed roots before any production HTTPS client is used.
+// The helper is intentionally best-effort for older Node runtimes.
+configureSystemCa();
 
 const DEFAULTS = Object.freeze({
   authMount: 'oidc',
@@ -267,28 +273,15 @@ function buildHeaders(config, extra = {}) {
   return headers;
 }
 
-function getSafeErrorMessage(error, config, extraSecrets = []) {
-  const message =
-    error && typeof error.message === 'string' ? error.message : 'Unknown Vault error.';
-  const secrets = [config && config.customHeaderValue, ...extraSecrets].filter(isNonEmpty);
-  return secrets.reduce(
-    (safeMessage, secret) => safeMessage.split(secret).join('[REDACTED]'),
-    message
-  );
-}
+function wrapVaultRequestError(operation, endpoint, error, config, extraSecrets, fallbackCode) {
+  const contextual = isContextualError(error, operation)
+    ? error
+    : createContextualError(operation, endpoint, error, {
+        fallbackCode,
+        secrets: [config && config.customHeaderValue, ...extraSecrets].filter(isNonEmpty),
+      });
 
-function networkError() {
-  return new VaultError(
-    'Unable to reach Vault. Check VAULT_ADDR and intranet/VPN connectivity.',
-    'VAULT_NETWORK_ERROR'
-  );
-}
-
-function requestTimeoutError() {
-  return new VaultError(
-    'Vault request timed out. Check VAULT_ADDR and intranet/VPN connectivity.',
-    'VAULT_TIMEOUT'
-  );
+  return new VaultError(contextual.message, contextual.code || fallbackCode, contextual.status);
 }
 
 /**
@@ -298,6 +291,7 @@ function requestTimeoutError() {
  * @param {object} options - Request options
  * @param {string} options.url - Absolute Vault URL
  * @param {string} options.method - HTTP method
+ * @param {string} [options.operation] - Human-readable Vault operation
  * @param {object} [options.headers] - HTTP headers
  * @param {string} [options.body] - JSON request body
  * @param {object} [deps] - Injectable transports and timeout settings
@@ -318,7 +312,22 @@ function requestJson(options, deps = {}) {
     );
   }
 
+  if (target.protocol === 'https:') configureSystemCa();
+
   const transport = target.protocol === 'https:' ? deps.https || https : deps.http || http;
+  const operation = options.operation || 'Vault request';
+  const requestSecrets = Object.values(options.headers || {}).filter(isNonEmpty);
+  const contextualize = (error, fallbackCode, fallbackMessage) => {
+    const contextual = createContextualError(operation, target, error, {
+      fallbackCode,
+      fallbackMessage,
+      secrets: requestSecrets,
+    });
+    const wrapped = new VaultError(contextual.message, contextual.code, contextual.status);
+    wrapped.contextualOperation = contextual.contextualOperation;
+    wrapped.contextualTarget = contextual.contextualTarget;
+    return wrapped;
+  };
   const body = options.body || '';
   const timeoutMs = deps.requestTimeoutMs || options.timeoutMs || DEFAULTS.requestTimeoutMs;
 
@@ -345,13 +354,18 @@ function requestJson(options, deps = {}) {
         (response) => {
           if (response.statusCode < 200 || response.statusCode >= 300) {
             if (typeof response.resume === 'function') response.resume();
+            const responseError = new VaultError(
+              `Vault request failed with HTTP status ${response.statusCode}.`,
+              response.statusCode === 401 || response.statusCode === 403
+                ? 'VAULT_UNAUTHORIZED'
+                : 'VAULT_HTTP_ERROR',
+              response.statusCode
+            );
             finish(
-              new VaultError(
-                `Vault request failed with HTTP status ${response.statusCode}.`,
-                response.statusCode === 401 || response.statusCode === 403
-                  ? 'VAULT_UNAUTHORIZED'
-                  : 'VAULT_HTTP_ERROR',
-                response.statusCode
+              contextualize(
+                responseError,
+                responseError.code,
+                `Vault request failed with HTTP status ${response.statusCode}.`
               )
             );
             return;
@@ -364,30 +378,59 @@ function requestJson(options, deps = {}) {
             responseBody += chunk;
             if (Buffer.byteLength(responseBody, 'utf8') > MAX_RESPONSE_BYTES) {
               if (typeof request.destroy === 'function') request.destroy();
-              finish(new VaultError('Vault response was too large.', 'VAULT_RESPONSE_INVALID'));
+              finish(
+                contextualize(
+                  new VaultError('Vault response was too large.', 'VAULT_RESPONSE_INVALID'),
+                  'VAULT_RESPONSE_INVALID'
+                )
+              );
             }
           });
 
           response.on('end', () => {
             if (!responseBody) {
-              finish(new VaultError('Vault returned an empty response.', 'VAULT_RESPONSE_INVALID'));
+              finish(
+                contextualize(
+                  new VaultError('Vault returned an empty response.', 'VAULT_RESPONSE_INVALID'),
+                  'VAULT_RESPONSE_INVALID'
+                )
+              );
               return;
             }
 
             try {
               finish(null, JSON.parse(responseBody));
             } catch {
-              finish(new VaultError('Vault returned invalid JSON.', 'VAULT_RESPONSE_INVALID'));
+              finish(
+                contextualize(
+                  new VaultError('Vault returned invalid JSON.', 'VAULT_RESPONSE_INVALID'),
+                  'VAULT_RESPONSE_INVALID'
+                )
+              );
             }
           });
 
           if (typeof response.on === 'function') {
-            response.on('error', () => finish(networkError()));
+            response.on('error', (error) =>
+              finish(
+                contextualize(
+                  error,
+                  'VAULT_NETWORK_ERROR',
+                  'Unable to reach Vault. Check VAULT_ADDR and intranet/VPN connectivity.'
+                )
+              )
+            );
           }
         }
       );
-    } catch {
-      finish(networkError());
+    } catch (error) {
+      finish(
+        contextualize(
+          error,
+          'VAULT_NETWORK_ERROR',
+          'Unable to reach Vault. Check VAULT_ADDR and intranet/VPN connectivity.'
+        )
+      );
       return;
     }
 
@@ -395,17 +438,39 @@ function requestJson(options, deps = {}) {
 
     timeout = setTimeout(() => {
       if (typeof request.destroy === 'function') request.destroy();
-      finish(requestTimeoutError());
+      finish(
+        contextualize(
+          null,
+          'VAULT_TIMEOUT',
+          'Vault request timed out. Check VAULT_ADDR and intranet/VPN connectivity.'
+        )
+      );
     }, timeoutMs);
     if (typeof timeout.unref === 'function') timeout.unref();
 
-    if (typeof request.on === 'function') request.on('error', () => finish(networkError()));
+    if (typeof request.on === 'function') {
+      request.on('error', (error) =>
+        finish(
+          contextualize(
+            error,
+            'VAULT_NETWORK_ERROR',
+            'Unable to reach Vault. Check VAULT_ADDR and intranet/VPN connectivity.'
+          )
+        )
+      );
+    }
 
     try {
       if (body) request.write(body);
       request.end();
-    } catch {
-      finish(networkError());
+    } catch (error) {
+      finish(
+        contextualize(
+          error,
+          'VAULT_NETWORK_ERROR',
+          'Unable to reach Vault. Check VAULT_ADDR and intranet/VPN connectivity.'
+        )
+      );
     }
   });
 }
@@ -441,6 +506,7 @@ async function requestAuthUrl(config, clientNonce, deps = {}) {
     response = await requestVaultJson(
       {
         method: 'POST',
+        operation: 'Vault OIDC authorization request',
         url: buildVaultUrl(config, ['auth', config.authMount, 'oidc', 'auth_url']),
         headers: buildHeaders(config, {
           'Content-Type': 'application/json',
@@ -461,10 +527,13 @@ async function requestAuthUrl(config, clientNonce, deps = {}) {
       deps
     );
   } catch (error) {
-    throw new VaultError(
-      `Vault OIDC authorization request failed: ${getSafeErrorMessage(error, config)}`,
-      error.code || 'VAULT_OIDC_AUTH_URL_FAILED',
-      error.status
+    throw wrapVaultRequestError(
+      'Vault OIDC authorization request',
+      buildVaultUrl(config, ['auth', config.authMount, 'oidc', 'auth_url']),
+      error,
+      config,
+      [],
+      'VAULT_OIDC_AUTH_URL_FAILED'
     );
   }
 
@@ -541,16 +610,20 @@ async function exchangeOidcCallback(config, callback, deps = {}) {
     response = await requestVaultJson(
       {
         method: 'GET',
+        operation: 'Vault OIDC callback exchange',
         url: callbackUrl.toString(),
         headers: buildHeaders(config),
       },
       deps
     );
   } catch (error) {
-    throw new VaultError(
-      `Vault OIDC token exchange failed: ${getSafeErrorMessage(error, config)}`,
-      error.code || 'VAULT_OIDC_EXCHANGE_FAILED',
-      error.status
+    throw wrapVaultRequestError(
+      'Vault OIDC callback exchange',
+      callbackUrl,
+      error,
+      config,
+      [callback.state, callback.nonce, callback.code, callback.clientNonce],
+      'VAULT_OIDC_EXCHANGE_FAILED'
     );
   }
 
@@ -606,16 +679,20 @@ async function lookupSelf(config, token, deps = {}) {
     response = await requestVaultJson(
       {
         method: 'GET',
+        operation: 'Vault token lookup',
         url: buildVaultUrl(config, ['auth', 'token', 'lookup-self']),
         headers: buildHeaders(config, { 'X-Vault-Token': token }),
       },
       deps
     );
   } catch (error) {
-    throw new VaultError(
-      `Vault token lookup failed: ${getSafeErrorMessage(error, config, [token])}`,
-      error.code || 'VAULT_TOKEN_LOOKUP_FAILED',
-      error.status
+    throw wrapVaultRequestError(
+      'Vault token lookup',
+      buildVaultUrl(config, ['auth', 'token', 'lookup-self']),
+      error,
+      config,
+      [token],
+      'VAULT_TOKEN_LOOKUP_FAILED'
     );
   }
 
@@ -651,6 +728,7 @@ async function renewSelf(config, token, deps = {}) {
     response = await requestVaultJson(
       {
         method: 'POST',
+        operation: 'Vault token renewal',
         url: buildVaultUrl(config, ['auth', 'token', 'renew-self']),
         headers: buildHeaders(config, {
           'Content-Type': 'application/json',
@@ -662,10 +740,13 @@ async function renewSelf(config, token, deps = {}) {
       deps
     );
   } catch (error) {
-    throw new VaultError(
-      `Vault token renewal failed: ${getSafeErrorMessage(error, config, [token])}`,
-      error.code || 'VAULT_TOKEN_RENEW_FAILED',
-      error.status
+    throw wrapVaultRequestError(
+      'Vault token renewal',
+      buildVaultUrl(config, ['auth', 'token', 'renew-self']),
+      error,
+      config,
+      [token],
+      'VAULT_TOKEN_RENEW_FAILED'
     );
   }
 
@@ -883,9 +964,58 @@ function openBrowser(authUrl, deps = {}) {
   }
 }
 
-function writeManualAuthUrl(authUrl, stream = process.stderr) {
+function sanitizeAuthUrl(authUrl) {
+  return typeof authUrl === 'string' ? authUrl.replace(/[\r\n]/g, '') : '';
+}
+
+/**
+ * Copy a Vault authorization URL using a native clipboard utility without a shell.
+ * @param {string} authUrl - Provider authorization URL
+ * @param {object} [deps] - Injectable platform and child-process module
+ * @returns {boolean} Whether the URL was copied successfully
+ */
+function copyToClipboard(authUrl, deps = {}) {
+  const sanitizedUrl = sanitizeAuthUrl(authUrl);
+  if (!sanitizedUrl) return false;
+
+  const platform = deps.platform || process.platform;
+  const processModule = deps.childProcess || childProcess;
+  if (!processModule || typeof processModule.spawnSync !== 'function') return false;
+
+  const commands =
+    platform === 'win32'
+      ? [['clip.exe', []]]
+      : platform === 'darwin'
+        ? [['pbcopy', []]]
+        : [
+            ['xclip', ['-selection', 'clipboard']],
+            ['xsel', ['--clipboard', '--input']],
+          ];
+
+  for (const [command, args] of commands) {
+    try {
+      const result = processModule.spawnSync(command, args, {
+        input: sanitizedUrl,
+        encoding: 'utf8',
+        stdio: ['pipe', 'ignore', 'ignore'],
+        ...(platform === 'win32' ? { windowsHide: true } : {}),
+      });
+      if (result && result.status === 0 && !result.error) return true;
+    } catch {
+      // Try the next native clipboard utility, or report failure below.
+    }
+  }
+
+  return false;
+}
+
+function writeManualAuthUrl(authUrl, stream = process.stderr, clipboardCopied = false) {
   if (stream && typeof stream.write === 'function') {
-    stream.write(`${authUrl.replace(/[\r\n]/g, '')}\n`);
+    const sanitizedUrl = sanitizeAuthUrl(authUrl);
+    const message = clipboardCopied
+      ? 'Vault authorization URL was copied to the clipboard. If the browser did not open, paste this complete URL manually:'
+      : 'Vault authorization URL could not be copied to the clipboard. Copy this complete URL manually:';
+    stream.write(`${message}\n${sanitizedUrl}\n`);
   }
 }
 
@@ -898,6 +1028,15 @@ function writeManualAuthUrl(authUrl, stream = process.stderr) {
 async function authenticateWithOidc(config, deps = {}) {
   const clientNonce = createNonce(deps);
   const authRequest = await requestAuthUrl(config, clientNonce, deps);
+  const sanitizedAuthUrl = sanitizeAuthUrl(authRequest.authUrl);
+  let clipboardCopied = false;
+  try {
+    const copy = deps.copyToClipboard || ((url) => copyToClipboard(url, deps));
+    clipboardCopied = Boolean(await copy(sanitizedAuthUrl));
+  } catch {
+    clipboardCopied = false;
+  }
+
   const listen = deps.listenForOidcCallback || listenForOidcCallback;
   const callback = listen(config, authRequest, deps);
 
@@ -914,7 +1053,9 @@ async function authenticateWithOidc(config, deps = {}) {
       }
     }
 
-    if (!browserOpened) writeManualAuthUrl(authRequest.authUrl, deps.stderr || process.stderr);
+    if (!browserOpened) {
+      writeManualAuthUrl(sanitizedAuthUrl, deps.stderr || process.stderr, clipboardCopied);
+    }
     return await callback.result;
   } catch (error) {
     if (callback && callback.result && typeof callback.result.catch === 'function') {
@@ -942,16 +1083,20 @@ async function readKvV2(config, token, deps = {}) {
     response = await requestVaultJson(
       {
         method: 'GET',
+        operation: 'Vault KV read',
         url: buildVaultUrl(config, [config.kvMount, 'data', config.secretPath]),
         headers: buildHeaders(config, { 'X-Vault-Token': token }),
       },
       deps
     );
   } catch (error) {
-    throw new VaultError(
-      `Vault KV read failed: ${getSafeErrorMessage(error, config, [token])}`,
-      error.code || 'VAULT_KV_READ_FAILED',
-      error.status
+    throw wrapVaultRequestError(
+      'Vault KV read',
+      buildVaultUrl(config, [config.kvMount, 'data', config.secretPath]),
+      error,
+      config,
+      [token],
+      'VAULT_KV_READ_FAILED'
     );
   }
 
@@ -1276,6 +1421,9 @@ module.exports = {
   setupVaultEnvironment,
   invalidateVaultTokenCache,
   openBrowser,
+  copyToClipboard,
+  sanitizeAuthUrl,
+  writeManualAuthUrl,
   readKvV2,
   mapVaultEnvironment,
   loadVaultEnvironment,

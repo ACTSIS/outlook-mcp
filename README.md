@@ -4,7 +4,7 @@
 [![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frafaga2469%2Foutlook-mcp%2Fbadges%2Fcoverage.json)](https://github.com/rafaga2469/outlook-mcp/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frafaga2469%2Foutlook-mcp%2Fbadges%2Ftests.json)](https://github.com/rafaga2469/outlook-mcp/actions/workflows/ci.yml)
 
-An independently maintained fork of [ryaker/outlook-mcp](https://github.com/ryaker/outlook-mcp). It exposes 37 MCP tools for Outlook mail and calendar, OneDrive, inbox rules, and Power Automate.
+An independently maintained fork of [ryaker/outlook-mcp](https://github.com/ryaker/outlook-mcp). It exposes 45 MCP tools for Outlook mail and calendar, OneDrive, inbox rules, and Power Automate.
 
 ## Quick start
 
@@ -76,7 +76,7 @@ You need Node.js 22.22.1 or later and a Microsoft Entra app registration.
    }
    ```
 
-   See [`claude-config-sample.json`](./claude-config-sample.json) for a copyable file. The server uses stdio, so restart the MCP client after changing its configuration. With Vault enabled, call `setup-vault` once after the MCP server starts; later starts reuse the cache without opening a browser.
+   See [`claude-config-sample.json`](./claude-config-sample.json) for a copyable file. The server uses stdio, so restart the MCP client after changing its configuration. With Vault enabled, call `setup-vault` once after the MCP server starts; later starts reuse the cache without opening a browser. You can also run the repository-level `vault-setup` command described below before starting the MCP client.
 
 6. Call `authenticate`, copy the URL returned as the first response line, and open it in your browser. The browser is not opened automatically; the MCP tool starts the callback server automatically. Then call `check-auth-status` and use a Graph-backed tool such as `list-emails`.
 
@@ -219,6 +219,24 @@ Set `VAULT_ADDR` to enable Vault mode. The other settings are optional:
 When `VAULT_TOKEN` is absent, call the `setup-vault` MCP tool once to complete the Vault OIDC browser flow. The runtime stores that Vault token and safe lease metadata in a per-user local cache. Later OpenCode/MCP launches validate the cached token, renew it when it is renewable and near expiry, and read the KV values without opening a browser. If the cache is missing, stale, or unusable, normal startup remains available in a setup-required state and does not open a browser; call `setup-vault` explicitly. The local listener accepts only `GET http://127.0.0.1:<port>/oidc/callback`; the Vault role and the OIDC provider must allow the matching `http://localhost:<port>/oidc/callback` URI. With the defaults, configure `http://localhost:8250/oidc/callback` exactly. Static `VAULT_TOKEN` values are not recommended for developer installs.
 When `VAULT_TOKEN` is present, it remains the explicit non-cached automation/testing credential and takes precedence over the OIDC cache; neither normal startup nor `setup-vault` opens a browser for that mode.
 After sign-in, the identity-provider redirect must return the matching `state` and a `code`. The client retains the `nonce` from Vault's authorization URL for the callback exchange; if the provider returns a nonce too, it must match.
+If the Vault browser cannot be opened, the complete short-lived authorization URL is copied to the system clipboard and printed for manual use. Clipboard support is best-effort and never blocks Vault setup.
+
+For a repository-level manual setup, use the dispatcher rather than the MCP client's remote OAuth command:
+
+```powershell
+# Source checkout
+node bin/m365-mcp.js vault-setup
+npm run vault-setup
+
+# Packaged Windows executable
+.\outlook-mcp-win-x64.exe vault-setup
+```
+
+This command loads the external `.env`, performs the explicit Vault browser/manual flow, saves the Vault identity cache, and reports only safe status. It exits `0` after a successful setup, `1` for a setup/runtime failure, and `2` when Vault is disabled or misconfigured. Do not use OpenCode's `opencode mcp auth <name>` for this local command: the current OpenCode command is documented for remote OAuth MCP servers and cannot invoke an arbitrary local stdio subcommand. The existing `m365-mcp-auth` package entry remains the Microsoft callback-server entry point.
+
+#### TLS and the Windows certificate store
+
+Node 22.22.1 and the packaged Node runtime merge Node's bundled public CA roots with certificates already installed in the Windows/system certificate store before productive HTTPS calls. TLS certificate verification remains enabled. Customers do not need to export/import a PEM file or set `NODE_EXTRA_CA_CERTS` for a CA that is already installed in the system store. Never disable verification with `NODE_TLS_REJECT_UNAUTHORIZED=0` or `rejectUnauthorized: false`.
 
 #### Vault token cache
 
@@ -293,7 +311,7 @@ The runtime precedence is explicit:
 3. The adjacent `.env` file fills values not supplied by the process or Vault.
 4. An explicit `setup-vault` refresh replaces values previously loaded from Vault without overriding process/MCP-client values.
 
-If `VAULT_ADDR` is unset, Vault is skipped and the existing adjacent `.env`/process-environment behavior remains available.
+If `VAULT_ADDR` is unset, Vault is skipped and the existing adjacent `.env`/process-environment behavior remains available. When Vault should provide OAuth values, remove those `MS_*`/`OUTLOOK_*` OAuth keys from the MCP client's environment; process/MCP values intentionally remain authoritative over Vault.
 
 #### Precedence
 
@@ -407,7 +425,7 @@ The MCP client supplies these values when it starts the process. Do not place a 
 - The inspected workflows use no OAuth client secrets. The release job uses GitHub's built-in `github.token` only to publish the release; it is not a Microsoft credential and is not embedded in the binary.
 - Build-time GitHub Actions credentials, if a future maintenance workflow needs them, are CI/release infrastructure credentials. They must never be used as substitutes for the end user's runtime Microsoft Entra values.
 
-The existing npm installation remains supported through `bin/m365-mcp.js`, which bootstraps the same runtime environment as the pre-built executable. Its `.env` lives in the project directory, while a pre-built executable reads `.env` beside the binary. Both paths use the same `OUTLOOK_*`/`MS_*` variables, and both `mcp` and `auth` modes use the same runtime environment.
+The existing npm installation remains supported through `bin/m365-mcp.js`, which bootstraps the same runtime environment as the pre-built executable. Its `.env` lives in the project directory, while a pre-built executable reads `.env` beside the binary. Both paths use the same `OUTLOOK_*`/`MS_*` variables, and `mcp`, `auth`, and `vault-setup` modes use the same runtime environment.
 
 ## What the server can do
 
@@ -421,14 +439,15 @@ The existing npm installation remains supported through `bin/m365-mcp.js`, which
 
 Nested mail-folder paths such as `Parent/Child/Archive` are resolved segment by segment by `create-folder` and `move-emails`. A literal `/` in a folder name is not supported because `/` is always the path separator.
 
-## Tool inventory (43)
+## Tool inventory (45)
 
-### Authentication (4)
+### Authentication (6)
 
 | Tool                | Purpose                                                                             |
 | ------------------- | ----------------------------------------------------------------------------------- |
 | `about`             | Report server identity and supported service areas                                  |
 | `authenticate`      | Start the callback server and return the Microsoft Graph browser-authentication URL |
+| `setup-vault`       | Run explicit Vault OIDC setup and refresh the current MCP process                   |
 | `check-auth-status` | Check and, when possible, refresh **Graph authentication only**                     |
 | `authenticate-flow` | Start the callback server and return the separate Power Automate authentication URL |
 | `stop-auth-server`  | Stop the callback server started by an authentication tool                          |
@@ -600,6 +619,7 @@ Replace the custom-header placeholder locally with the protected secret value. K
 | Graph returns `UNAUTHORIZED` (HTTP 401)                                 | The API rejected the submitted token; complete Graph authentication again because a 401 does not force local invalidation     |
 | Graph returns HTTP 403 in an API error                                  | Authentication may be valid but the account/app lacks the required delegated permission; verify Entra permissions and consent |
 | `AADSTS7000215` / invalid client secret                                 | Configure the client secret **value**, not the secret ID                                                                      |
+| `self-signed certificate in certificate chain`                          | Read the operation/target first; inspect system/proxy TLS trust before treating it as a Vault failure                         |
 | OAuth state is invalid or expired                                       | Start again from `authenticate`; pending state expires after ten minutes and is single-use                                    |
 | Port 3333 is already in use                                             | Stop the existing process, or run `npx kill-port 3333`, then call `authenticate` again                                        |
 

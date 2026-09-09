@@ -15,9 +15,12 @@ const {
   loadVaultEnvironment,
   mapVaultEnvironment,
   openBrowser,
+  copyToClipboard,
   readKvV2,
   renewSelf,
+  requestJson,
   requestAuthUrl,
+  sanitizeAuthUrl,
   setupVaultEnvironment,
   invalidateVaultTokenCache,
 } = require('../../runtime/vault-client');
@@ -232,6 +235,41 @@ describe('runtime/vault-client', () => {
     });
   });
 
+  it('contextualizes Vault transport errors with the operation and safe target', async () => {
+    const request = {
+      on: jest.fn(),
+      write: jest.fn(),
+      end: jest.fn(),
+    };
+    const httpsTransport = { request: jest.fn().mockReturnValue(request) };
+    const transportError = Object.assign(
+      new Error(
+        'self-signed certificate in certificate chain at https://vault.example.test/v1/kv?token=opaque-vault-token'
+      ),
+      { code: 'SELF_SIGNED_CERT_IN_CHAIN' }
+    );
+    const promise = requestJson(
+      {
+        method: 'GET',
+        operation: 'Vault KV read',
+        url: 'https://vault.example.test/v1/kv/data/outlook-mcp/actsis?token=opaque-vault-token',
+        headers: { 'X-Vault-Token': 'opaque-vault-token' },
+      },
+      { https: httpsTransport }
+    );
+    const errorHandler = request.on.mock.calls.find(([event]) => event === 'error')[1];
+    errorHandler(transportError);
+
+    const error = await promise.catch((caught) => caught);
+    expect(error).toMatchObject({ code: 'SELF_SIGNED_CERT_IN_CHAIN' });
+    expect(error.message).toContain(
+      'Vault KV read failed while connecting to https://vault.example.test/v1/kv/data/outlook-mcp/actsis'
+    );
+    expect(error.message).toContain('Check network TLS trust/proxy configuration.');
+    expect(error.message).not.toContain('opaque-vault-token');
+    expect(error.message).not.toContain('?');
+  });
+
   it('exchanges validated OIDC callback values without sending a Vault token', async () => {
     const requestJson = jest
       .fn()
@@ -432,7 +470,7 @@ describe('runtime/vault-client', () => {
     expect((await result).code).toBe('VAULT_OIDC_CALLBACK_INVALID');
   });
 
-  it('prints only the provider URL when browser launch is skipped', async () => {
+  it('copies the provider URL and reports the clipboard fallback when browser launch is skipped', async () => {
     const requestJson = jest.fn().mockResolvedValue({
       data: { auth_url: 'https://login.example.test/authorize?state=s&nonce=n' },
     });
@@ -441,6 +479,7 @@ describe('runtime/vault-client', () => {
       result: Promise.resolve('opaque-vault-token'),
       close: jest.fn(),
     }));
+    const copyToClipboard = jest.fn().mockReturnValue(true);
     const stderr = { write: jest.fn() };
 
     const token = await authenticateWithOidc(
@@ -453,16 +492,116 @@ describe('runtime/vault-client', () => {
         requestJson,
         randomBytes: () => Buffer.alloc(32, 1),
         listenForOidcCallback: listenForCallback,
+        copyToClipboard,
         stderr,
       }
     );
 
     expect(token).toBe('opaque-vault-token');
+    expect(copyToClipboard).toHaveBeenCalledWith(
+      'https://login.example.test/authorize?state=s&nonce=n'
+    );
     expect(stderr.write).toHaveBeenCalledWith(
-      'https://login.example.test/authorize?state=s&nonce=n\n'
+      'Vault authorization URL was copied to the clipboard. If the browser did not open, paste this complete URL manually:\nhttps://login.example.test/authorize?state=s&nonce=n\n'
     );
     expect(stderr.write.mock.calls.join('')).not.toContain('opaque-vault-token');
     expect(stderr.write.mock.calls.join('')).not.toContain(CUSTOM_HEADER_VALUE);
+  });
+
+  it('copies the complete Windows URL through clip.exe without shell parsing', () => {
+    const authUrl =
+      'https://login.example.test/authorize?state=state-value&nonce=nonce-value&scope=openid%20profile';
+    const spawnSync = jest.fn().mockReturnValue({ status: 0 });
+
+    expect(copyToClipboard(authUrl, { platform: 'win32', childProcess: { spawnSync } })).toBe(true);
+    expect(spawnSync).toHaveBeenCalledWith(
+      'clip.exe',
+      [],
+      expect.objectContaining({
+        input: authUrl,
+        encoding: 'utf8',
+        stdio: ['pipe', 'ignore', 'ignore'],
+        windowsHide: true,
+      })
+    );
+    expect(spawnSync.mock.calls[0][2].shell).not.toBe(true);
+  });
+
+  it('tries Linux clipboard utilities and returns false when both fail', () => {
+    const spawnSync = jest
+      .fn()
+      .mockReturnValueOnce({ status: 1 })
+      .mockReturnValueOnce({ error: new Error('command unavailable'), status: null });
+
+    expect(
+      copyToClipboard('https://login.example.test/authorize?state=s&nonce=n', {
+        platform: 'linux',
+        childProcess: { spawnSync },
+      })
+    ).toBe(false);
+    expect(spawnSync.mock.calls[0][0]).toBe('xclip');
+    expect(spawnSync.mock.calls[0][1]).toEqual(['-selection', 'clipboard']);
+    expect(spawnSync.mock.calls[1][0]).toBe('xsel');
+    expect(spawnSync.mock.calls[1][1]).toEqual(['--clipboard', '--input']);
+  });
+
+  it('keeps the complete URL in the manual fallback when clipboard copy fails', async () => {
+    const authUrl =
+      'https://login.example.test/authorize?state=state-value&nonce=nonce-value&scope=openid%20profile';
+    const requestJson = jest.fn().mockResolvedValue({ data: { auth_url: authUrl } });
+    const listenForCallback = jest.fn(() => ({
+      ready: Promise.resolve(),
+      result: Promise.resolve('opaque-vault-token'),
+      close: jest.fn(),
+    }));
+    const copy = jest.fn().mockReturnValue(false);
+    const stderr = { write: jest.fn() };
+
+    await authenticateWithOidc(createConfig({ skipBrowser: true }), {
+      requestJson,
+      listenForOidcCallback: listenForCallback,
+      copyToClipboard: copy,
+      stderr,
+    });
+
+    expect(copy).toHaveBeenCalledWith(authUrl);
+    expect(stderr.write).toHaveBeenCalledWith(
+      `Vault authorization URL could not be copied to the clipboard. Copy this complete URL manually:\n${authUrl}\n`
+    );
+  });
+
+  it('copies the URL even when the browser launcher reports success', async () => {
+    const authUrl =
+      'https://login.example.test/authorize?state=state-value&nonce=nonce-value&scope=openid%20profile';
+    const requestJson = jest.fn().mockResolvedValue({ data: { auth_url: authUrl } });
+    const listenForCallback = jest.fn(() => ({
+      ready: Promise.resolve(),
+      result: Promise.resolve('opaque-vault-token'),
+      close: jest.fn(),
+    }));
+    const copy = jest.fn().mockReturnValue(true);
+    const open = jest.fn().mockReturnValue(true);
+    const stderr = { write: jest.fn() };
+
+    await authenticateWithOidc(createConfig(), {
+      requestJson,
+      listenForOidcCallback: listenForCallback,
+      copyToClipboard: copy,
+      openBrowser: open,
+      stderr,
+    });
+
+    expect(copy).toHaveBeenCalledWith(authUrl);
+    expect(open).toHaveBeenCalledWith(authUrl, expect.anything());
+    expect(stderr.write).not.toHaveBeenCalled();
+  });
+
+  it('strips CR/LF only and preserves URL parameters', () => {
+    const authUrl =
+      'https://login.example.test/authorize?state=s&nonce=n&scope=openid%20profile\r\n';
+    expect(sanitizeAuthUrl(authUrl)).toBe(
+      'https://login.example.test/authorize?state=s&nonce=n&scope=openid%20profile'
+    );
   });
 
   it('passes the complete Windows provider URL to the protocol handler without shell parsing', () => {
@@ -490,7 +629,7 @@ describe('runtime/vault-client', () => {
     expect(unref).toHaveBeenCalledTimes(1);
   });
 
-  it('redacts a custom header value from wrapped request errors', async () => {
+  it('redacts a custom header value and identifies the Vault target in request errors', async () => {
     const requestJson = jest
       .fn()
       .mockRejectedValue(new Error(`transport rejected ${CUSTOM_HEADER_VALUE}`));
@@ -510,6 +649,9 @@ describe('runtime/vault-client', () => {
     }
 
     expect(error).toMatchObject({ code: 'VAULT_OIDC_AUTH_URL_FAILED' });
+    expect(error.message).toContain(
+      'Vault OIDC authorization request failed while connecting to https://vault.example.test/v1/auth/oidc/oidc/auth_url'
+    );
     expect(error.message).toContain('[REDACTED]');
     expect(error.message).not.toContain(CUSTOM_HEADER_VALUE);
   });

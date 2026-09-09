@@ -13,6 +13,7 @@
  */
 const { spawn, spawnSync } = require('child_process');
 const path = require('path');
+const packageJson = require('../../package.json');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
 
@@ -72,6 +73,11 @@ function runSpawnUntilMarker(args, marker) {
 }
 
 describe('entry points', () => {
+  it('maps the npm m365-mcp bin to the dispatcher and preserves the auth bin', () => {
+    expect(packageJson.bin['m365-mcp']).toBe('./bin/m365-mcp.js');
+    expect(packageJson.bin['m365-mcp-auth']).toBe('./outlook-auth-server.js');
+  });
+
   it('index.js exports startMCP as a function', () => {
     const result = runNodeSync(
       "const m = require('./index.js'); console.log(typeof m.startMCP); process.exit(0);"

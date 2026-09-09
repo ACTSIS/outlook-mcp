@@ -379,13 +379,27 @@ describe('TokenStorage', () => {
     });
 
     it('should reject on network error during token exchange', async () => {
-      const networkError = new Error('Network fail');
+      const networkError = Object.assign(
+        new Error(
+          'self-signed certificate in certificate chain at https://login.microsoftonline.com/common/oauth2/v2.0/token?client_secret=test-client-secret'
+        ),
+        { code: 'SELF_SIGNED_CERT_IN_CHAIN' }
+      );
       const exchangePromise = tokenStorage.exchangeCodeForTokens(mockAuthCode);
 
       // Simulate network error by calling the 'error' handler on the request object
       mockHttpsRequest.errorHandler(networkError);
 
-      await expect(exchangePromise).rejects.toThrow('Network fail');
+      const error = await exchangePromise.catch((caught) => caught);
+      expect(error).toMatchObject({ code: 'SELF_SIGNED_CERT_IN_CHAIN' });
+      expect(error.message).toContain(
+        'Microsoft Graph token exchange failed while connecting to https://login.microsoftonline.com/common/oauth2/v2.0/token'
+      );
+      expect(error.message).toContain('self-signed certificate in certificate chain');
+      expect(error.message).toContain('Check network TLS trust/proxy configuration.');
+      expect(error.message).not.toContain('test-client-secret');
+      expect(error.message).not.toContain(mockAuthCode);
+      expect(error.message).not.toContain('?');
     });
 
     it('should reject if client ID or secret is missing', async () => {
@@ -449,6 +463,35 @@ describe('TokenStorage', () => {
       expect(requestBody.grant_type).toBe('refresh_token');
       expect(requestBody.refresh_token).toBe('valid_refresh_token');
       expect(requestBody.scope).toBe(baseConfig.scopes.join(' '));
+    });
+
+    it('should contextualize a TLS error during Graph token refresh', async () => {
+      const networkError = Object.assign(
+        new Error(
+          'self-signed certificate in certificate chain at https://login.microsoftonline.com/common/oauth2/v2.0/token?refresh_token=valid_refresh_token'
+        ),
+        { code: 'SELF_SIGNED_CERT_IN_CHAIN' }
+      );
+      const invalidateSpy = jest
+        .spyOn(vaultClient, 'invalidateVaultTokenCache')
+        .mockResolvedValue({ deleted: true });
+
+      try {
+        const refreshPromise = tokenStorage.refreshAccessToken();
+        mockHttpsRequest.errorHandler(networkError);
+
+        const error = await refreshPromise.catch((caught) => caught);
+        expect(error).toMatchObject({ code: 'SELF_SIGNED_CERT_IN_CHAIN' });
+        expect(error.message).toContain(
+          'Microsoft Graph token refresh failed while connecting to https://login.microsoftonline.com/common/oauth2/v2.0/token'
+        );
+        expect(error.message).not.toContain('test-client-secret');
+        expect(error.message).not.toContain('valid_refresh_token');
+        expect(error.message).not.toContain('?');
+        expect(invalidateSpy).not.toHaveBeenCalled();
+      } finally {
+        invalidateSpy.mockRestore();
+      }
     });
 
     it('should reject if saving refreshed token fails', async () => {
@@ -689,6 +732,26 @@ describe('TokenStorage', () => {
       expect(requestBody.grant_type).toBe('refresh_token');
       expect(requestBody.refresh_token).toBe(mockFlowRefreshToken);
       expect(requestBody.scope).toBe(config.FLOW_SCOPE);
+    });
+
+    it('should contextualize a TLS error during Power Automate token refresh', async () => {
+      const networkError = Object.assign(
+        new Error(
+          'self-signed certificate in certificate chain at https://login.microsoftonline.com/common/oauth2/v2.0/token?refresh_token=valid-flow-refresh'
+        ),
+        { code: 'SELF_SIGNED_CERT_IN_CHAIN' }
+      );
+      const refreshPromise = tokenStorage.refreshFlowAccessToken();
+      mockHttpsRequest.errorHandler(networkError);
+
+      const error = await refreshPromise.catch((caught) => caught);
+      expect(error).toMatchObject({ code: 'SELF_SIGNED_CERT_IN_CHAIN' });
+      expect(error.message).toContain(
+        'Power Automate token refresh failed while connecting to https://login.microsoftonline.com/common/oauth2/v2.0/token'
+      );
+      expect(error.message).not.toContain('test-client-secret');
+      expect(error.message).not.toContain('valid-flow-refresh');
+      expect(error.message).not.toContain('?');
     });
 
     it('should update flow_refresh_token if a new one is in response', async () => {
