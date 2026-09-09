@@ -68,7 +68,8 @@ describe('MCP handshake', () => {
 
     await new Promise((resolve) => {
       processToStop.once('close', resolve);
-      processToStop.kill();
+      // The server intentionally ignores SIGTERM, so force-close this test child.
+      processToStop.kill('SIGKILL');
     });
   });
 
