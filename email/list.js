@@ -5,6 +5,7 @@ const config = require('../config');
 const { callGraphAPIPaginated } = require('../utils/graph-api');
 const { ensureAuthenticated } = require('../auth');
 const { resolveFolderPath } = require('./folder-utils');
+const { buildDateFilter } = require('./date-filter');
 
 /**
  * List emails handler
@@ -13,7 +14,25 @@ const { resolveFolderPath } = require('./folder-utils');
  */
 async function handleListEmails(args) {
   const folder = args.folder || 'inbox';
-  const requestedCount = args.count || 10;
+  const requestedCount = args.count === undefined ? config.MAX_RESULT_COUNT : args.count;
+
+  // Validate dates client-side (fail-fast) before any Graph call
+  let dateFilter;
+  try {
+    dateFilter = buildDateFilter({
+      receivedAfter: args.receivedAfter,
+      receivedBefore: args.receivedBefore,
+    });
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Error listing emails: ${error.message}`,
+        },
+      ],
+    };
+  }
 
   try {
     // Get access token
@@ -22,20 +41,28 @@ async function handleListEmails(args) {
     // Resolve the folder path
     const endpoint = await resolveFolderPath(accessToken, folder);
 
-    // Add query parameters
+    // Add query parameters; count=0 sweeps all pages so $top only sets page size
     const queryParams = {
-      $top: Math.min(50, requestedCount), // Use 50 per page for efficiency
+      $top:
+        requestedCount === 0
+          ? config.DEFAULT_PAGE_SIZE
+          : Math.min(config.MAX_RESULT_COUNT, requestedCount),
       $orderby: 'receivedDateTime desc',
       $select: config.EMAIL_SELECT_FIELDS,
     };
 
-    // Make API call with pagination support
+    // Date predicates persist across nextLink pages via $filter
+    if (dateFilter) {
+      queryParams.$filter = dateFilter;
+    }
+
+    // Make API call with pagination support (maxCount 0 = full sweep)
     const response = await callGraphAPIPaginated(
       accessToken,
       'GET',
       endpoint,
       queryParams,
-      requestedCount
+      requestedCount === 0 ? 0 : requestedCount
     );
 
     if (!response.value || response.value.length === 0) {
