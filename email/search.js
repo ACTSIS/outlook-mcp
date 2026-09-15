@@ -7,6 +7,12 @@ const { ensureAuthenticated } = require('../auth');
 const { resolveFolderPath } = require('./folder-utils');
 const { buildDateFilter, combineFilterConditions } = require('./date-filter');
 
+// Graph API caps $search responses at 1,000 results regardless of paging.
+// Spec R3: client-side sweeps down a $search path must respect that cap so a
+// count=0 request never paginates past it. Non-$search strategies keep the
+// maxCount passthrough so count=0 still means a full sweep.
+const MAX_SEARCH_RESULT_COUNT = 1000;
+
 /**
  * Search emails handler
  * @param {object} args - Tool arguments
@@ -128,10 +134,20 @@ async function progressiveSearch(
     console.error('Attempting combined search with params:', params);
     searchAttempts.push('combined-search');
 
-    const response = await callGraphAPIPaginated(accessToken, 'GET', endpoint, params, maxCount);
+    // Strategy 1 emits $search only when search terms exist; without terms it
+    // is a $filter/$orderby request and keeps the count=0 sweep passthrough.
+    const effectiveMaxCount = params.$search ? searchPathMaxCount(maxCount) : maxCount;
+
+    const response = await callGraphAPIPaginated(
+      accessToken,
+      'GET',
+      endpoint,
+      params,
+      effectiveMaxCount
+    );
     if (response.value && response.value.length > 0) {
       console.error(`Combined search successful: found ${response.value.length} results`);
-      return response;
+      return withSearchCapInfo(response, response.value.length);
     }
   } catch (error) {
     console.error(`Combined search failed: ${error.message}`);
@@ -175,11 +191,11 @@ async function progressiveSearch(
           'GET',
           endpoint,
           simplifiedParams,
-          maxCount
+          searchPathMaxCount(maxCount)
         );
         if (response.value && response.value.length > 0) {
           console.error(`Search with ${term} successful: found ${response.value.length} results`);
-          return response;
+          return withSearchCapInfo(response, response.value.length);
         }
       } catch (error) {
         console.error(`Search with ${term} failed: ${error.message}`);
@@ -237,6 +253,32 @@ async function progressiveSearch(
     filterTerms: filterTerms,
   };
 
+  return response;
+}
+
+/**
+ * Clamp the pagination bound for a request that carries $search (spec R3):
+ * a count=0 sweep becomes the 1,000-result cap and any larger explicit count
+ * is clamped down to it. Requests without $search never call this, so
+ * count=0 keeps meaning a full sweep on $filter/$orderby paths.
+ * @param {number} maxCount - Requested maximum number of results
+ * @returns {number} - maxCount clamped to MAX_SEARCH_RESULT_COUNT
+ */
+function searchPathMaxCount(maxCount) {
+  return maxCount > 0 ? Math.min(maxCount, MAX_SEARCH_RESULT_COUNT) : MAX_SEARCH_RESULT_COUNT;
+}
+
+/**
+ * Flag a $search-path response when it hit the 1,000-result cap exactly, so
+ * callers can tell a truncated sweep from genuine exhaustion (spec R3).
+ * @param {object} response - Graph API response from a $search strategy
+ * @param {number} resultCount - Number of results returned
+ * @returns {object} - Same response with _searchInfo.capReached when capped
+ */
+function withSearchCapInfo(response, resultCount) {
+  if (resultCount >= MAX_SEARCH_RESULT_COUNT) {
+    response._searchInfo = { ...(response._searchInfo || {}), capReached: true };
+  }
   return response;
 }
 
@@ -425,7 +467,15 @@ function formatSearchResults(response) {
   // Add search strategy info if available
   let additionalInfo = '';
   if (response._searchInfo) {
-    additionalInfo = `\n(Search used ${response._searchInfo.strategies[response._searchInfo.strategies.length - 1]} strategy)`;
+    if (response._searchInfo.strategies) {
+      additionalInfo = `\n(Search used ${
+        response._searchInfo.strategies[response._searchInfo.strategies.length - 1]
+      } strategy)`;
+    }
+    if (response._searchInfo.capReached) {
+      additionalInfo +=
+        '\n(Results capped at 1,000: $search responses cannot return more than 1,000 results)';
+    }
     if (response._searchInfo.degradedKeywordSearch) {
       additionalInfo +=
         '\n(Keyword search was not applied: date filters cannot be combined with $search in Graph API)';

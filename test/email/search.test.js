@@ -277,6 +277,94 @@ describe('handleSearchEmails', () => {
     });
   });
 
+  describe('$search path caps at 1000 results', () => {
+    test('count=0 on a $search path passes maxCount=1000, not 0', async () => {
+      setupSuccess();
+
+      await handleSearchEmails({ query: 'report', count: 0 });
+
+      // Combined search is the first strategy attempted and carries $search.
+      const firstCall = callGraphAPIPaginated.mock.calls[0];
+      expect(firstCall[3].$search).toContain('report');
+      expect(firstCall[4]).toBe(1000);
+    });
+
+    test('count=0 on a single-term $search path also passes maxCount=1000', async () => {
+      setupSuccess();
+      // Force the combined strategy to find nothing so the single-term
+      // strategies run with their own pagination bound.
+      callGraphAPIPaginated.mockResolvedValueOnce({ value: [] });
+
+      await handleSearchEmails({ query: 'report', count: 0 });
+
+      const searchCalls = callGraphAPIPaginated.mock.calls.filter(
+        (call) => typeof call[3].$search === 'string'
+      );
+      expect(searchCalls.length).toBeGreaterThan(0);
+      for (const call of searchCalls) {
+        expect(call[4]).toBe(1000);
+      }
+    });
+
+    test('count=0 on the date-only filter path still passes maxCount=0 through', async () => {
+      setupSuccess();
+
+      await handleSearchEmails({
+        receivedAfter: '2024-01-01',
+        receivedBefore: '2024-06-30',
+        count: 0,
+      });
+
+      expect(callGraphAPIPaginated).toHaveBeenCalledTimes(1);
+      const onlyCall = callGraphAPIPaginated.mock.calls[0];
+      expect(onlyCall[3].$search).toBeUndefined();
+      expect(onlyCall[3].$filter).toBe(
+        'receivedDateTime ge 2024-01-01T00:00:00.000Z and receivedDateTime le 2024-06-30T23:59:59.999Z'
+      );
+      expect(onlyCall[4]).toBe(0);
+    });
+
+    test('count=0 with boolean filters only keeps maxCount=0 passthrough (no $search)', async () => {
+      setupSuccess();
+
+      await handleSearchEmails({ unreadOnly: true, count: 0 });
+
+      // Boolean-only requests ride strategy 1 but emit $filter/$orderby
+      // without $search, so the sweep stays unbounded (R3 no-$search clause).
+      const onlyCall = callGraphAPIPaginated.mock.calls[0];
+      expect(onlyCall[3].$filter).toBe('isRead eq false');
+      expect(onlyCall[3].$search).toBeUndefined();
+      expect(onlyCall[4]).toBe(0);
+    });
+
+    test('maxCount is clamped to 1000 when count exceeds it on a $search path', async () => {
+      setupSuccess();
+
+      await handleSearchEmails({ query: 'report', count: 5000 });
+
+      const firstCall = callGraphAPIPaginated.mock.calls[0];
+      expect(firstCall[3].$search).toContain('report');
+      expect(firstCall[4]).toBe(1000);
+    });
+
+    test('flags capReached when a $search path returns exactly 1000 results', async () => {
+      setupSuccess();
+      const cappedPage = Array.from({ length: 1000 }, (_, i) => ({
+        id: `email-${i}`,
+        subject: 'Report',
+        from: { emailAddress: { name: 'John Doe', address: 'john@example.com' } },
+        receivedDateTime: '2024-01-15T10:30:00Z',
+        isRead: false,
+      }));
+      callGraphAPIPaginated.mockResolvedValue({ value: cappedPage });
+
+      const result = await handleSearchEmails({ query: 'report', count: 0 });
+
+      expect(callGraphAPIPaginated.mock.calls[0][4]).toBe(1000);
+      expect(result.content[0].text).toContain('Found 1000 emails');
+    });
+  });
+
   describe('error handling', () => {
     test('should handle authentication error', async () => {
       ensureAuthenticated.mockRejectedValue(new Error('Authentication required'));
