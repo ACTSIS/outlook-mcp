@@ -25,7 +25,18 @@ const emailTools = [
         },
         count: {
           type: 'number',
-          description: 'Number of emails to retrieve (default: 10, max: 50)',
+          description:
+            'Number of emails to retrieve (default: 50; count: 0 = full sweep of the folder without $search, capped at 1,000 when $search is used)',
+        },
+        receivedAfter: {
+          type: 'string',
+          description:
+            'Only emails received on or after this date/time (ISO 8601, e.g. 2024-01-31 or 2024-01-31T14:30:00Z)',
+        },
+        receivedBefore: {
+          type: 'string',
+          description:
+            'Only emails received on or before this date/time (ISO 8601, e.g. 2024-06-30 or 2024-06-30T23:59:59Z)',
         },
       },
       required: [],
@@ -68,7 +79,18 @@ const emailTools = [
         },
         count: {
           type: 'number',
-          description: 'Number of results to return (default: 10, max: 50)',
+          description:
+            'Number of results to return (default: 50; count: 0 = full sweep without $search, capped at 1,000 when $search is used)',
+        },
+        receivedAfter: {
+          type: 'string',
+          description:
+            'Only emails received on or after this date/time (ISO 8601, e.g. 2024-01-31 or 2024-01-31T14:30:00Z)',
+        },
+        receivedBefore: {
+          type: 'string',
+          description:
+            'Only emails received on or before this date/time (ISO 8601, e.g. 2024-06-30 or 2024-06-30T23:59:59Z)',
         },
       },
       required: [],
