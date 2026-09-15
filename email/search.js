@@ -5,6 +5,7 @@ const config = require('../config');
 const { callGraphAPIPaginated } = require('../utils/graph-api');
 const { ensureAuthenticated } = require('../auth');
 const { resolveFolderPath } = require('./folder-utils');
+const { buildDateFilter, combineFilterConditions } = require('./date-filter');
 
 /**
  * Search emails handler
@@ -13,13 +14,31 @@ const { resolveFolderPath } = require('./folder-utils');
  */
 async function handleSearchEmails(args) {
   const folder = args.folder || 'inbox';
-  const requestedCount = args.count || 10;
+  const requestedCount = args.count === undefined ? config.MAX_RESULT_COUNT : args.count;
   const query = args.query || '';
   const from = args.from || '';
   const to = args.to || '';
   const subject = args.subject || '';
   const hasAttachments = args.hasAttachments;
   const unreadOnly = args.unreadOnly;
+
+  // Validate dates client-side (fail-fast) before any Graph call
+  let dateFilter;
+  try {
+    dateFilter = buildDateFilter({
+      receivedAfter: args.receivedAfter,
+      receivedBefore: args.receivedBefore,
+    });
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Error searching emails: ${error.message}`,
+        },
+      ],
+    };
+  }
 
   try {
     // Get access token
@@ -35,7 +54,8 @@ async function handleSearchEmails(args) {
       accessToken,
       { query, from, to, subject },
       { hasAttachments, unreadOnly },
-      requestedCount
+      requestedCount,
+      dateFilter
     );
 
     return formatSearchResults(response);
@@ -66,14 +86,39 @@ async function handleSearchEmails(args) {
 
 /**
  * Execute a search with progressively simpler fallback strategies
+ *
+ * When dateFilter is present, all $search strategies (1 and 2) are skipped
+ * structurally: Graph API does not support combining $filter with $search, so
+ * the gate below prevents any $search path from ever carrying a date filter.
  * @param {string} endpoint - API endpoint
  * @param {string} accessToken - Access token
  * @param {object} searchTerms - Search terms (query, from, to, subject)
  * @param {object} filterTerms - Filter terms (hasAttachments, unreadOnly)
  * @param {number} maxCount - Maximum number of results to retrieve
+ * @param {string|null} dateFilter - Compiled date predicate (or null)
  * @returns {Promise<object>} - Search results
  */
-async function progressiveSearch(endpoint, accessToken, searchTerms, filterTerms, maxCount) {
+async function progressiveSearch(
+  endpoint,
+  accessToken,
+  searchTerms,
+  filterTerms,
+  maxCount,
+  dateFilter
+) {
+  // Hard gate: date filters must NEVER ride a $search request. Skip the
+  // $search strategies entirely and run the $filter-only path instead.
+  if (dateFilter) {
+    return searchWithFiltersOnly(
+      endpoint,
+      accessToken,
+      searchTerms,
+      filterTerms,
+      maxCount,
+      dateFilter
+    );
+  }
+
   // Track search strategies attempted
   const searchAttempts = [];
 
@@ -191,6 +236,73 @@ async function progressiveSearch(endpoint, accessToken, searchTerms, filterTerms
     originalTerms: searchTerms,
     filterTerms: filterTerms,
   };
+
+  return response;
+}
+
+/**
+ * Filter-only search path used whenever a date filter is present.
+ *
+ * Builds params without $search (Graph API does not support $filter + $search).
+ * With search terms, keyword search degrades: $orderby is omitted (no
+ * $search-style relevance sort is possible) and the response is flagged with
+ * _searchInfo.degradedKeywordSearch so the user knows keyword search did not
+ * run. Without search terms, results keep the newest-first $orderby.
+ * @param {string} endpoint - API endpoint
+ * @param {string} accessToken - Access token
+ * @param {object} searchTerms - Search terms (query, from, to, subject)
+ * @param {object} filterTerms - Filter terms (hasAttachments, unreadOnly)
+ * @param {number} maxCount - Maximum number of results to retrieve
+ * @param {string} dateFilter - Compiled date predicate
+ * @returns {Promise<object>} - Search results
+ */
+async function searchWithFiltersOnly(
+  endpoint,
+  accessToken,
+  searchTerms,
+  filterTerms,
+  maxCount,
+  dateFilter
+) {
+  const hasSearchTerms = Boolean(
+    searchTerms.query || searchTerms.from || searchTerms.to || searchTerms.subject
+  );
+
+  const params = {
+    $top: Math.min(config.MAX_RESULT_COUNT, maxCount),
+    $select: config.EMAIL_SELECT_FIELDS,
+  };
+
+  if (!hasSearchTerms) {
+    // No search terms — keep the deterministic newest-first order
+    params.$orderby = 'receivedDateTime desc';
+  }
+
+  // Date predicates go FIRST (Graph InefficientFilter rules)
+  const booleanConditions = [];
+  if (filterTerms.hasAttachments === true) {
+    booleanConditions.push('hasAttachments eq true');
+  }
+  if (filterTerms.unreadOnly === true) {
+    booleanConditions.push('isRead eq false');
+  }
+
+  const combinedFilter = combineFilterConditions(dateFilter, booleanConditions);
+  if (combinedFilter) {
+    params.$filter = combinedFilter;
+  }
+
+  const response = await callGraphAPIPaginated(accessToken, 'GET', endpoint, params, maxCount);
+  console.error(`Filter-only search found ${response.value?.length || 0} results`);
+
+  response._searchInfo = {
+    strategies: hasSearchTerms ? ['date-filter-only-degraded'] : ['date-filter-only'],
+    originalTerms: searchTerms,
+    filterTerms: filterTerms,
+  };
+  if (hasSearchTerms) {
+    response._searchInfo.degradedKeywordSearch = true;
+  }
 
   return response;
 }
@@ -314,6 +426,10 @@ function formatSearchResults(response) {
   let additionalInfo = '';
   if (response._searchInfo) {
     additionalInfo = `\n(Search used ${response._searchInfo.strategies[response._searchInfo.strategies.length - 1]} strategy)`;
+    if (response._searchInfo.degradedKeywordSearch) {
+      additionalInfo +=
+        '\n(Keyword search was not applied: date filters cannot be combined with $search in Graph API)';
+    }
   }
 
   return {
