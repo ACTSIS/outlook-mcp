@@ -254,12 +254,55 @@ describe('handleListEmails', () => {
         'GET',
         WELL_KNOWN_FOLDERS['inbox'],
         expect.objectContaining({
-          $top: config.DEFAULT_PAGE_SIZE,
+          $top: config.FOLDER_SWEEP_PAGE_SIZE,
           $filter:
             'receivedDateTime ge 2024-01-01T00:00:00.000Z and receivedDateTime le 2024-06-30T23:59:59.999Z',
         }),
         0
       );
+    });
+
+    test('should use page size 50 for count=0 sweeps', () => {
+      expect(config.FOLDER_SWEEP_PAGE_SIZE).toBe(50);
+      expect(config.GRAPH_REQUEST_TIMEOUT_MS).toBe(30000);
+    });
+
+    test('nextLink input requests the URL directly and skips filter building', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      const { callGraphAPI } = require('../../utils/graph-api');
+      const nextLink = 'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=abc';
+      callGraphAPI.mockResolvedValue({ value: mockEmails });
+
+      const result = await handleListEmails({
+        nextLink,
+        receivedAfter: 'not-a-date',
+      });
+
+      expect(callGraphAPI).toHaveBeenCalledWith(mockAccessToken, 'GET', nextLink, null, {});
+      expect(callGraphAPIPaginated).not.toHaveBeenCalled();
+      expect(resolveFolderPath).not.toHaveBeenCalled();
+      expect(result.content[0].text).toContain('Found 2 emails in inbox');
+    });
+
+    test('appends the nextLink line when the response reports more pages', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      resolveFolderPath.mockResolvedValue(WELL_KNOWN_FOLDERS['inbox']);
+      const nextLink = 'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=def';
+      callGraphAPIPaginated.mockResolvedValue({ value: mockEmails, nextLink });
+
+      const result = await handleListEmails({ count: 2 });
+
+      expect(result.content[0].text).toContain(`(nextLink: ${nextLink})`);
+    });
+
+    test('omits the nextLink line when the sweep completes', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      resolveFolderPath.mockResolvedValue(WELL_KNOWN_FOLDERS['inbox']);
+      callGraphAPIPaginated.mockResolvedValue({ value: mockEmails });
+
+      const result = await handleListEmails({});
+
+      expect(result.content[0].text).not.toContain('(nextLink:');
     });
 
     test('should default limit to config.MAX_RESULT_COUNT when count is absent', async () => {

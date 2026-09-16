@@ -104,60 +104,133 @@ describe('handleSearchEmails', () => {
     });
   });
 
-  describe('terms plus dates degrade to filter-only', () => {
-    test('uses $filter only without $search or $orderby', async () => {
+  describe('keyword terms plus dates fail loudly instead of degrading', () => {
+    test('query plus dates returns the loud degradation error', async () => {
       setupSuccess();
 
-      await handleSearchEmails({ query: 'report', receivedAfter: '2024-01-01' });
+      const result = await handleSearchEmails({ query: 'report', receivedAfter: '2024-01-01' });
 
-      expect(callGraphAPIPaginated).toHaveBeenCalledTimes(1);
-      const params = callGraphAPIPaginated.mock.calls[0][3];
-      expect(params.$filter).toBe('receivedDateTime ge 2024-01-01T00:00:00.000Z');
-      expect(params.$search).toBeUndefined();
-      expect(params.$orderby).toBeUndefined();
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('filter_dropped_due_to_strategy_degradation');
+      expect(result.content[0].text).toContain('query');
+      expect(callGraphAPIPaginated).not.toHaveBeenCalled();
     });
 
-    test('appends degradation note to the response text', async () => {
+    test('subject plus dates returns the loud degradation error', async () => {
       setupSuccess();
 
       const result = await handleSearchEmails({
-        query: 'report',
-        receivedAfter: '2024-01-01',
-      });
-
-      expect(result.content[0].text).toContain(
-        '(Keyword search was not applied: date filters cannot be combined with $search in Graph API)'
-      );
-    });
-
-    test('field-based terms also degrade without $orderby', async () => {
-      setupSuccess();
-
-      await handleSearchEmails({
-        from: 'jane@example.com',
         subject: 'lunch',
         receivedBefore: '2024-06-30',
       });
 
-      const params = callGraphAPIPaginated.mock.calls[0][3];
-      expect(params.$filter).toBe('receivedDateTime le 2024-06-30T23:59:59.999Z');
-      expect(params.$search).toBeUndefined();
-      expect(params.$orderby).toBeUndefined();
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('filter_dropped_due_to_strategy_degradation');
+      expect(result.content[0].text).toContain('subject');
+      expect(callGraphAPIPaginated).not.toHaveBeenCalled();
     });
 
-    test('degraded response combines dates with booleans, dates first', async () => {
+    test('to plus query plus dates fails loudly (query would still be dropped)', async () => {
+      setupSuccess();
+
+      const result = await handleSearchEmails({
+        to: 'bob@example.com',
+        query: 'report',
+        receivedAfter: '2024-01-01',
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('filter_dropped_due_to_strategy_degradation');
+      expect(callGraphAPIPaginated).not.toHaveBeenCalled();
+    });
+
+    test('query and subject both present are listed in the error', async () => {
+      setupSuccess();
+
+      const result = await handleSearchEmails({
+        query: 'report',
+        subject: 'lunch',
+        receivedAfter: '2024-01-01',
+      });
+
+      expect(result.content[0].text).toContain('(query, subject)');
+    });
+  });
+
+  describe('recipient terms plus dates translate to $filter', () => {
+    test('to plus dates uses toRecipients/any predicate with dates and $orderby', async () => {
+      setupSuccess();
+
+      const result = await handleSearchEmails({
+        to: 'bob@example.com',
+        receivedAfter: '2024-01-01',
+      });
+
+      expect(callGraphAPIPaginated).toHaveBeenCalledTimes(1);
+      const params = callGraphAPIPaginated.mock.calls[0][3];
+      expect(params.$filter).toBe(
+        "receivedDateTime ge 2024-01-01T00:00:00.000Z and toRecipients/any(r: r/emailAddress/address eq 'bob@example.com')"
+      );
+      expect(params.$orderby).toBe('receivedDateTime desc');
+      expect(params.$search).toBeUndefined();
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).not.toContain('Keyword search was not applied');
+      expect(result.content[0].text).toContain('filter-with-recipient');
+    });
+
+    test('from plus dates uses from/emailAddress/address predicate', async () => {
+      setupSuccess();
+
+      const result = await handleSearchEmails({
+        from: 'jane@example.com',
+        receivedBefore: '2024-06-30',
+      });
+
+      const params = callGraphAPIPaginated.mock.calls[0][3];
+      expect(params.$filter).toBe(
+        "receivedDateTime le 2024-06-30T23:59:59.999Z and from/emailAddress/address eq 'jane@example.com'"
+      );
+      expect(params.$orderby).toBe('receivedDateTime desc');
+      expect(params.$search).toBeUndefined();
+      expect(result.content[0].text).toContain('filter-with-recipient');
+    });
+
+    test('escapes apostrophes by doubling them in recipient predicates', async () => {
       setupSuccess();
 
       await handleSearchEmails({
-        query: 'report',
+        to: "o'brien@x.com",
+        receivedAfter: '2024-01-01',
+      });
+
+      const params = callGraphAPIPaginated.mock.calls[0][3];
+      expect(params.$filter).toContain(
+        "toRecipients/any(r: r/emailAddress/address eq 'o''brien@x.com')"
+      );
+    });
+
+    test('recipient predicates come after date and boolean predicates', async () => {
+      setupSuccess();
+
+      await handleSearchEmails({
+        from: 'jane@example.com',
         receivedAfter: '2024-01-01',
         unreadOnly: true,
       });
 
       const params = callGraphAPIPaginated.mock.calls[0][3];
       expect(params.$filter).toBe(
-        'receivedDateTime ge 2024-01-01T00:00:00.000Z and isRead eq false'
+        "receivedDateTime ge 2024-01-01T00:00:00.000Z and isRead eq false and from/emailAddress/address eq 'jane@example.com'"
       );
+    });
+
+    test('date-only path still reports the plain date-filter-only strategy', async () => {
+      setupSuccess();
+
+      const result = await handleSearchEmails({ receivedAfter: '2024-01-01' });
+
+      expect(result.content[0].text).toContain('(Search used date-filter-only strategy)');
+      expect(result.content[0].text).not.toContain('Keyword search was not applied');
     });
   });
 
@@ -207,12 +280,13 @@ describe('handleSearchEmails', () => {
       setupSuccess();
 
       // With dates present the gate must skip strategies 1-2 entirely, so the
-      // handler may only emit a single request per run.
+      // handler may only emit a single request per run. Keyword-only terms
+      // (query/subject) fail loudly instead, with zero Graph calls.
       for (const dates of [
         { receivedAfter: '2024-01-01' },
         { receivedBefore: '2024-06-30' },
         { receivedAfter: '2024-01-01', receivedBefore: '2024-06-30' },
-        { query: 'any', receivedAfter: '2024-01-01' },
+        { to: 'any@example.com', receivedAfter: '2024-01-01' },
       ]) {
         callGraphAPIPaginated.mockClear();
         setupSuccess();
@@ -220,6 +294,14 @@ describe('handleSearchEmails', () => {
         expect(callGraphAPIPaginated).toHaveBeenCalledTimes(1);
         expect(callGraphAPIPaginated.mock.calls[0][3].$search).toBeUndefined();
       }
+    });
+
+    test('keyword terms with dates emit zero Graph requests', async () => {
+      setupSuccess();
+
+      await handleSearchEmails({ query: 'any', receivedAfter: '2024-01-01' });
+
+      expect(callGraphAPIPaginated).not.toHaveBeenCalled();
     });
   });
 
@@ -362,6 +444,39 @@ describe('handleSearchEmails', () => {
 
       expect(callGraphAPIPaginated.mock.calls[0][4]).toBe(1000);
       expect(result.content[0].text).toContain('Found 1000 emails');
+    });
+  });
+
+  describe('nextLink passthrough', () => {
+    // graph-api is mocked wholesale, so both callGraphAPI and
+    // callGraphAPIPaginated come from the same mock registry.
+    const { callGraphAPI } = require('../../utils/graph-api');
+
+    test('requests the nextLink URL directly, skipping filter building', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      const nextLink = 'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=abc';
+      callGraphAPI.mockResolvedValue({ value: mockEmails });
+
+      const result = await handleSearchEmails({
+        nextLink,
+        query: 'ignored',
+        receivedAfter: '2024-01-01',
+      });
+
+      expect(callGraphAPI).toHaveBeenCalledWith(mockAccessToken, 'GET', nextLink, null, {});
+      expect(callGraphAPIPaginated).not.toHaveBeenCalled();
+      expect(resolveFolderPath).not.toHaveBeenCalled();
+      expect(result.content[0].text).toContain('Found 2 emails matching your search criteria');
+    });
+
+    test('appends the nextLink line when the page reports more data', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      const nextLink = 'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=def';
+      callGraphAPI.mockResolvedValue({ value: mockEmails, nextLink });
+
+      const result = await handleSearchEmails({ nextLink });
+
+      expect(result.content[0].text).toContain(`(nextLink: ${nextLink})`);
     });
   });
 

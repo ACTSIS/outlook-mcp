@@ -2,7 +2,7 @@
  * Improved search emails functionality
  */
 const config = require('../config');
-const { callGraphAPIPaginated } = require('../utils/graph-api');
+const { callGraphAPI, callGraphAPIPaginated } = require('../utils/graph-api');
 const { ensureAuthenticated } = require('../auth');
 const { resolveFolderPath } = require('./folder-utils');
 const { buildDateFilter, combineFilterConditions } = require('./date-filter');
@@ -28,27 +28,37 @@ async function handleSearchEmails(args) {
   const hasAttachments = args.hasAttachments;
   const unreadOnly = args.unreadOnly;
 
-  // Validate dates client-side (fail-fast) before any Graph call
-  let dateFilter;
-  try {
-    dateFilter = buildDateFilter({
-      receivedAfter: args.receivedAfter,
-      receivedBefore: args.receivedBefore,
-    });
-  } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Error searching emails: ${error.message}`,
-        },
-      ],
-    };
+  // Validate dates client-side (fail-fast) before any Graph call. Skipped on
+  // the nextLink passthrough path: the link already encodes the full query.
+  let dateFilter = null;
+  if (!args.nextLink) {
+    try {
+      dateFilter = buildDateFilter({
+        receivedAfter: args.receivedAfter,
+        receivedBefore: args.receivedBefore,
+      });
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error searching emails: ${error.message}`,
+          },
+        ],
+      };
+    }
   }
 
   try {
     // Get access token
     const accessToken = await ensureAuthenticated();
+
+    // nextLink passthrough: the URL already encodes the full query, so other
+    // filter arguments are ignored. Fetch the page directly and format it.
+    if (args.nextLink) {
+      const pageResponse = await callGraphAPI(accessToken, 'GET', args.nextLink, null, {});
+      return formatSearchResults(pageResponse);
+    }
 
     // Resolve the folder path
     const endpoint = await resolveFolderPath(accessToken, folder);
@@ -63,6 +73,12 @@ async function handleSearchEmails(args) {
       requestedCount,
       dateFilter
     );
+
+    // Loud-failure results (keyword terms that cannot ride a date-filtered
+    // request) pass through unchanged so they keep their isError flag.
+    if (response.isError) {
+      return response;
+    }
 
     return formatSearchResults(response);
   } catch (error) {
@@ -286,10 +302,11 @@ function withSearchCapInfo(response, resultCount) {
  * Filter-only search path used whenever a date filter is present.
  *
  * Builds params without $search (Graph API does not support $filter + $search).
- * With search terms, keyword search degrades: $orderby is omitted (no
- * $search-style relevance sort is possible) and the response is flagged with
- * _searchInfo.degradedKeywordSearch so the user knows keyword search did not
- * run. Without search terms, results keep the newest-first $orderby.
+ * `to` and `from` translate into OData recipient predicates
+ * (toRecipients/any, from/emailAddress/address) so they are honored on this
+ * path. `query` and `subject` have NO OData translation: instead of silently
+ * dropping them, the path fails loudly with a
+ * filter_dropped_due_to_strategy_degradation error result.
  * @param {string} endpoint - API endpoint
  * @param {string} accessToken - Access token
  * @param {object} searchTerms - Search terms (query, from, to, subject)
@@ -306,21 +323,30 @@ async function searchWithFiltersOnly(
   maxCount,
   dateFilter
 ) {
-  const hasSearchTerms = Boolean(
-    searchTerms.query || searchTerms.from || searchTerms.to || searchTerms.subject
-  );
+  // query/subject cannot ride $filter (only $search, which conflicts with
+  // dates). Fail loudly rather than returning silently wrong results.
+  const droppedTerms = [];
+  if (searchTerms.query) {
+    droppedTerms.push('query');
+  }
+  if (searchTerms.subject) {
+    droppedTerms.push('subject');
+  }
+  if (droppedTerms.length > 0) {
+    return buildDegradationError(droppedTerms);
+  }
+
+  const recipientConditions = buildRecipientFilterConditions(searchTerms);
 
   const params = {
     $top: Math.min(config.MAX_RESULT_COUNT, maxCount),
     $select: config.EMAIL_SELECT_FIELDS,
+    $orderby: 'receivedDateTime desc',
   };
 
-  if (!hasSearchTerms) {
-    // No search terms — keep the deterministic newest-first order
-    params.$orderby = 'receivedDateTime desc';
-  }
-
-  // Date predicates go FIRST (Graph InefficientFilter rules)
+  // Date predicates go FIRST (Graph InefficientFilter rules), then boolean
+  // filters, then recipient predicates (distinct properties from the $filter
+  // and $orderby targets, so $orderby stays safe).
   const booleanConditions = [];
   if (filterTerms.hasAttachments === true) {
     booleanConditions.push('hasAttachments eq true');
@@ -329,7 +355,10 @@ async function searchWithFiltersOnly(
     booleanConditions.push('isRead eq false');
   }
 
-  const combinedFilter = combineFilterConditions(dateFilter, booleanConditions);
+  const combinedFilter = combineFilterConditions(dateFilter, [
+    ...booleanConditions,
+    ...recipientConditions,
+  ]);
   if (combinedFilter) {
     params.$filter = combinedFilter;
   }
@@ -338,15 +367,57 @@ async function searchWithFiltersOnly(
   console.error(`Filter-only search found ${response.value?.length || 0} results`);
 
   response._searchInfo = {
-    strategies: hasSearchTerms ? ['date-filter-only-degraded'] : ['date-filter-only'],
+    strategies: recipientConditions.length > 0 ? ['filter-with-recipient'] : ['date-filter-only'],
     originalTerms: searchTerms,
     filterTerms: filterTerms,
   };
-  if (hasSearchTerms) {
-    response._searchInfo.degradedKeywordSearch = true;
-  }
 
   return response;
+}
+
+/**
+ * Translates `to`/`from` search terms into OData recipient predicates for the
+ * $filter-only path. Apostrophes are escaped by doubling them (OData string
+ * literal convention used across this repo).
+ * @param {object} searchTerms - Search terms (query, from, to, subject)
+ * @returns {string[]} - OData predicate strings (empty when neither is set)
+ */
+function buildRecipientFilterConditions(searchTerms) {
+  const conditions = [];
+
+  if (searchTerms.from) {
+    const escaped = searchTerms.from.replace(/'/g, "''");
+    conditions.push(`from/emailAddress/address eq '${escaped}'`);
+  }
+
+  if (searchTerms.to) {
+    const escaped = searchTerms.to.replace(/'/g, "''");
+    conditions.push(`toRecipients/any(r: r/emailAddress/address eq '${escaped}')`);
+  }
+
+  return conditions;
+}
+
+/**
+ * Builds the loud-failure result for keyword terms (query/subject) that would
+ * be silently dropped by the filter-only strategy.
+ * @param {string[]} droppedTerms - Names of the dropped keyword parameters
+ * @returns {object} - MCP error result
+ */
+function buildDegradationError(droppedTerms) {
+  return {
+    isError: true,
+    content: [
+      {
+        type: 'text',
+        text:
+          `Error: filter_dropped_due_to_strategy_degradation — the requested keyword filter ` +
+          `(${droppedTerms.join(', ')}) cannot be combined with receivedAfter/receivedBefore ` +
+          `because Graph API does not allow $search and $filter together. Re-run without the ` +
+          `date range, or filter by 'to'/'from' which now support date-ranged $filter.`,
+      },
+    ],
+  };
 }
 
 /**
@@ -476,10 +547,11 @@ function formatSearchResults(response) {
       additionalInfo +=
         '\n(Results capped at 1,000: $search responses cannot return more than 1,000 results)';
     }
-    if (response._searchInfo.degradedKeywordSearch) {
-      additionalInfo +=
-        '\n(Keyword search was not applied: date filters cannot be combined with $search in Graph API)';
-    }
+  }
+
+  // Surface the pagination cursor when the source has more pages
+  if (response.nextLink) {
+    additionalInfo += `\n(nextLink: ${response.nextLink})`;
   }
 
   return {

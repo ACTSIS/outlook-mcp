@@ -28,6 +28,8 @@ function mockRequests(...outcomes) {
       const request = new EventEmitter();
       request.write = jest.fn();
       request.end = jest.fn();
+      request.destroy = jest.fn();
+      request.setTimeout = jest.fn();
 
       process.nextTick(() => {
         if (outcome instanceof Error) {
@@ -189,6 +191,35 @@ describe('Graph API helpers', () => {
         'Network error during API call: socket closed'
       );
     });
+
+    test('registers a request timeout from config and surfaces it as an error', async () => {
+      // Capture the request object so the test can fire the timeout callback.
+      let capturedRequest;
+      https.request.mockImplementationOnce((_url, _options, _callback) => {
+        const request = new EventEmitter();
+        request.write = jest.fn();
+        request.end = jest.fn();
+        request.destroy = jest.fn((error) => request.emit('error', error));
+        request.setTimeout = jest.fn((ms, handler) => {
+          capturedRequest = request;
+          request._timeoutMs = ms;
+          request._timeoutHandler = handler;
+        });
+        request.end.mockImplementation(() => request._timeoutHandler());
+        return request;
+      });
+
+      config.GRAPH_REQUEST_TIMEOUT_MS = 1234;
+      await expect(callGraphAPI('token', 'GET', 'me')).rejects.toThrow(
+        'Network error during API call: Graph request timed out after 1234 ms'
+      );
+      config.GRAPH_REQUEST_TIMEOUT_MS = 30000;
+
+      expect(capturedRequest._timeoutMs).toBe(1234);
+      expect(capturedRequest.destroy).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'Graph request timed out after 1234 ms' })
+      );
+    });
   });
 
   describe('callGraphAPIPaginated', () => {
@@ -216,6 +247,39 @@ describe('Graph API helpers', () => {
         '@odata.count': 2,
       });
       expect(https.request).toHaveBeenCalledTimes(1);
+    });
+
+    test('exposes nextLink when stopping at maxCount with more pages available', async () => {
+      const nextLink = 'https://graph.example/v1.0/me/messages?$skiptoken=next';
+      mockRequests(
+        response(
+          200,
+          JSON.stringify({ value: [{ id: 1 }, { id: 2 }], '@odata.nextLink': nextLink })
+        )
+      );
+
+      await expect(callGraphAPIPaginated('token', 'GET', 'me/messages', {}, 2)).resolves.toEqual({
+        value: [{ id: 1 }, { id: 2 }],
+        '@odata.count': 2,
+        nextLink,
+      });
+    });
+
+    test('omits nextLink when stopping at maxCount with no further pages', async () => {
+      mockRequests(response(200, JSON.stringify({ value: [{ id: 1 }] })));
+
+      const result = await callGraphAPIPaginated('token', 'GET', 'me/messages', {}, 2);
+
+      expect(result.nextLink).toBeUndefined();
+    });
+
+    test('omits nextLink when a full sweep completes the source', async () => {
+      mockRequests(response(200, JSON.stringify({ value: [{ id: 1 }, { id: 2 }] })));
+
+      const result = await callGraphAPIPaginated('token', 'GET', 'me/messages', { $top: 1 }, 0);
+
+      expect(result).toEqual({ value: [{ id: 1 }, { id: 2 }], '@odata.count': 2 });
+      expect(result.nextLink).toBeUndefined();
     });
 
     test('rejects methods other than GET before making a request', async () => {

@@ -117,6 +117,14 @@ async function callGraphAPI(accessToken, method, path, data = null, queryParams 
         reject(new Error(`Network error during API call: ${error.message}`));
       });
 
+      // Hard timeout so a hung connection surfaces as a rejected response
+      // instead of blocking until the MCP client times out.
+      req.setTimeout(config.GRAPH_REQUEST_TIMEOUT_MS, () => {
+        req.destroy(
+          new Error(`Graph request timed out after ${config.GRAPH_REQUEST_TIMEOUT_MS} ms`)
+        );
+      });
+
       if (data && (method === 'POST' || method === 'PATCH' || method === 'PUT')) {
         req.write(JSON.stringify(data));
       }
@@ -161,14 +169,16 @@ async function callGraphAPIPaginated(accessToken, method, path, queryParams = {}
         );
       }
 
+      // Get next page URL
+      nextLink = response['@odata.nextLink'];
+
       // Check if we've reached the desired count
       if (maxCount > 0 && allItems.length >= maxCount) {
         console.error(`Pagination: Reached max count of ${maxCount}, stopping`);
+        // Expose the cursor so callers can resume this sweep later (when the
+        // source actually has more pages); absent when the sweep is complete.
         break;
       }
-
-      // Get next page URL
-      nextLink = response['@odata.nextLink'];
 
       if (nextLink) {
         // Pass the full nextLink URL directly to callGraphAPI
@@ -183,10 +193,17 @@ async function callGraphAPIPaginated(accessToken, method, path, queryParams = {}
 
     console.error(`Pagination complete: Retrieved ${finalItems.length} total items`);
 
-    return {
+    // When we stopped early (maxCount reached) but the source has more pages,
+    // surface the nextLink cursor. A completed sweep leaves it undefined.
+    const result = {
       value: finalItems,
       '@odata.count': finalItems.length,
     };
+    if (maxCount > 0 && allItems.length >= maxCount && nextLink) {
+      result.nextLink = nextLink;
+    }
+
+    return result;
   } catch (error) {
     console.error('Error during pagination:', error);
     throw error;
