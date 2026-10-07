@@ -336,7 +336,13 @@ async function searchWithFiltersOnly(
     return buildDegradationError(droppedTerms);
   }
 
-  const recipientConditions = buildRecipientFilterConditions(searchTerms);
+  // Graph does NOT support server-side filtering on toRecipients (lambda
+  // any(...) on message recipients is rejected with ErrorInvalidUrlQueryFilter
+  // even with ConsistencyLevel: eventual + $count=true). from/emailAddress
+  // stays server-side; `to` becomes a client-side post-filter over the
+  // date-filtered result set.
+  const serverConditions = buildRecipientFilterConditions(searchTerms, { clientSideTo: true });
+  const clientSideTo = searchTerms.to || '';
 
   const params = {
     $top: Math.min(config.MAX_RESULT_COUNT, maxCount),
@@ -357,17 +363,37 @@ async function searchWithFiltersOnly(
 
   const combinedFilter = combineFilterConditions(dateFilter, [
     ...booleanConditions,
-    ...recipientConditions,
+    ...serverConditions,
   ]);
   if (combinedFilter) {
     params.$filter = combinedFilter;
   }
 
   const response = await callGraphAPIPaginated(accessToken, 'GET', endpoint, params, maxCount);
+
+  // Client-side recipient filtering for `to`: keep only messages whose
+  // toRecipients contains the requested address (exact match).
+  if (clientSideTo && Array.isArray(response.value)) {
+    const wanted = clientSideTo.toLowerCase();
+    const before = response.value.length;
+    response.value = response.value.filter((email) =>
+      (email.toRecipients || []).some(
+        (r) => r.emailAddress && r.emailAddress.address.toLowerCase() === wanted
+      )
+    );
+    console.error(
+      `Client-side to-filter: ${response.value.length}/${before} messages matched to=${clientSideTo}`
+    );
+  }
+
   console.error(`Filter-only search found ${response.value?.length || 0} results`);
 
   response._searchInfo = {
-    strategies: recipientConditions.length > 0 ? ['filter-with-recipient'] : ['date-filter-only'],
+    strategies: clientSideTo
+      ? ['filter-with-recipient-client-side']
+      : serverConditions.length > 0
+        ? ['filter-with-recipient']
+        : ['date-filter-only'],
     originalTerms: searchTerms,
     filterTerms: filterTerms,
   };
@@ -377,12 +403,16 @@ async function searchWithFiltersOnly(
 
 /**
  * Translates `to`/`from` search terms into OData recipient predicates for the
- * $filter-only path. Apostrophes are escaped by doubling them (OData string
- * literal convention used across this repo).
+ * $filter-only path. Graph rejects server-side filters on toRecipients, so
+ * with `clientSideTo` (default true) only `from` is translated; otherwise both
+ * are emitted for callers that send them anyway. Apostrophes are escaped by
+ * doubling them (OData string literal convention used across this repo).
  * @param {object} searchTerms - Search terms (query, from, to, subject)
+ * @param {object} [options] - { clientSideTo: boolean } (default true)
  * @returns {string[]} - OData predicate strings (empty when neither is set)
  */
-function buildRecipientFilterConditions(searchTerms) {
+function buildRecipientFilterConditions(searchTerms, options = {}) {
+  const { clientSideTo = true } = options;
   const conditions = [];
 
   if (searchTerms.from) {
@@ -390,7 +420,7 @@ function buildRecipientFilterConditions(searchTerms) {
     conditions.push(`from/emailAddress/address eq '${escaped}'`);
   }
 
-  if (searchTerms.to) {
+  if (searchTerms.to && !clientSideTo) {
     const escaped = searchTerms.to.replace(/'/g, "''");
     conditions.push(`toRecipients/any(r: r/emailAddress/address eq '${escaped}')`);
   }

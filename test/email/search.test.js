@@ -158,8 +158,22 @@ describe('handleSearchEmails', () => {
   });
 
   describe('recipient terms plus dates translate to $filter', () => {
-    test('to plus dates uses toRecipients/any predicate with dates and $orderby', async () => {
+    test('to plus dates keeps to server-side-free: dates only in $filter, to matched client-side', async () => {
       setupSuccess();
+      callGraphAPIPaginated.mockResolvedValue({
+        value: [
+          {
+            id: 'm1',
+            subject: 'Matched',
+            toRecipients: [{ emailAddress: { address: 'bob@example.com' } }],
+          },
+          {
+            id: 'm2',
+            subject: 'Not matched',
+            toRecipients: [{ emailAddress: { address: 'carol@example.com' } }],
+          },
+        ],
+      });
 
       const result = await handleSearchEmails({
         to: 'bob@example.com',
@@ -168,14 +182,16 @@ describe('handleSearchEmails', () => {
 
       expect(callGraphAPIPaginated).toHaveBeenCalledTimes(1);
       const params = callGraphAPIPaginated.mock.calls[0][3];
-      expect(params.$filter).toBe(
-        "receivedDateTime ge 2024-01-01T00:00:00.000Z and toRecipients/any(r: r/emailAddress/address eq 'bob@example.com')"
-      );
+      // Graph rejects toRecipients/any(...) server-side filters, so `to` must
+      // NOT appear in $filter; it is applied as a client-side post-filter.
+      expect(params.$filter).toBe('receivedDateTime ge 2024-01-01T00:00:00.000Z');
       expect(params.$orderby).toBe('receivedDateTime desc');
       expect(params.$search).toBeUndefined();
       expect(result.isError).toBeUndefined();
       expect(result.content[0].text).not.toContain('Keyword search was not applied');
       expect(result.content[0].text).toContain('filter-with-recipient');
+      expect(result.content[0].text).toContain('Matched');
+      expect(result.content[0].text).not.toContain('Not matched');
     });
 
     test('from plus dates uses from/emailAddress/address predicate', async () => {
@@ -199,14 +215,12 @@ describe('handleSearchEmails', () => {
       setupSuccess();
 
       await handleSearchEmails({
-        to: "o'brien@x.com",
+        from: "o'brien@x.com",
         receivedAfter: '2024-01-01',
       });
 
       const params = callGraphAPIPaginated.mock.calls[0][3];
-      expect(params.$filter).toContain(
-        "toRecipients/any(r: r/emailAddress/address eq 'o''brien@x.com')"
-      );
+      expect(params.$filter).toContain("from/emailAddress/address eq 'o''brien@x.com'");
     });
 
     test('recipient predicates come after date and boolean predicates', async () => {
