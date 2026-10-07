@@ -182,6 +182,13 @@ Without `$search`, `count=0` SHALL sweep the entire date-filtered set via `@odat
 - THEN the request SHALL use `$filter` only (no `$search`, no `$orderby`)
 - AND the response SHALL state keyword search was not applied
 
+#### Scenario: `to` term with date range applies client-side recipient filter
+
+- WHEN `search-emails` is called with `to` plus date range
+- THEN `$filter` SHALL contain only the date predicate (Graph rejects `toRecipients/any` server-side)
+- AND `to` SHALL be matched client-side against `toRecipients` in the results
+- AND the result SHALL be reported with strategy `filter-with-recipient-client-side`
+
 #### Scenario: Filter and search are never combined
 
 - GIVEN any input combination
