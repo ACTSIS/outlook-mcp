@@ -79,24 +79,31 @@ describe('resolveFolderPath', () => {
       const customFolderId = 'custom-folder-id-456';
       const customFolderName = 'ProjectAlpha';
 
-      // First call returns empty (exact match fails)
-      callGraphAPI.mockResolvedValueOnce({ value: [] });
-
-      // Second call returns all folders for case-insensitive match
-      callGraphAPI.mockResolvedValueOnce({
-        value: [
-          { id: 'other-id', displayName: 'OtherFolder' },
-          { id: customFolderId, displayName: 'projectalpha' },
-        ],
+      // 1: exact-match failure, 2: case-insensitive fallback fetch (paginated:
+      // pages follow via nextLink), 3: fetch children of any candidate folders
+      // found on the pages.
+      callGraphAPI.mockImplementation(async (_token, _method, path, _data, params) => {
+        if (path === 'me/mailFolders') {
+          if (params && params.$filter) {
+            return { value: [] }; // exact match fails
+          }
+          return {
+            value: [
+              { id: 'other-id', displayName: 'Other' },
+              { id: customFolderId, displayName: 'projectalpha' },
+            ],
+          };
+        }
+        // childFolders probe for candidates (folder already matches by name)
+        return { value: [] };
       });
 
       const result = await resolveFolderPath(mockAccessToken, customFolderName);
 
       expect(result).toBe(`me/mailFolders/${customFolderId}/messages`);
-      expect(callGraphAPI).toHaveBeenCalledTimes(2);
     });
 
-    test('should fall back to inbox when custom folder is not found', async () => {
+    test('should throw a clear error when custom folder is not found', async () => {
       const nonExistentFolder = 'NonExistentFolder';
 
       // First call returns empty (exact match fails)
@@ -110,20 +117,22 @@ describe('resolveFolderPath', () => {
         ],
       });
 
-      const result = await resolveFolderPath(mockAccessToken, nonExistentFolder);
-
-      expect(result).toBe(WELL_KNOWN_FOLDERS['inbox']);
+      // Strict resolution: an unknown folder must fail loudly, never silently
+      // fall back to the inbox (issue #16 bug B).
+      await expect(resolveFolderPath(mockAccessToken, nonExistentFolder)).rejects.toThrow(
+        `Folder not found: '${nonExistentFolder}'`
+      );
       expect(callGraphAPI).toHaveBeenCalledTimes(2);
     });
 
-    test('should fall back to inbox when API call fails', async () => {
+    test('should propagate the error when folder lookup API call fails', async () => {
       const customFolderName = 'CustomFolder';
 
       callGraphAPI.mockRejectedValueOnce(new Error('API Error'));
 
-      const result = await resolveFolderPath(mockAccessToken, customFolderName);
-
-      expect(result).toBe(WELL_KNOWN_FOLDERS['inbox']);
+      await expect(resolveFolderPath(mockAccessToken, customFolderName)).rejects.toThrow(
+        `Folder not found: '${customFolderName}'`
+      );
       expect(callGraphAPI).toHaveBeenCalledTimes(1);
     });
   });
@@ -284,7 +293,7 @@ describe('getFolderIdByName', () => {
         'GET',
         'me/mailFolders',
         null,
-        { $top: 100 }
+        {} // full-sweep page fetch (paginated via nextLink), was fixed $top: 100
       );
       expect(callGraphAPI).toHaveBeenNthCalledWith(
         4,
@@ -292,7 +301,7 @@ describe('getFolderIdByName', () => {
         'GET',
         'me/mailFolders/tramite-id/childFolders',
         null,
-        { $top: 100 }
+        {} // full-sweep page fetch (paginated via nextLink), was fixed $top: 100
       );
     });
 
@@ -374,7 +383,7 @@ describe('getFolderIdByName', () => {
         'GET',
         'me/mailFolders/parent-id/childFolders',
         null,
-        { $top: 100 }
+        {} // full-sweep page fetch (paginated via nextLink), was fixed $top: 100
       );
     });
   });

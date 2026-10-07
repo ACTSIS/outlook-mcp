@@ -65,6 +65,76 @@ async function handleListFolders(args) {
 }
 
 /**
+ * Recursively collect all folders under (and including) the given parent ID,
+ * descending through every nesting level and following every @odata.nextLink
+ * page. Depth and page guards keep a pathological folder graph from hanging
+ * the listing (issue #16, bug A).
+ * @param {string} accessToken - Access token
+ * @param {string|null} parentId - Parent folder ID, null for top-level
+ * @param {string} selectFields - Fields to select on folder objects
+ * @param {Map<string, boolean>} visited - Folder IDs already enumerated (cycle guard)
+ * @param {number} depth - Current recursion depth
+ * @returns {Promise<Array>} - Folder objects from this level and all deeper levels
+ */
+const MAX_FOLDER_DEPTH = 10;
+const MAX_PAGING_ROUNDS = 50;
+
+async function collectFolders(accessToken, parentId, selectFields, visited = new Map(), depth = 0) {
+  const base = parentId ? `me/mailFolders/${parentId}/childFolders` : 'me/mailFolders';
+  if (depth > MAX_FOLDER_DEPTH) {
+    console.error(`Folder listing stopped at depth ${depth} (limit ${MAX_FOLDER_DEPTH})`);
+    return [];
+  }
+
+  const items = [];
+  let currentPath = base;
+  let currentParams = { $select: selectFields };
+  const pendingChildren = [];
+
+  // Follow nextLink pages of this level before descending.
+  for (let round = 0; round < MAX_PAGING_ROUNDS; round++) {
+    const response = await callGraphAPI(accessToken, 'GET', currentPath, null, currentParams);
+    const page = response.value || [];
+
+    for (const f of page) {
+      if (visited.get(f.id)) {
+        continue;
+      }
+      visited.set(f.id, true);
+      f.isTopLevel = parentId === null;
+      items.push(f);
+      if (f.childFolderCount > 0) {
+        pendingChildren.push(f);
+      }
+    }
+
+    const nextLink = response['@odata.nextLink'];
+    if (!nextLink) {
+      break;
+    }
+    currentPath = nextLink;
+    currentParams = {}; // nextLink already encodes the query
+  }
+
+  // Descend breadth-first into unvisited children of every folder at this level.
+  for (const parentItem of pendingChildren) {
+    const children = await collectFolders(
+      accessToken,
+      parentItem.id,
+      selectFields,
+      visited,
+      depth + 1
+    );
+    for (const child of children) {
+      child.parentFolder = parentItem.displayName;
+    }
+    items.push(...children);
+  }
+
+  return items;
+}
+
+/**
  * Get all mail folders with hierarchy information
  * @param {string} accessToken - Access token
  * @param {boolean} includeItemCounts - Include item counts in response
@@ -77,53 +147,15 @@ async function getAllFoldersHierarchy(accessToken, includeItemCounts) {
       ? 'id,displayName,parentFolderId,childFolderCount,totalItemCount,unreadItemCount'
       : 'id,displayName,parentFolderId,childFolderCount';
 
-    // Get all mail folders
-    const response = await callGraphAPI(accessToken, 'GET', 'me/mailFolders', null, {
-      $top: 100,
-      $select: selectFields,
-    });
+    const folders = await collectFolders(accessToken, null, selectFields);
 
-    if (!response.value) {
-      return [];
-    }
-
-    // Get child folders for folders with children
-    const foldersWithChildren = response.value.filter((f) => f.childFolderCount > 0);
-
-    const childFolderPromises = foldersWithChildren.map(async (folder) => {
-      try {
-        const childResponse = await callGraphAPI(
-          accessToken,
-          'GET',
-          `me/mailFolders/${folder.id}/childFolders`,
-          null,
-          { $select: selectFields }
-        );
-
-        // Add parent folder info to each child
-        const childFolders = childResponse.value || [];
-        childFolders.forEach((child) => {
-          child.parentFolder = folder.displayName;
-        });
-
-        return childFolders;
-      } catch (error) {
-        console.error(`Error getting child folders for "${folder.displayName}": ${error.message}`);
-        return [];
-      }
-    });
-
-    const childFolders = await Promise.all(childFolderPromises);
-    const allChildFolders = childFolders.flat();
-
-    // Add top-level flag to parent folders
-    const topLevelFolders = response.value.map((folder) => ({
+    // Top-level folders are those fetched from the me/mailFolders root call;
+    // collectFolders marks them with a null parentFolderId (Graph returns a
+    // hidden root ID for these, so null flags our own fetch root).
+    return folders.map((folder) => ({
       ...folder,
-      isTopLevel: true,
+      isTopLevel: folder.isTopLevel === true,
     }));
-
-    // Combine all folders
-    return [...topLevelFolders, ...allChildFolders];
   } catch (error) {
     console.error(`Error getting all folders: ${error.message}`);
     throw error;

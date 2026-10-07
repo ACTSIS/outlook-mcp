@@ -68,6 +68,45 @@ Empty segments resulting from consecutive `/` or leading/trailing separators SHA
 - WHEN `getFolderIdByName("Tramite//REQ-104951")` is called
 - THEN it MUST return the ID of "REQ-104951"
 
+### Requirement: Strict Folder Resolution
+
+When a named folder (or any path segment) cannot be found, `resolveFolderPath()` MUST throw a clear `Folder not found: '<name>'` error instead of silently falling back to the inbox. Callers surface the error in their tool response.
+
+#### Scenario: Unknown folder name errors instead of searching the inbox
+
+- GIVEN no folder named "NonExistent" exists
+- WHEN a tool resolves folder "NonExistent"
+- THEN the resolution MUST reject with an error containing `Folder not found: 'NonExistent'`
+- AND no request SHALL be made against the inbox endpoint as a fallback
+
+#### Scenario: Missing folder argument still defaults to inbox
+
+- GIVEN no folder argument is provided
+- WHEN a tool resolves the folder
+- THEN the inbox endpoint SHALL be used (existing behavior unchanged)
+
+### Requirement: Folder Listing Completeness
+
+Folder enumeration (`list-folders`) MUST traverse every nesting level via `childFolders` and MUST follow `@odata.nextLink` pages at every level. Enumeration SHALL be bounded by depth and cycle guards so a pathological folder graph cannot loop indefinitely.
+
+#### Scenario: Nested subfolder at depth three is enumerated
+
+- GIVEN folders "A" → "B" → "C"
+- WHEN `list-folders` is called with `includeChildren=true`
+- THEN the response SHALL include "C" nested under "B"
+
+#### Scenario: Folder level larger than one page is fully enumerated
+
+- GIVEN a parent folder whose child listing returns an `@odata.nextLink`
+- WHEN `list-folders` is called
+- THEN all pages SHALL be followed before the response completes
+
+#### Scenario: Folder graph cycle terminates
+
+- GIVEN a folder graph that reports a folder as its own descendant
+- WHEN `list-folders` is called
+- THEN enumeration SHALL terminate within bounded calls without revisiting visited folders
+
 ### Requirement: Literal Slash Limitation
 
 Folder names containing a literal `/` in their display name are NOT supported. The function SHALL treat `/` exclusively as a path separator.

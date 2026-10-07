@@ -4,6 +4,35 @@
 const { callGraphAPI } = require('../utils/graph-api');
 
 /**
+ * Fetch a folder listing with nextLink pagination, following every page before
+ * returning the combined value array. Guards against runaway loops with a page
+ * cap well above any realistic mailbox (issue #16, bug A).
+ * @param {string} accessToken - Access token
+ * @param {string} path - Graph endpoint to fetch
+ * @param {object} params - Query params for the first request
+ * @returns {Promise<Array>} - Combined folder value array across pages
+ */
+const MAX_PAGING_ROUNDS = 50;
+async function fetchAllPages(accessToken, path, params = {}) {
+  const items = [];
+  let currentUrl = path;
+  let currentParams = params;
+  for (let round = 0; round < MAX_PAGING_ROUNDS; round++) {
+    const response = await callGraphAPI(accessToken, 'GET', currentUrl, null, currentParams);
+    if (response && Array.isArray(response.value)) {
+      items.push(...response.value);
+    }
+    const nextLink = response && response['@odata.nextLink'];
+    if (!nextLink) {
+      break;
+    }
+    currentUrl = nextLink;
+    currentParams = {}; // nextLink already encodes the query
+  }
+  return items;
+}
+
+/**
  * Well-known folder names and their endpoints
  */
 const WELL_KNOWN_FOLDERS = {
@@ -16,9 +45,12 @@ const WELL_KNOWN_FOLDERS = {
 };
 
 /**
- * Resolve a folder name to its endpoint path
+ * Resolve a folder name to its endpoint path. Resolution is strict: an unknown
+ * folder (or a failed lookup) throws a clear "Folder not found" error instead
+ * of silently falling back to the inbox, which used to return unrelated search
+ * results with no visible failure (issue #16, bug B).
  * @param {string} accessToken - Access token
- * @param {string} folderName - Folder name to resolve
+ * @param {string} folderName - Folder name or Parent/Child path
  * @returns {Promise<string>} - Resolved endpoint path
  */
 async function resolveFolderPath(accessToken, folderName) {
@@ -34,22 +66,22 @@ async function resolveFolderPath(accessToken, folderName) {
     return WELL_KNOWN_FOLDERS[lowerFolderName];
   }
 
+  let folderId;
   try {
-    // Try to find the folder by name
-    const folderId = await getFolderIdByName(accessToken, folderName);
-    if (folderId) {
-      const path = `me/mailFolders/${folderId}/messages`;
-      console.error(`Resolved folder "${folderName}" to path: ${path}`);
-      return path;
-    }
-
-    // If not found, fall back to inbox
-    console.error(`Couldn't find folder "${folderName}", falling back to inbox`);
-    return WELL_KNOWN_FOLDERS['inbox'];
+    folderId = await getFolderIdByName(accessToken, folderName);
   } catch (error) {
-    console.error(`Error resolving folder "${folderName}": ${error.message}`);
-    return WELL_KNOWN_FOLDERS['inbox'];
+    throw new Error(`Folder not found: '${folderName}' (lookup failed: ${error.message})`);
   }
+
+  if (!folderId) {
+    throw new Error(
+      `Folder not found: '${folderName}'. Verify the folder exists; use 'list-folders' for valid names. Subfolders require the full path (e.g. 'Parent/Child').`
+    );
+  }
+
+  const path = `me/mailFolders/${folderId}/messages`;
+  console.error(`Resolved folder "${folderName}" to path: ${path}`);
+  return path;
 }
 
 /**
@@ -62,23 +94,24 @@ async function resolveFolderPath(accessToken, folderName) {
 async function resolveSegmentInParent(accessToken, parentId, segment) {
   const base = parentId ? `me/mailFolders/${parentId}/childFolders` : 'me/mailFolders';
 
-  // First try with exact match filter
-  // OData string literals require single quotes to be escaped by doubling them
+  // First try with exact match filter. Paginate: large tenants can exceed the
+  // default page size (issue #16, bug A).
   const escapedSegment = segment.replace(/'/g, "''");
-  const response = await callGraphAPI(accessToken, 'GET', base, null, {
+  const response = await fetchAllPages(accessToken, base, {
     $filter: `displayName eq '${escapedSegment}'`,
   });
 
-  if (response.value && response.value.length > 0) {
-    return response.value[0].id;
+  if (response && response.length > 0) {
+    return response[0].id;
   }
 
-  // If exact match fails, try to get all folders and do a case-insensitive comparison
-  const allFoldersResponse = await callGraphAPI(accessToken, 'GET', base, null, { $top: 100 });
+  // If exact match fails, try to get all folders under the parent and do a
+  // case-insensitive comparison. Paginate fully before scanning (issue #16).
+  const allFolders = await fetchAllPages(accessToken, base);
 
-  if (allFoldersResponse.value) {
+  if (allFolders) {
     const lowerSegment = segment.toLowerCase();
-    const matchingFolder = allFoldersResponse.value.find(
+    const matchingFolder = allFolders.find(
       (folder) => folder.displayName.toLowerCase() === lowerSegment
     );
 

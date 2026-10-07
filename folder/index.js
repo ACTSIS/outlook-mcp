@@ -9,7 +9,8 @@ const handleMoveEmails = require('./move');
 const folderTools = [
   {
     name: 'list-folders',
-    description: 'Lists mail folders in your Outlook account',
+    description:
+      'Lists mail folders in your Outlook account. Enumerates all nesting levels and pages fully; unknown folder names passed to other tools now fail with a clear error instead of searching the inbox.',
     inputSchema: {
       type: 'object',
       properties: {
