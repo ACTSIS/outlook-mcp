@@ -101,3 +101,41 @@ When `USE_TEST_MODE=true`, attachment tools MUST return simulated data without c
 - GIVEN `USE_TEST_MODE=true`
 - WHEN `download-attachment` is called with a simulated email ID and attachment ID
 - THEN the response MUST include mock base64 content and metadata
+
+---
+
+### Requirement: Draft Email Attachments
+
+`draft-email` SHALL accept an optional `attachments` array of local file paths. Each path SHALL be read from the host filesystem and converted into a Graph `fileAttachment` (base64 `contentBytes`, `name` from the path, `contentType` inferred from the extension with `application/octet-stream` fallback). Attachment reading MUST complete before any Graph call so a failure creates no draft. The result text SHALL list the attached file names.
+
+#### Scenario: New draft includes file attachments
+
+- GIVEN local files exist at the provided paths
+- WHEN `draft-email` is called with `attachments`
+- THEN the POST `me/messages` payload SHALL include the `attachments` array
+- AND the response SHALL list the attached file names
+
+#### Scenario: Reply draft receives posted attachments
+
+- GIVEN `draft-email` is called with `replyToId` and `attachments`
+- THEN each attachment SHALL be POSTed to `me/messages/{draft-id}/attachments`
+- AND the response SHALL list the attached file names
+
+#### Scenario: Missing attachment file returns error without creating a draft
+
+- GIVEN an `attachments` path that does not exist
+- WHEN `draft-email` is called
+- THEN no Graph call SHALL be made
+- AND the response SHALL report the missing path
+
+#### Scenario: Oversized attachment returns size-limit error
+
+- GIVEN an attachment exceeding `MAX_DRAFT_ATTACHMENT_BYTES`
+- WHEN `draft-email` is called
+- THEN no Graph call SHALL be made
+- AND the response SHALL report the size limit
+
+#### Scenario: Omitting attachments preserves payload shape
+
+- GIVEN `draft-email` is called without `attachments`
+- THEN the created payload SHALL NOT contain an `attachments` key

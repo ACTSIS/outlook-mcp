@@ -241,6 +241,12 @@ const emailTools = [
           description: 'Email importance (normal, high, low)',
           enum: ['normal', 'high', 'low'],
         },
+        attachments: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Local file paths to attach to the draft (e.g. ["/tmp/report.pdf", "/tmp/evidence.png"]). Read from the MCP host filesystem; MIME type is inferred from the extension.',
+        },
       },
       required: [],
     },

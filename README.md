@@ -470,7 +470,7 @@ Nested mail-folder paths such as `Parent/Child/Archive` are resolved segment by 
 | `search-emails`       | Search by text, sender, recipient, subject, attachments, or unread state    |
 | `read-email`          | Read sanitized visible content; raw HTML is an explicit unsafe debug option |
 | `send-email`          | Send a new message or reply to an existing message                          |
-| `draft-email`         | Create a new draft or reply draft                                           |
+| `draft-email`         | Create a new draft or reply draft with optional local file attachments      |
 | `mark-as-read`        | Mark a message read or unread                                               |
 | `delete-email`        | Move a message to Deleted Items or permanently delete it                    |
 | `list-attachments`    | List attachment metadata for a message                                      |
