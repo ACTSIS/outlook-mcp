@@ -101,6 +101,11 @@ module.exports = {
   // Page size for count=0 full sweeps of a folder (bounded by nextLink paging)
   FOLDER_SWEEP_PAGE_SIZE: 50,
 
+  // Draft attachments (issue #14): total guard per draft. Graph accepts large
+  // drafts but the practical safe boundary for base64-in-JSON payloads is ~3 MB
+  // per attachment (4 MB request threshold applies to simple uploads).
+  MAX_DRAFT_ATTACHMENT_BYTES: 10 * 1024 * 1024,
+
   // Transport
   // Hard timeout for a single Graph API HTTP request so hung connections fail
   // instead of blocking the MCP client until its own timeout fires.

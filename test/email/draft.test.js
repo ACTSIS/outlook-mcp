@@ -352,3 +352,149 @@ describe('draft-email tool schema', () => {
     });
   });
 });
+
+describe('draft-email with user-supplied attachments (issue #14)', () => {
+  const accessToken = 'dummy_access_token';
+  let tmpDir;
+  let fs;
+  let os;
+  let path;
+
+  beforeEach(() => {
+    jest.resetModules();
+    fs = require('fs');
+    os = require('os');
+    path = require('path');
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'draft-att-wire-'));
+    callGraphAPI.mockReset();
+    ensureAuthenticated.mockReset();
+    ensureAuthenticated.mockResolvedValue(accessToken);
+    callGraphAPI.mockResolvedValue({ id: 'draft-123', subject: 'Test subject' });
+    composeEmail.mockImplementation(({ body = '', isHtml }) =>
+      Promise.resolve({
+        body,
+        contentType: isHtml === true ? 'html' : 'text',
+        attachments: [],
+      })
+    );
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function writeFile(name, bytes) {
+    const p = path.join(tmpDir, name);
+    fs.writeFileSync(p, bytes);
+    return p;
+  }
+
+  test('new draft payload carries user-supplied file attachments', async () => {
+    const pdfPath = writeFile('invoice.pdf', Buffer.from('%PDF-1.4 fake'));
+    const pngPath = writeFile('shot.png', Buffer.from('89PNG fake'));
+
+    const result = await handleDraftEmail({
+      to: 'client@external.com',
+      subject: 'Assignment',
+      body: 'See attached evidence.',
+      attachments: [pdfPath, pngPath],
+    });
+
+    const payload = callGraphAPI.mock.calls[0][3];
+    expect(callGraphAPI.mock.calls[0][2]).toBe('me/messages');
+    expect(payload.attachments).toHaveLength(2);
+    expect(payload.attachments[0]).toEqual({
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: 'invoice.pdf',
+      contentType: 'application/pdf',
+      contentBytes: Buffer.from('%PDF-1.4 fake').toString('base64'),
+    });
+    expect(payload.attachments[1].contentType).toBe('image/png');
+    expect(result.content[0].text).toContain('Attachments: invoice.pdf, shot.png');
+  });
+
+  test('reply draft posts user-supplied attachments to the reply attachment endpoint', async () => {
+    const pdfPath = writeFile('ev.pdf', Buffer.from('%PDF-1.4 ev'));
+    callGraphAPI
+      .mockResolvedValueOnce({ id: 'reply-draft', subject: 'RE: Original' })
+      .mockResolvedValueOnce({ id: 'reply-draft', subject: 'RE: Original' })
+      .mockResolvedValueOnce({});
+
+    const result = await handleDraftEmail({
+      replyToId: 'original-id',
+      body: 'Internal note with evidence.',
+      attachments: [pdfPath],
+    });
+
+    const endpoints = callGraphAPI.mock.calls.map((c) => c[2]);
+    expect(endpoints).toContain('me/messages/original-id/createReply');
+    expect(endpoints).toContain('me/messages/reply-draft/attachments');
+    const attCall = callGraphAPI.mock.calls.find((c) => c[2].endsWith('/attachments'));
+    expect(attCall[3]).toEqual({
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: 'ev.pdf',
+      contentType: 'application/pdf',
+      contentBytes: Buffer.from('%PDF-1.4 ev').toString('base64'),
+    });
+    expect(result.content[0].text).toContain('Attachments: ev.pdf');
+  });
+
+  test('missing attachment file surfaces a clear MCP error and creates nothing', async () => {
+    const missing = path.join(tmpDir, 'ghost.pdf');
+
+    const result = await handleDraftEmail({
+      to: 'a@b.com',
+      subject: 'X',
+      attachments: [missing],
+    });
+
+    expect(result.content[0].text).toContain(`Attachment file not found: ${missing}`);
+    expect(callGraphAPI).not.toHaveBeenCalled();
+  });
+
+  test('unreadable attachment file surfaces a readable error', async () => {
+    const dirPath = tmpDir; // a directory, not a file — readFile errors
+
+    const result = await handleDraftEmail({
+      to: 'a@b.com',
+      subject: 'X',
+      attachments: [dirPath],
+    });
+
+    expect(result.content[0].text).toContain('could not be read');
+    expect(callGraphAPI).not.toHaveBeenCalled();
+  });
+
+  test('oversized attachment surfaces the size-limit error', async () => {
+    const bigPath = path.join(tmpDir, 'big.bin');
+    fs.writeFileSync(bigPath, Buffer.alloc(11 * 1024 * 1024, 1));
+
+    const result = await handleDraftEmail({
+      to: 'a@b.com',
+      subject: 'X',
+      attachments: [bigPath],
+    });
+
+    expect(result.content[0].text).toMatch(/exceeds the .* limit/i);
+    expect(callGraphAPI).not.toHaveBeenCalled();
+  });
+
+  test('omitting attachments keeps the payload free of an attachments key', async () => {
+    await handleDraftEmail({ to: 'a@b.com', subject: 'No atts' });
+
+    const payload = callGraphAPI.mock.calls[0][3];
+    expect(payload.attachments).toBeUndefined();
+  });
+
+  test('schema declares the optional attachments array of file paths', () => {
+    const { emailTools: tools } = require('../../email');
+    const draftTool = tools.find(({ name }) => name === 'draft-email');
+
+    expect(draftTool.inputSchema.properties.attachments).toEqual({
+      type: 'array',
+      items: { type: 'string' },
+      description: expect.stringContaining('file paths'),
+    });
+    expect(draftTool.inputSchema.required).toEqual([]);
+  });
+});

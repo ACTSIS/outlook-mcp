@@ -9,6 +9,7 @@ const {
   hasManagedSignature,
   deliverNativeReply,
 } = require('./graph-message-flow');
+const { buildFileAttachments } = require('./attachment-builder');
 
 /**
  * Draft email handler
@@ -27,9 +28,13 @@ async function handleDraftEmail(args) {
     importance = 'normal',
     isHtml,
     replyToId,
+    attachments,
   } = args || {};
 
   try {
+    // Build Graph fileAttachment objects from local paths BEFORE any Graph call
+    // so a bad path fails without creating a draft (issue #14).
+    const fileAttachments = attachments ? await buildFileAttachments(attachments) : null;
     // Format recipients only when provided
     const toRecipients = to
       ? to
@@ -79,11 +84,21 @@ async function handleDraftEmail(args) {
           false,
           callGraphAPI
         );
+        // Post user-supplied attachments to the reply draft (issue #14)
+        const nativeReplyDraftId = updatedDraft.id || replyDraft.id;
+        for (const attachment of fileAttachments || []) {
+          await callGraphAPI(
+            accessToken,
+            'POST',
+            `me/messages/${encodeURIComponent(nativeReplyDraftId)}/attachments`,
+            attachment
+          );
+        }
         return {
           content: [
             {
               type: 'text',
-              text: `Reply draft created successfully!\n\nDraft ID: ${updatedDraft.id || replyDraft.id}\nSubject: ${updatedDraft.subject || replyDraft.subject || '(no subject)'}\nRecipients: inherited from original message`,
+              text: `Reply draft created successfully!\n\nDraft ID: ${updatedDraft.id || replyDraft.id}\nSubject: ${updatedDraft.subject || replyDraft.subject || '(no subject)'}\nRecipients: inherited from original message${fileAttachments ? `\nAttachments: ${fileAttachments.map((a) => a.name).join(', ')}` : ''}`,
             },
           ],
         };
@@ -108,11 +123,22 @@ async function handleDraftEmail(args) {
         }
       );
 
+      // Post user-supplied attachments to the reply draft (issue #14)
+      const replyDraftId = updatedDraft.id || replyDraft.id;
+      for (const attachment of fileAttachments || []) {
+        await callGraphAPI(
+          accessToken,
+          'POST',
+          `me/messages/${encodeURIComponent(replyDraftId)}/attachments`,
+          attachment
+        );
+      }
+
       return {
         content: [
           {
             type: 'text',
-            text: `Reply draft created successfully!\n\nDraft ID: ${updatedDraft.id || replyDraft.id}\nSubject: ${updatedDraft.subject || replyDraft.subject || '(no subject)'}\nRecipients: inherited from original message`,
+            text: `Reply draft created successfully!\n\nDraft ID: ${updatedDraft.id || replyDraft.id}\nSubject: ${updatedDraft.subject || replyDraft.subject || '(no subject)'}\nRecipients: inherited from original message${fileAttachments ? `\nAttachments: ${fileAttachments.map((a) => a.name).join(', ')}` : ''}`,
           },
         ],
       };
@@ -129,6 +155,7 @@ async function handleDraftEmail(args) {
       ccRecipients: ccRecipients.length > 0 ? ccRecipients : undefined,
       bccRecipients: bccRecipients.length > 0 ? bccRecipients : undefined,
       importance,
+      ...(fileAttachments ? { attachments: fileAttachments } : {}),
     });
 
     // Create draft message
@@ -139,7 +166,7 @@ async function handleDraftEmail(args) {
       content: [
         {
           type: 'text',
-          text: `Draft created successfully!\n\nDraft ID: ${draft.id}\nSubject: ${draft.subject || '(no subject)'}\nRecipients: ${toRecipients.length}${ccRecipients.length > 0 ? ` + ${ccRecipients.length} CC` : ''}${bccRecipients.length > 0 ? ` + ${bccRecipients.length} BCC` : ''}`,
+          text: `Draft created successfully!\n\nDraft ID: ${draft.id}\nSubject: ${draft.subject || '(no subject)'}\nRecipients: ${toRecipients.length}${ccRecipients.length > 0 ? ` + ${ccRecipients.length} CC` : ''}${bccRecipients.length > 0 ? ` + ${bccRecipients.length} BCC` : ''}${fileAttachments ? `\nAttachments: ${fileAttachments.map((a) => a.name).join(', ')}` : ''}`,
         },
       ],
     };
