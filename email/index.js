@@ -52,7 +52,7 @@ const emailTools = [
   {
     name: 'search-emails',
     description:
-      "Search for emails using various criteria. Without a date range, to/from/subject/query run via $search (KQL). When combined with receivedAfter/receivedBefore, only 'to'/'from' are supported (translated to OData $filter on toRecipients/any and from/emailAddress/address); 'query'/'subject' CANNOT be combined with date ranges and return a filter_dropped_due_to_strategy_degradation error. Results may include a nextLink line for paging.",
+      "Search for emails using various criteria. Without a date range, to/from/subject/query run via $search (KQL). When combined with receivedAfter/receivedBefore, only 'from' is translated to a server-side OData $filter (from/emailAddress/address); 'to' is applied as a client-side post-filter because Graph rejects toRecipients/any server-side; 'query'/'subject' CANNOT be combined with date ranges and return a filter_dropped_due_to_strategy_degradation error. Results may include a nextLink line for paging.",
     inputSchema: {
       type: 'object',
       properties: {

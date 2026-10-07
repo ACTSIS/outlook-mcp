@@ -57,6 +57,17 @@ async function callGraphAPI(accessToken, method, path, data = null, queryParams 
           params.append(key, value);
         }
 
+        // Lambda operators (any(...)) make this an advanced query in Graph
+        // API, which requires $count=true alongside the filter. Skip when the
+        // caller already supplied it.
+        if (
+          typeof filter === 'string' &&
+          filter.includes('any(') &&
+          !Object.prototype.hasOwnProperty.call(regularParams, '$count')
+        ) {
+          params.append('$count', 'true');
+        }
+
         queryString = params.toString();
 
         // Add filter parameter separately with proper encoding
@@ -80,6 +91,16 @@ async function callGraphAPI(accessToken, method, path, data = null, queryParams 
     }
 
     return new Promise((resolve, reject) => {
+      // Advanced queries (lambda filters like toRecipients/any(...)) require the
+      // ConsistencyLevel: eventual header per Graph API documentation. The
+      // predicate may ride queryParams.$filter or be embedded in a full nextLink
+      // URL, so check both.
+      const filterParam = queryParams && queryParams.$filter;
+      const isAdvancedQuery =
+        (typeof filterParam === 'string' && filterParam.includes('any(')) ||
+        finalUrl.includes('toRecipients%2Fany') ||
+        finalUrl.includes('toRecipients/any');
+
       const options = {
         method: method,
         headers: {
@@ -87,6 +108,10 @@ async function callGraphAPI(accessToken, method, path, data = null, queryParams 
           'Content-Type': 'application/json',
         },
       };
+
+      if (isAdvancedQuery) {
+        options.headers.ConsistencyLevel = 'eventual';
+      }
 
       const req = https.request(finalUrl, options, (res) => {
         let responseData = '';
