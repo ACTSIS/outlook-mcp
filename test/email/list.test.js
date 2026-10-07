@@ -2,6 +2,8 @@ const handleListEmails = require('../../email/list');
 const { callGraphAPIPaginated } = require('../../utils/graph-api');
 const { ensureAuthenticated } = require('../../auth');
 const { resolveFolderPath, WELL_KNOWN_FOLDERS } = require('../../email/folder-utils');
+const config = require('../../config');
+const { simulateGraphAPIResponse } = require('../../utils/mock-data');
 
 jest.mock('../../utils/graph-api');
 jest.mock('../../auth');
@@ -62,10 +64,10 @@ describe('handleListEmails', () => {
         'GET',
         WELL_KNOWN_FOLDERS['inbox'],
         expect.objectContaining({
-          $top: 10,
+          $top: config.MAX_RESULT_COUNT,
           $orderby: 'receivedDateTime desc',
         }),
-        10
+        config.MAX_RESULT_COUNT
       );
       expect(result.content[0].text).toContain('Found 2 emails in inbox');
       expect(result.content[0].text).toContain('Test Email 1');
@@ -210,6 +212,156 @@ describe('handleListEmails', () => {
         expect.any(Object),
         expect.any(Number)
       );
+    });
+  });
+
+  describe('date filter integration', () => {
+    test('should emit $filter with normalized date predicates', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      resolveFolderPath.mockResolvedValue(WELL_KNOWN_FOLDERS['inbox']);
+      callGraphAPIPaginated.mockResolvedValue({ value: mockEmails });
+
+      await handleListEmails({
+        receivedAfter: '2024-01-01',
+        receivedBefore: '2024-06-30',
+      });
+
+      expect(callGraphAPIPaginated).toHaveBeenCalledWith(
+        mockAccessToken,
+        'GET',
+        WELL_KNOWN_FOLDERS['inbox'],
+        expect.objectContaining({
+          $filter:
+            'receivedDateTime ge 2024-01-01T00:00:00.000Z and receivedDateTime le 2024-06-30T23:59:59.999Z',
+        }),
+        expect.any(Number)
+      );
+    });
+
+    test('should pass maxCount=0 through for count=0 full sweep', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      resolveFolderPath.mockResolvedValue(WELL_KNOWN_FOLDERS['inbox']);
+      callGraphAPIPaginated.mockResolvedValue({ value: mockEmails });
+
+      await handleListEmails({
+        count: 0,
+        receivedAfter: '2024-01-01',
+        receivedBefore: '2024-06-30',
+      });
+
+      expect(callGraphAPIPaginated).toHaveBeenCalledWith(
+        mockAccessToken,
+        'GET',
+        WELL_KNOWN_FOLDERS['inbox'],
+        expect.objectContaining({
+          $top: config.FOLDER_SWEEP_PAGE_SIZE,
+          $filter:
+            'receivedDateTime ge 2024-01-01T00:00:00.000Z and receivedDateTime le 2024-06-30T23:59:59.999Z',
+        }),
+        0
+      );
+    });
+
+    test('should use page size 50 for count=0 sweeps', () => {
+      expect(config.FOLDER_SWEEP_PAGE_SIZE).toBe(50);
+      expect(config.GRAPH_REQUEST_TIMEOUT_MS).toBe(30000);
+    });
+
+    test('nextLink input requests the URL directly and skips filter building', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      const { callGraphAPI } = require('../../utils/graph-api');
+      const nextLink = 'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=abc';
+      callGraphAPI.mockResolvedValue({ value: mockEmails });
+
+      const result = await handleListEmails({
+        nextLink,
+        receivedAfter: 'not-a-date',
+      });
+
+      expect(callGraphAPI).toHaveBeenCalledWith(mockAccessToken, 'GET', nextLink, null, {});
+      expect(callGraphAPIPaginated).not.toHaveBeenCalled();
+      expect(resolveFolderPath).not.toHaveBeenCalled();
+      expect(result.content[0].text).toContain('Found 2 emails in inbox');
+    });
+
+    test('appends the nextLink line when the response reports more pages', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      resolveFolderPath.mockResolvedValue(WELL_KNOWN_FOLDERS['inbox']);
+      const nextLink = 'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=def';
+      callGraphAPIPaginated.mockResolvedValue({ value: mockEmails, nextLink });
+
+      const result = await handleListEmails({ count: 2 });
+
+      expect(result.content[0].text).toContain(`(nextLink: ${nextLink})`);
+    });
+
+    test('omits the nextLink line when the sweep completes', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      resolveFolderPath.mockResolvedValue(WELL_KNOWN_FOLDERS['inbox']);
+      callGraphAPIPaginated.mockResolvedValue({ value: mockEmails });
+
+      const result = await handleListEmails({});
+
+      expect(result.content[0].text).not.toContain('(nextLink:');
+    });
+
+    test('should default limit to config.MAX_RESULT_COUNT when count is absent', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      resolveFolderPath.mockResolvedValue(WELL_KNOWN_FOLDERS['inbox']);
+      callGraphAPIPaginated.mockResolvedValue({ value: mockEmails });
+
+      await handleListEmails({ receivedAfter: '2024-01-01' });
+
+      expect(callGraphAPIPaginated).toHaveBeenCalledWith(
+        mockAccessToken,
+        'GET',
+        WELL_KNOWN_FOLDERS['inbox'],
+        expect.objectContaining({
+          $filter: 'receivedDateTime ge 2024-01-01T00:00:00.000Z',
+        }),
+        config.MAX_RESULT_COUNT
+      );
+      expect(config.MAX_RESULT_COUNT).toBe(50);
+    });
+
+    test('should error client-side on invalid date without calling Graph', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      resolveFolderPath.mockResolvedValue(WELL_KNOWN_FOLDERS['inbox']);
+
+      const result = await handleListEmails({ receivedAfter: 'not-a-date' });
+
+      expect(result.content[0].text).toBe(
+        'Error listing emails: Invalid receivedAfter: "not-a-date" is not a valid ISO 8601 date (e.g. 2024-01-31 or 2024-01-31T14:30:00Z)'
+      );
+      expect(callGraphAPIPaginated).not.toHaveBeenCalled();
+      expect(resolveFolderPath).not.toHaveBeenCalled();
+    });
+
+    test('mock honors $filter date predicates on listings', () => {
+      // Mock messages are relative (now, -1d, -2d): a lower bound of now-36h
+      // excludes only the -2d message.
+      const cutoff = new Date(Date.now() - 36 * 3600000).toISOString();
+      const messages = simulateGraphAPIResponse('GET', 'me/mailFolders/inbox/messages', null, {
+        $filter: `receivedDateTime ge ${cutoff}`,
+      });
+
+      const ids = messages.value.map((m) => m.id);
+      expect(ids).toContain('simulated-email-1');
+      expect(ids).toContain('simulated-email-2');
+      expect(ids).not.toContain('simulated-email-3');
+    });
+
+    test('mock honors le predicate and boolean predicates joined with and', () => {
+      const nowIso = new Date().toISOString();
+      const leValue = 'receivedDateTime le ' + nowIso + ' and isRead eq false';
+      const messages = simulateGraphAPIResponse('GET', 'me/mailFolders/inbox/messages', null, {
+        $filter: leValue,
+      });
+
+      const ids = messages.value.map((m) => m.id);
+      expect(ids).toContain('simulated-email-1');
+      expect(ids).toContain('simulated-email-3');
+      expect(ids).not.toContain('simulated-email-2'); // isRead: true
     });
   });
 });

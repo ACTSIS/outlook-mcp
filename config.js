@@ -98,6 +98,13 @@ module.exports = {
   // Pagination
   DEFAULT_PAGE_SIZE: 25,
   MAX_RESULT_COUNT: 50,
+  // Page size for count=0 full sweeps of a folder (bounded by nextLink paging)
+  FOLDER_SWEEP_PAGE_SIZE: 50,
+
+  // Transport
+  // Hard timeout for a single Graph API HTTP request so hung connections fail
+  // instead of blocking the MCP client until its own timeout fires.
+  GRAPH_REQUEST_TIMEOUT_MS: 30000,
 
   // Timezone
   DEFAULT_TIMEZONE: 'Central European Standard Time',

@@ -3,6 +3,49 @@
  */
 
 /**
+ * Applies a Graph $filter to a mock message list.
+ *
+ * KNOWN LIMITATION: only the predicate shapes this codebase emits are honored —
+ * `receivedDateTime ge <literal>`, `receivedDateTime le <literal>`,
+ * `hasAttachments eq true`, and `isRead eq false`, joined by " and ".
+ * Any other $filter content (functions, other properties, quoting styles)
+ * is ignored and the full list is returned.
+ *
+ * @param {Array<object>} list - Mock messages
+ * @param {object} queryParams - Query parameters possibly containing $filter
+ * @returns {Array<object>} Filtered messages
+ */
+function filterMockMessages(list, queryParams) {
+  const filter = queryParams && queryParams.$filter;
+  if (!filter) {
+    return list;
+  }
+
+  const geMatch = filter.match(/receivedDateTime\s+ge\s+(\S+)/);
+  const leMatch = filter.match(/receivedDateTime\s+le\s+(\S+)/);
+  const after = geMatch ? new Date(geMatch[1]) : null;
+  const before = leMatch ? new Date(leMatch[1]) : null;
+
+  return list.filter((msg) => {
+    const msgDate = new Date(msg.receivedDateTime);
+
+    if (after && msgDate < after) {
+      return false;
+    }
+    if (before && msgDate > before) {
+      return false;
+    }
+    if (filter.includes('hasAttachments eq true') && !msg.hasAttachments) {
+      return false;
+    }
+    if (filter.includes('isRead eq false') && msg.isRead) {
+      return false;
+    }
+    return true;
+  });
+}
+
+/**
  * Simulates Microsoft Graph API responses for testing
  * @param {string} method - HTTP method
  * @param {string} path - API path
@@ -90,83 +133,83 @@ function simulateGraphAPIResponse(method, path, data, _queryParams) {
           internetMessageHeaders: [],
         };
       } else {
-        // Email list response
-        return {
-          value: [
-            {
-              id: 'simulated-email-1',
-              subject: 'Important Meeting Tomorrow',
-              from: {
+        // Email list response, honoring $filter (date and boolean predicates)
+        const messages = [
+          {
+            id: 'simulated-email-1',
+            subject: 'Important Meeting Tomorrow',
+            from: {
+              emailAddress: {
+                name: 'John Doe',
+                address: 'john@example.com',
+              },
+            },
+            toRecipients: [
+              {
                 emailAddress: {
-                  name: 'John Doe',
-                  address: 'john@example.com',
+                  name: 'You',
+                  address: 'you@example.com',
                 },
               },
-              toRecipients: [
-                {
-                  emailAddress: {
-                    name: 'You',
-                    address: 'you@example.com',
-                  },
-                },
-              ],
-              ccRecipients: [],
-              receivedDateTime: new Date().toISOString(),
-              bodyPreview: "Let's discuss the project status...",
-              hasAttachments: false,
-              importance: 'high',
-              isRead: false,
+            ],
+            ccRecipients: [],
+            receivedDateTime: new Date().toISOString(),
+            bodyPreview: "Let's discuss the project status...",
+            hasAttachments: false,
+            importance: 'high',
+            isRead: false,
+          },
+          {
+            id: 'simulated-email-2',
+            subject: 'Weekly Report',
+            from: {
+              emailAddress: {
+                name: 'Jane Smith',
+                address: 'jane@example.com',
+              },
             },
-            {
-              id: 'simulated-email-2',
-              subject: 'Weekly Report',
-              from: {
+            toRecipients: [
+              {
                 emailAddress: {
-                  name: 'Jane Smith',
-                  address: 'jane@example.com',
+                  name: 'You',
+                  address: 'you@example.com',
                 },
               },
-              toRecipients: [
-                {
-                  emailAddress: {
-                    name: 'You',
-                    address: 'you@example.com',
-                  },
-                },
-              ],
-              ccRecipients: [],
-              receivedDateTime: new Date(Date.now() - 86400000).toISOString(), // Yesterday
-              bodyPreview: 'Please find attached the weekly report...',
-              hasAttachments: true,
-              importance: 'normal',
-              isRead: true,
+            ],
+            ccRecipients: [],
+            receivedDateTime: new Date(Date.now() - 86400000).toISOString(), // Yesterday
+            bodyPreview: 'Please find attached the weekly report...',
+            hasAttachments: true,
+            importance: 'normal',
+            isRead: true,
+          },
+          {
+            id: 'simulated-email-3',
+            subject: 'Question about the project',
+            from: {
+              emailAddress: {
+                name: 'Bob Johnson',
+                address: 'bob@example.com',
+              },
             },
-            {
-              id: 'simulated-email-3',
-              subject: 'Question about the project',
-              from: {
+            toRecipients: [
+              {
                 emailAddress: {
-                  name: 'Bob Johnson',
-                  address: 'bob@example.com',
+                  name: 'You',
+                  address: 'you@example.com',
                 },
               },
-              toRecipients: [
-                {
-                  emailAddress: {
-                    name: 'You',
-                    address: 'you@example.com',
-                  },
-                },
-              ],
-              ccRecipients: [],
-              receivedDateTime: new Date(Date.now() - 172800000).toISOString(), // 2 days ago
-              bodyPreview: 'I had a question about the timeline...',
-              hasAttachments: false,
-              importance: 'normal',
-              isRead: false,
-            },
-          ],
-        };
+            ],
+            ccRecipients: [],
+            receivedDateTime: new Date(Date.now() - 172800000).toISOString(), // 2 days ago
+            bodyPreview: 'I had a question about the timeline...',
+            hasAttachments: false,
+            importance: 'normal',
+            isRead: false,
+          },
+        ];
+
+        return { value: filterMockMessages(messages, _queryParams) };
       }
     } else if (path.includes('mailFolders')) {
       // Child folder lookup support for path-style folder references

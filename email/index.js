@@ -15,7 +15,8 @@ const handleDownloadAttachment = require('./download-attachment');
 const emailTools = [
   {
     name: 'list-emails',
-    description: 'Lists recent emails from your inbox',
+    description:
+      'Lists recent emails from your inbox. Supports pagination via nextLink: full sweeps of very large folders can time out, so prefer date ranges (receivedAfter/receivedBefore) plus nextLink paging over count=0 sweeps.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -25,7 +26,23 @@ const emailTools = [
         },
         count: {
           type: 'number',
-          description: 'Number of emails to retrieve (default: 10, max: 50)',
+          description:
+            'Number of emails to retrieve (default: 50; count: 0 = full sweep of the folder without $search, capped at 1,000 when $search is used)',
+        },
+        nextLink: {
+          type: 'string',
+          description:
+            'Opaque @odata.nextLink from a previous response to fetch the next page. When provided, other filter arguments are ignored (the link already encodes them).',
+        },
+        receivedAfter: {
+          type: 'string',
+          description:
+            'Only emails received on or after this date/time (ISO 8601, e.g. 2024-01-31 or 2024-01-31T14:30:00Z)',
+        },
+        receivedBefore: {
+          type: 'string',
+          description:
+            'Only emails received on or before this date/time (ISO 8601, e.g. 2024-06-30 or 2024-06-30T23:59:59Z)',
         },
       },
       required: [],
@@ -34,7 +51,8 @@ const emailTools = [
   },
   {
     name: 'search-emails',
-    description: 'Search for emails using various criteria',
+    description:
+      "Search for emails using various criteria. Without a date range, to/from/subject/query run via $search (KQL). When combined with receivedAfter/receivedBefore, only 'to'/'from' are supported (translated to OData $filter on toRecipients/any and from/emailAddress/address); 'query'/'subject' CANNOT be combined with date ranges and return a filter_dropped_due_to_strategy_degradation error. Results may include a nextLink line for paging.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -68,7 +86,23 @@ const emailTools = [
         },
         count: {
           type: 'number',
-          description: 'Number of results to return (default: 10, max: 50)',
+          description:
+            'Number of results to return (default: 50; count: 0 = full sweep without $search, capped at 1,000 when $search is used)',
+        },
+        nextLink: {
+          type: 'string',
+          description:
+            'Opaque @odata.nextLink from a previous response to fetch the next page. When provided, other filter arguments are ignored (the link already encodes them).',
+        },
+        receivedAfter: {
+          type: 'string',
+          description:
+            'Only emails received on or after this date/time (ISO 8601, e.g. 2024-01-31 or 2024-01-31T14:30:00Z)',
+        },
+        receivedBefore: {
+          type: 'string',
+          description:
+            'Only emails received on or before this date/time (ISO 8601, e.g. 2024-06-30 or 2024-06-30T23:59:59Z)',
         },
       },
       required: [],
