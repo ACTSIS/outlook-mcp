@@ -274,3 +274,37 @@ The test-mode mock SHALL honor `$filter` on message listings so date-filter beha
 - GIVEN test mode is enabled
 - WHEN a listing request includes a `$filter` with date predicates
 - THEN the mock SHALL return only messages satisfying the filter
+
+---
+
+### Requirement: Forward Draft With Empty Recipients
+
+`forward-draft` SHALL create a forwarded-message draft via Graph `createForward` for the message identified by the required `emailId` parameter. The draft SHALL quote the original message thread as embedded content (inline images and signatures intact). The draft SHALL start with EMPTY recipients: the handler MUST PATCH `toRecipients`, `ccRecipients`, and `bccRecipients` to `[]` after creation so recipients are never inherited from the original message. The handler SHALL apply the composed caller text above the quoted thread when a managed signature is present, mirror the reply draft error mapping (Authentication required / 403 / generic `Error creating forward draft: <msg>`), and accept optional `body`, `subject`, `isHtml`, `importance`, `attachments`, `signatureName`, and `includeSignature` inputs.
+
+#### Scenario: Forward draft is created with empty recipients quoting the original thread
+
+- GIVEN an existing message ID
+- WHEN `forward-draft` is called with `emailId`
+- THEN a draft SHALL be created via `POST me/messages/{emailId}/createForward`
+- AND the handler SHALL PATCH the draft with `toRecipients: []`, `ccRecipients: []`, and `bccRecipients: []`
+- AND the result text SHALL state that recipients are none and must be set before sending
+
+#### Scenario: Signed forward draft places composed text above the quoted thread
+
+- GIVEN a managed signature resolves for the operation
+- WHEN `forward-draft` is called with `body` text
+- THEN the handler SHALL PATCH the draft body with the composed text followed by the Graph-quoted thread body
+- AND managed CID images SHALL be posted to the draft
+
+#### Scenario: Missing emailId returns a validation error
+
+- WHEN `forward-draft` is called without `emailId`
+- THEN the response SHALL report the missing `emailId` requirement
+- AND no authentication or Graph call SHALL be made
+
+#### Scenario: Graph API failure maps like other draft errors
+
+- GIVEN the Graph API rejects the `createForward` or draft PATCH call
+- WHEN `forward-draft` is called
+- THEN HTTP 403 SHALL produce the Mail.ReadWrite consent guidance
+- AND other failures SHALL surface as `Error creating forward draft: <message>`

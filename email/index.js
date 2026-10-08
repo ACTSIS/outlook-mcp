@@ -6,6 +6,7 @@ const handleSearchEmails = require('./search');
 const handleReadEmail = require('./read');
 const handleSendEmail = require('./send');
 const handleDraftEmail = require('./draft');
+const handleForwardDraft = require('./forward');
 const handleMarkAsRead = require('./mark-as-read');
 const handleDeleteEmail = require('./delete');
 const handleListAttachments = require('./list-attachments');
@@ -253,6 +254,55 @@ const emailTools = [
     handler: handleDraftEmail,
   },
   {
+    name: 'forward-draft',
+    description:
+      'Creates a forwarded-message draft quoting the original message thread as embedded content (inline images and signature intact) with empty recipients; add recipients before sending.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        emailId: {
+          type: 'string',
+          description: 'ID of the message to forward',
+        },
+        body: {
+          type: 'string',
+          description: 'Optional caller text prepended above the quoted original thread',
+        },
+        subject: {
+          type: 'string',
+          description:
+            'Optional subject override; defaults to the original subject with a forward prefix applied by Graph',
+        },
+        isHtml: {
+          type: 'boolean',
+          description:
+            'Set to true to compose as HTML, false for plain text. If not specified, auto-detects based on <html> tag presence.',
+        },
+        importance: {
+          type: 'string',
+          description: 'Email importance (normal, high, low)',
+          enum: ['normal', 'high', 'low'],
+        },
+        attachments: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Local file paths to attach to the forward draft (e.g. ["/tmp/report.pdf"]). Read from the MCP host filesystem; MIME type is inferred from the extension.',
+        },
+        signatureName: {
+          type: 'string',
+          description: 'Managed signature name; overrides the shared default',
+        },
+        includeSignature: {
+          type: 'boolean',
+          description: 'Set to false to omit managed signatures for this operation',
+        },
+      },
+      required: ['emailId'],
+    },
+    handler: handleForwardDraft,
+  },
+  {
     name: 'mark-as-read',
     description: 'Marks an email as read or unread',
     inputSchema: {
@@ -340,6 +390,7 @@ module.exports = {
   handleReadEmail,
   handleSendEmail,
   handleDraftEmail,
+  handleForwardDraft,
   handleMarkAsRead,
   handleDeleteEmail,
   handleListAttachments,
