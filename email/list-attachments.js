@@ -50,6 +50,9 @@ async function handleListAttachments(args) {
 
     for (const attachment of response.value) {
       const inlineFlag = attachment.isInline ? ' [INLINE]' : '';
+      // `size` is Graph server-reported metadata from the listing payload and
+      // may differ slightly from the actual binary; download-attachment reports
+      // the exact decoded binary size.
       const formatted = `- ${attachment.name}${inlineFlag}\n  ID: ${attachment.id}\n  Type: ${attachment.contentType}\n  Size: ${attachment.size} bytes`;
       if (attachment.isInline) {
         inlineAttachments.push(formatted);

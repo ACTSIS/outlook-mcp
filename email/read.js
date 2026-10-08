@@ -123,6 +123,8 @@ async function handleReadEmail(args) {
           if (attachments && attachments.value && attachments.value.length > 0) {
             const attachmentLines = attachments.value.map((att) => {
               const inlineFlag = att.isInline ? ' [INLINE]' : '';
+              // `size` is Graph server-reported metadata and may differ slightly
+              // from the actual binary; download-attachment reports the exact size.
               return `- ${att.name}${inlineFlag}\n  ID: ${att.id}\n  Type: ${att.contentType}\n  Size: ${att.size} bytes`;
             });
 
