@@ -4,7 +4,7 @@
 [![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frafaga2469%2Foutlook-mcp%2Fbadges%2Fcoverage.json)](https://github.com/rafaga2469/outlook-mcp/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frafaga2469%2Foutlook-mcp%2Fbadges%2Ftests.json)](https://github.com/rafaga2469/outlook-mcp/actions/workflows/ci.yml)
 
-An independently maintained fork of [ryaker/outlook-mcp](https://github.com/ryaker/outlook-mcp). It exposes 45 MCP tools for Outlook mail and calendar, OneDrive, inbox rules, and Power Automate.
+An independently maintained fork of [ryaker/outlook-mcp](https://github.com/ryaker/outlook-mcp). It exposes 46 MCP tools for Outlook mail and calendar, OneDrive, inbox rules, and Power Automate.
 
 ## Quick start
 
@@ -439,7 +439,7 @@ The existing npm installation remains supported through `bin/m365-mcp.js`, which
 
 Nested mail-folder paths such as `Parent/Child/Archive` are resolved segment by segment by `create-folder` and `move-emails`. A literal `/` in a folder name is not supported because `/` is always the path separator.
 
-## Tool inventory (45)
+## Tool inventory (46)
 
 ### Authentication (6)
 
@@ -462,7 +462,7 @@ Nested mail-folder paths such as `Parent/Child/Archive` are resolved segment by 
 | `cancel-event`  | Cancel an event with an optional comment         |
 | `delete-event`  | Delete an event                                  |
 
-### Email (9)
+### Email (10)
 
 | Tool                  | Purpose                                                                     |
 | --------------------- | --------------------------------------------------------------------------- |
@@ -471,6 +471,7 @@ Nested mail-folder paths such as `Parent/Child/Archive` are resolved segment by 
 | `read-email`          | Read sanitized visible content; raw HTML is an explicit unsafe debug option |
 | `send-email`          | Send a new message or reply to an existing message                          |
 | `draft-email`         | Create a new draft or reply draft with optional local file attachments      |
+| `forward-draft`       | Create a forward draft quoting the original thread with empty recipients    |
 | `mark-as-read`        | Mark a message read or unread                                               |
 | `delete-email`        | Move a message to Deleted Items or permanently delete it                    |
 | `list-attachments`    | List attachment metadata for a message                                      |
@@ -487,7 +488,8 @@ Nested mail-folder paths such as `Parent/Child/Archive` are resolved segment by 
 | `delete-email-signature`      | Delete a signature and clear it if default   |
 | `set-default-email-signature` | Set or clear the default used by email flows |
 
-`send-email` and `draft-email` apply the shared default to new messages and native replies.
+`send-email`, `draft-email`, and `forward-draft` apply the shared default to new messages and
+native reply or forward drafts.
 Use `signatureName` for a per-operation override or `includeSignature: false` to opt out. See
 [Managed email signatures](docs/email-signatures.md) for CID image, storage, limit, and recovery
 details.
