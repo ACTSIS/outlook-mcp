@@ -139,7 +139,7 @@ describe('handleForwardDraft', () => {
       'me/messages/forward-draft-1',
     ]);
     expect(callGraphAPI.mock.calls[1][3]).toEqual({
-      body: { contentType: 'text', content: 'Check this thread' },
+      body: { contentType: 'text', content: 'Check this thread<div>Quoted</div>' },
     });
     // Issue #15: recipients must never be inherited from the original message.
     expect(callGraphAPI.mock.calls[2][3]).toEqual({

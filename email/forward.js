@@ -79,9 +79,10 @@ async function handleForwardDraft(args) {
     } else if ((body && body.trim() !== '') || subject) {
       const patch = {};
       if (body && body.trim() !== '') {
+        const quotedBody = forwardDraft.body?.content || '';
         patch.body = {
           contentType: composed.contentType,
-          content: body,
+          content: `${body}${quotedBody}`,
         };
       }
       if (subject) {
