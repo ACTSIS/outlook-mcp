@@ -464,18 +464,18 @@ Nested mail-folder paths such as `Parent/Child/Archive` are resolved segment by 
 
 ### Email (10)
 
-| Tool                  | Purpose                                                                     |
-| --------------------- | --------------------------------------------------------------------------- |
-| `list-emails`         | List recent messages in a mail folder                                       |
-| `search-emails`       | Search by text, sender, recipient, subject, attachments, or unread state    |
-| `read-email`          | Read sanitized visible content; raw HTML is an explicit unsafe debug option |
-| `send-email`          | Send a new message or reply to an existing message                          |
-| `draft-email`         | Create a new draft or reply draft with optional local file attachments      |
-| `forward-draft`       | Create a forward draft quoting the original thread with empty recipients    |
-| `mark-as-read`        | Mark a message read or unread                                               |
-| `delete-email`        | Move a message to Deleted Items or permanently delete it                    |
-| `list-attachments`    | List attachment metadata for a message                                      |
-| `download-attachment` | Return attachment content, optionally decoded when text-like                |
+| Tool                  | Purpose                                                                                                                          |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `list-emails`         | List recent messages in a mail folder                                                                                            |
+| `search-emails`       | Search by text, sender, recipient, subject, attachments, or unread state                                                         |
+| `read-email`          | Read sanitized visible content; raw HTML is an explicit unsafe debug option                                                      |
+| `send-email`          | Send a new message or reply to an existing message                                                                               |
+| `draft-email`         | Create a new draft or reply draft with optional local file attachments                                                           |
+| `forward-draft`       | Create a forward draft quoting the original thread with empty recipients                                                         |
+| `mark-as-read`        | Mark a message read or unread                                                                                                    |
+| `delete-email`        | Move a message to Deleted Items or permanently delete it                                                                         |
+| `list-attachments`    | List attachment metadata for a message (sizes are Graph server-reported metadata and may differ slightly from the actual binary) |
+| `download-attachment` | Return attachment content, optionally decoded when text-like; always reports the exact decoded binary size                       |
 
 ### Email signatures (6)
 

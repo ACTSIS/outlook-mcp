@@ -75,12 +75,18 @@ async function handleDownloadAttachment(args) {
 
     const name = attachment.name || 'unnamed';
     const contentType = attachment.contentType || 'application/octet-stream';
-    const size = attachment.size || 0;
+    const metaSize = attachment.size || 0;
     const contentBytes = attachment.contentBytes || '';
 
+    // The decoded content is authoritative: Graph's metadata `size` is
+    // server-reported for the listing payload and can differ from the actual
+    // binary delivered in `contentBytes`.
+    const realSize = contentBytes ? Buffer.from(contentBytes, 'base64').length : 0;
+    const sizeNote = realSize !== metaSize ? ` (Graph metadata size: ${metaSize} bytes)` : '';
+
     let warning = '';
-    if (size > config.ATTACHMENT_SIZE_WARNING_THRESHOLD) {
-      const sizeMB = (size / (1024 * 1024)).toFixed(2);
+    if (realSize > config.ATTACHMENT_SIZE_WARNING_THRESHOLD) {
+      const sizeMB = (realSize / (1024 * 1024)).toFixed(2);
       warning = `\n⚠️ Warning: This attachment is ${sizeMB} MB, which exceeds the ${config.ATTACHMENT_SIZE_WARNING_THRESHOLD / (1024 * 1024)} MB threshold.`;
     }
 
@@ -93,7 +99,7 @@ async function handleDownloadAttachment(args) {
       }
     }
 
-    const output = `Attachment: ${name}\nType: ${contentType}\nSize: ${size} bytes${warning}\n\n${decodedText !== null ? `Content (decoded text):\n${decodedText}` : `Content (base64):\n${contentBytes}`}`;
+    const output = `Attachment: ${name}\nType: ${contentType}\nSize: ${realSize} bytes${sizeNote}${warning}\n\n${decodedText !== null ? `Content (decoded text):\n${decodedText}` : `Content (base64):\n${contentBytes}`}`;
 
     return {
       content: [

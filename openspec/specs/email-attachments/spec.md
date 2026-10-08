@@ -41,11 +41,21 @@ Define the behavior of `list-attachments` and `download-attachment` tools for li
 - THEN the response MUST include the base64-encoded content of the file
 - AND the response MUST include the attachment's name, contentType, and size
 
+#### Scenario: Downloaded attachment reports exact binary size
+
+- GIVEN an attachment whose `contentBytes` decodes to a different length than the Graph metadata `size` field
+- WHEN `download-attachment` is called
+- THEN the `Size:` line MUST report the decoded length of the base64 content (`Buffer.from(contentBytes, 'base64').length`)
+- AND the response MUST note Graph's metadata size when it differs from the actual size
+- AND the size warning threshold MUST be evaluated against the actual decoded size, not the metadata
+
 #### Scenario: Download attachment with invalid attachmentId returns error
 
 - GIVEN an email with no attachment matching "att-invalid"
 - WHEN `download-attachment` is called with `attachmentId="att-invalid"`
 - THEN the response MUST return an error message indicating the attachment was not found
+
+`list-attachments` and the attachments section of `read-email` report the `size` field returned by the Graph listing payload. This is server-reported metadata and may differ from the actual binary content; `download-attachment` always reports the exact decoded binary size.
 
 ### Requirement: Size Warning
 

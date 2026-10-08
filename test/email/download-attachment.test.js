@@ -51,13 +51,13 @@ describe('handleDownloadAttachment', () => {
       name: 'large-file.zip',
       contentType: 'application/zip',
       size: 15 * 1024 * 1024,
-      contentBytes: 'bGFyZ2UtYmFzZTY0LWNvbnRlbnQ=',
+      contentBytes: Buffer.alloc(15 * 1024 * 1024, 'a').toString('base64'),
     });
 
     const result = await handleDownloadAttachment({ emailId, attachmentId });
 
+    expect(result.content[0].text).toContain(`Size: ${15 * 1024 * 1024} bytes`);
     expect(result.content[0].text).toContain('exceeds the 10 MB threshold');
-    expect(result.content[0].text).toContain('bGFyZ2UtYmFzZTY0LWNvbnRlbnQ=');
   });
 
   test('should not include size warning for attachments below threshold', async () => {
@@ -140,5 +140,94 @@ describe('handleDownloadAttachment', () => {
     const result = await handleDownloadAttachment({ emailId, attachmentId });
 
     expect(result.content[0].text).toBe('Error downloading attachment: Attachment not found');
+  });
+
+  test('should report the exact decoded binary size, not the Graph metadata size', async () => {
+    ensureAuthenticated.mockResolvedValue(mockAccessToken);
+    const realContent = Buffer.alloc(450, 'x');
+    const contentBytes = realContent.toString('base64');
+    callGraphAPI.mockResolvedValue({
+      id: attachmentId,
+      name: 'mismatched.bin',
+      contentType: 'application/pdf',
+      size: 1000,
+      contentBytes,
+    });
+
+    const result = await handleDownloadAttachment({ emailId, attachmentId });
+    const text = result.content[0].text;
+    const realSize = Buffer.from(contentBytes, 'base64').length;
+
+    expect(Buffer.from('x').length * 450).toBe(realSize); // sanity: fixture differs from metadata
+    expect(realSize).not.toBe(1000);
+    expect(text).toContain(`Size: ${realSize} bytes`);
+    expect(text).toContain('Graph metadata size: 1000 bytes');
+    expect(text).not.toContain('Size: 1000 bytes');
+  });
+
+  test('should base the size warning on the real decoded size, not metadata', async () => {
+    ensureAuthenticated.mockResolvedValue(mockAccessToken);
+    const contentBytes = Buffer.alloc(11 * 1024 * 1024, 'z').toString('base64');
+    callGraphAPI.mockResolvedValue({
+      id: attachmentId,
+      name: 'under-reported.bin',
+      contentType: 'application/octet-stream',
+      size: 500 * 1024, // metadata claims it is below the 10 MB threshold
+      contentBytes,
+    });
+
+    const result = await handleDownloadAttachment({ emailId, attachmentId });
+    const text = result.content[0].text;
+    const realSize = Buffer.from(contentBytes, 'base64').length;
+
+    expect(realSize).toBeGreaterThan(11 * 1024 * 1024 - 1024);
+    expect(text).toContain(`Size: ${realSize} bytes`);
+    expect(text).toContain('exceeds the 10 MB threshold');
+  });
+
+  test('should not warn when the real size is below threshold even if metadata says otherwise', async () => {
+    ensureAuthenticated.mockResolvedValue(mockAccessToken);
+    callGraphAPI.mockResolvedValue({
+      id: attachmentId,
+      name: 'over-reported.bin',
+      contentType: 'application/octet-stream',
+      size: 15 * 1024 * 1024,
+      contentBytes: Buffer.from('small').toString('base64'),
+    });
+
+    const result = await handleDownloadAttachment({ emailId, attachmentId });
+
+    expect(result.content[0].text).not.toContain('exceeds the');
+    expect(result.content[0].text).toContain(`Size: ${Buffer.from('small').length} bytes`);
+  });
+
+  test('should report 0 bytes for empty contentBytes', async () => {
+    ensureAuthenticated.mockResolvedValue(mockAccessToken);
+    callGraphAPI.mockResolvedValue({
+      id: attachmentId,
+      name: 'empty.bin',
+      contentType: 'application/octet-stream',
+      size: 1000,
+      contentBytes: '',
+    });
+
+    const result = await handleDownloadAttachment({ emailId, attachmentId });
+
+    expect(result.content[0].text).toContain('Size: 0 bytes');
+    expect(result.content[0].text).toContain('Graph metadata size: 1000 bytes');
+  });
+
+  test('should report 0 bytes when contentBytes is missing', async () => {
+    ensureAuthenticated.mockResolvedValue(mockAccessToken);
+    callGraphAPI.mockResolvedValue({
+      id: attachmentId,
+      name: 'no-content.bin',
+      contentType: 'application/octet-stream',
+      size: 1000,
+    });
+
+    const result = await handleDownloadAttachment({ emailId, attachmentId });
+
+    expect(result.content[0].text).toContain('Size: 0 bytes');
   });
 });
