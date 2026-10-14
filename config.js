@@ -101,6 +101,12 @@ module.exports = {
   // Page size for count=0 full sweeps of a folder (bounded by nextLink paging)
   FOLDER_SWEEP_PAGE_SIZE: 50,
 
+  // Folder enumeration guards (issue #16, bug A): keep pathological folder graphs
+  // or very large mailboxes from hanging folder listing. The paging cap applies
+  // to every nextLink traversal; the depth cap only to recursive child descent.
+  MAX_PAGING_ROUNDS: 50,
+  MAX_FOLDER_DEPTH: 10,
+
   // Draft attachments (issue #14): total guard per draft. Graph accepts large
   // drafts but the practical safe boundary for base64-in-JSON payloads is ~3 MB
   // per attachment (4 MB request threshold applies to simple uploads).

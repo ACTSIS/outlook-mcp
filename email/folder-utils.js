@@ -1,6 +1,7 @@
 /**
  * Email folder utilities
  */
+const config = require('../config');
 const { callGraphAPI } = require('../utils/graph-api');
 
 /**
@@ -12,8 +13,8 @@ const { callGraphAPI } = require('../utils/graph-api');
  * @param {object} params - Query params for the first request
  * @returns {Promise<Array>} - Combined folder value array across pages
  */
-const MAX_PAGING_ROUNDS = 50;
 async function fetchAllPages(accessToken, path, params = {}) {
+  const { MAX_PAGING_ROUNDS } = config;
   const items = [];
   let currentUrl = path;
   let currentParams = params;

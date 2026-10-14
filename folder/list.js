@@ -3,6 +3,7 @@
  */
 const { callGraphAPI } = require('../utils/graph-api');
 const { ensureAuthenticated } = require('../auth');
+const { MAX_FOLDER_DEPTH, MAX_PAGING_ROUNDS } = require('../config');
 
 /**
  * List folders handler
@@ -76,9 +77,6 @@ async function handleListFolders(args) {
  * @param {number} depth - Current recursion depth
  * @returns {Promise<Array>} - Folder objects from this level and all deeper levels
  */
-const MAX_FOLDER_DEPTH = 10;
-const MAX_PAGING_ROUNDS = 50;
-
 async function collectFolders(accessToken, parentId, selectFields, visited = new Map(), depth = 0) {
   const base = parentId ? `me/mailFolders/${parentId}/childFolders` : 'me/mailFolders';
   if (depth > MAX_FOLDER_DEPTH) {
