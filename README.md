@@ -440,13 +440,13 @@ The existing npm installation remains supported through `bin/m365-mcp.js`, which
 
 ## What the server can do
 
-| Area                   | Supported operations                                                                                 |
-| ---------------------- | ---------------------------------------------------------------------------------------------------- |
-| Outlook mail           | List, search, read, draft, send/reply, mark, delete, attachments, and folder moves                   |
-| Calendar               | List, create, decline, cancel, and delete events                                                     |
-| Mail folders and rules | List/create folders, move messages, and list/create/reorder inbox rules                              |
-| OneDrive               | List/search, download URL, small and chunked uploads, sharing links, folders, and deletion           |
-| Power Automate         | List environments and solution-aware flows, run manual-trigger flows, inspect runs, and toggle flows |
+| Area                   | Supported operations                                                                                               |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Outlook mail           | List, search, read, draft, send/reply, mark, delete, attachments, and folder moves                                 |
+| Calendar               | List, create, decline, cancel, and delete events                                                                   |
+| Mail folders and rules | List/create folders, move messages, and list/create/reorder inbox rules                                            |
+| OneDrive               | List/search, download URL, small and chunked uploads (text or base64 binary), sharing links, folders, and deletion |
+| Power Automate         | List environments and solution-aware flows, run manual-trigger flows, inspect runs, and toggle flows               |
 
 Nested mail-folder paths such as `Parent/Child/Archive` are resolved segment by segment by `create-folder` and `move-emails`. A literal `/` in a folder name is not supported because `/` is always the path separator.
 
@@ -542,16 +542,16 @@ selector:
 
 ### OneDrive (8)
 
-| Tool                     | Purpose                                                 |
-| ------------------------ | ------------------------------------------------------- |
-| `onedrive-list`          | List items at a path                                    |
-| `onedrive-search`        | Search files by name or content                         |
-| `onedrive-download`      | Get a pre-authenticated download URL by item ID or path |
-| `onedrive-upload`        | Upload content smaller than 4 MB                        |
-| `onedrive-upload-large`  | Upload content through a chunked upload session         |
-| `onedrive-share`         | Create a view, edit, or embed sharing link              |
-| `onedrive-create-folder` | Create a folder at a path                               |
-| `onedrive-delete`        | Delete an item by ID or path                            |
+| Tool                     | Purpose                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------- |
+| `onedrive-list`          | List items at a path                                                                  |
+| `onedrive-search`        | Search files by name or content                                                       |
+| `onedrive-download`      | Get a pre-authenticated download URL by item ID or path (via the `/content` redirect) |
+| `onedrive-upload`        | Upload content smaller than 4 MB (text verbatim, or base64 binary)                    |
+| `onedrive-upload-large`  | Upload content through a chunked upload session (text or base64 binary)               |
+| `onedrive-share`         | Create a view, edit, or embed sharing link                                            |
+| `onedrive-create-folder` | Create a folder at a path                                                             |
+| `onedrive-delete`        | Delete an item by ID or path                                                          |
 
 ### Power Automate (5)
 

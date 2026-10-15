@@ -148,6 +148,92 @@ describe('Graph API helpers', () => {
       expect(https.request.mock.results[0].value.write).toHaveBeenCalledWith(JSON.stringify(data));
     });
 
+    test('writes an opt-in raw string body with a custom Content-Type', async () => {
+      mockRequests(response(201, '{}'));
+
+      await callGraphAPI(
+        'token',
+        'PUT',
+        'me/drive/root:/a.txt:/content',
+        null,
+        {},
+        {
+          rawBody: '<html>hello</html>',
+          contentType: 'text/plain',
+        }
+      );
+
+      const request = https.request.mock.results[0].value;
+      const call = https.request.mock.calls[0];
+      expect(call[1].headers['Content-Type']).toBe('text/plain');
+      expect(request.write).toHaveBeenCalledTimes(1);
+      expect(request.write).toHaveBeenCalledWith('<html>hello</html>');
+    });
+
+    test('writes an opt-in raw Buffer body verbatim as binary', async () => {
+      mockRequests(response(201, '{}'));
+      const bytes = Buffer.from([0x4e, 0x45, 0x00, 0xff]);
+
+      await callGraphAPI(
+        'token',
+        'PUT',
+        'me/drive/root:/a.bin:/content',
+        null,
+        {},
+        {
+          rawBody: bytes,
+          contentType: 'application/octet-stream',
+        }
+      );
+
+      const request = https.request.mock.results[0].value;
+      const call = https.request.mock.calls[0];
+      expect(call[1].headers['Content-Type']).toBe('application/octet-stream');
+      expect(request.write).toHaveBeenCalledTimes(1);
+      const written = request.write.mock.calls[0][0];
+      expect(Buffer.isBuffer(written)).toBe(true);
+      expect(written).toEqual(bytes);
+    });
+
+    test('sets explicit Content-Length for raw bodies', async () => {
+      mockRequests(response(201, '{}'));
+
+      await callGraphAPI(
+        'token',
+        'PUT',
+        'me/drive/root:/a.txt:/content',
+        null,
+        {},
+        {
+          rawBody: 'hi',
+          contentType: 'text/plain',
+        }
+      );
+
+      const { headers } = https.request.mock.calls[0][1];
+      expect(headers['Content-Length']).toBe(2);
+    });
+
+    test('ignores raw options when no body is provided', async () => {
+      mockRequests(response(200, '{}'));
+
+      await callGraphAPI(
+        'token',
+        'GET',
+        'me',
+        null,
+        {},
+        {
+          rawBody: 'ignored',
+          contentType: 'text/plain',
+        }
+      );
+
+      const request = https.request.mock.results[0].value;
+      expect(request.write).not.toHaveBeenCalled();
+      expect(https.request.mock.calls[0][1].headers['Content-Type']).toBe('application/json');
+    });
+
     test('returns parsed JSON for successful responses', async () => {
       mockRequests(response(201, '{"id":"message-id"}'));
 

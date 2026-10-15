@@ -13,6 +13,7 @@ const { ensureAuthenticated } = require('../auth');
 async function handleUpload(args) {
   const path = args.path;
   const content = args.content;
+  const isBase64 = args.base64 === true;
   const conflictBehavior = args.conflictBehavior || 'rename'; // rename, replace, fail
 
   if (!path) {
@@ -37,14 +38,29 @@ async function handleUpload(args) {
     };
   }
 
-  // Check size - this is for simple upload only
-  const contentSize = Buffer.byteLength(content, 'utf8');
-  if (contentSize > config.ONEDRIVE_UPLOAD_THRESHOLD) {
+  // Build the raw upload body: text content is sent verbatim as UTF-8, while
+  // base64-flagged content is decoded to a Buffer so binary files reach Graph
+  // unmodified instead of being wrapped in a JSON string literal.
+  let rawBody;
+  let contentType;
+  if (isBase64) {
+    rawBody = Buffer.from(content, 'base64');
+    contentType = 'application/octet-stream';
+  } else {
+    rawBody = content;
+    contentType = 'text/plain';
+  }
+
+  // Check size - this is for simple upload only.
+  // Always measure the actual bytes on the wire: decoded base64 content may be
+  // smaller (or larger) than its textual representation.
+  const bodyBytes = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(rawBody, 'utf8');
+  if (bodyBytes.length > config.ONEDRIVE_UPLOAD_THRESHOLD) {
     return {
       content: [
         {
           type: 'text',
-          text: `File is too large for simple upload (${formatSize(contentSize)}). Use onedrive-upload-large for files over 4MB.`,
+          text: `File is too large for simple upload (${formatSize(bodyBytes.length)}). Use onedrive-upload-large for files over 4MB.`,
         },
       ],
     };
@@ -62,7 +78,10 @@ async function handleUpload(args) {
       '@microsoft.graph.conflictBehavior': conflictBehavior,
     };
 
-    const response = await callGraphAPI(accessToken, 'PUT', endpoint, content, queryParams);
+    const response = await callGraphAPI(accessToken, 'PUT', endpoint, null, queryParams, {
+      rawBody: rawBody,
+      contentType: contentType,
+    });
 
     if (!response || !response.id) {
       return {

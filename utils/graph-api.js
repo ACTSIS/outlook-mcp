@@ -12,9 +12,19 @@ const mockData = require('./mock-data');
  * @param {string} path - API endpoint path
  * @param {object} data - Data to send for POST/PUT requests
  * @param {object} queryParams - Query parameters
+ * @param {object} [requestOptions] - Optional body overrides for raw content
+ * @param {string|Buffer} [requestOptions.rawBody] - Body written verbatim (no JSON wrapping)
+ * @param {string} [requestOptions.contentType] - Content-Type used with rawBody
  * @returns {Promise<object>} - The API response
  */
-async function callGraphAPI(accessToken, method, path, data = null, queryParams = {}) {
+async function callGraphAPI(
+  accessToken,
+  method,
+  path,
+  data = null,
+  queryParams = {},
+  requestOptions = {}
+) {
   // For test tokens, we'll simulate the API call
   if (config.USE_TEST_MODE && accessToken.startsWith('test_access_token_')) {
     console.error(`TEST MODE: Simulating ${method} ${path} API call`);
@@ -101,11 +111,16 @@ async function callGraphAPI(accessToken, method, path, data = null, queryParams 
         finalUrl.includes('toRecipients%2Fany') ||
         finalUrl.includes('toRecipients/any');
 
+      const hasBodyPath = method === 'POST' || method === 'PATCH' || method === 'PUT';
+      const usesRawBody = hasBodyPath && requestOptions.rawBody !== undefined;
+
       const options = {
         method: method,
         headers: {
           Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
+          'Content-Type': usesRawBody
+            ? requestOptions.contentType || 'application/octet-stream'
+            : 'application/json',
         },
       };
 
@@ -150,7 +165,12 @@ async function callGraphAPI(accessToken, method, path, data = null, queryParams 
         );
       });
 
-      if (data && (method === 'POST' || method === 'PATCH' || method === 'PUT')) {
+      if (usesRawBody) {
+        const body = requestOptions.rawBody;
+        const bodyBytes = Buffer.isBuffer(body) ? body : Buffer.from(body, 'utf8');
+        options.headers['Content-Length'] = bodyBytes.length;
+        req.write(body);
+      } else if (data && hasBodyPath) {
         req.write(JSON.stringify(data));
       }
 

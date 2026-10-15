@@ -71,7 +71,8 @@ const onedriveTools = [
   },
   {
     name: 'onedrive-upload',
-    description: 'Upload a small file (< 4MB) to OneDrive',
+    description:
+      'Upload a small file (< 4MB) to OneDrive; text is sent verbatim, binary via base64 flag (issue #41)',
     inputSchema: {
       type: 'object',
       properties: {
@@ -82,6 +83,11 @@ const onedriveTools = [
         content: {
           type: 'string',
           description: 'File content to upload',
+        },
+        base64: {
+          type: 'boolean',
+          description:
+            'Set true when content is base64-encoded binary data; it is decoded and sent as application/octet-stream',
         },
         conflictBehavior: {
           type: 'string',
@@ -106,6 +112,11 @@ const onedriveTools = [
         content: {
           type: 'string',
           description: 'File content to upload',
+        },
+        base64: {
+          type: 'boolean',
+          description:
+            'Set true when content is base64-encoded binary data; it is decoded before chunked upload',
         },
         conflictBehavior: {
           type: 'string',
