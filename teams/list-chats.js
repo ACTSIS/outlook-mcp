@@ -85,16 +85,12 @@ function formatListResults(response) {
   const chatList = response.value
     .map((chat, index) => {
       const topic = chat.topic || '(unnamed chat)';
-      const members =
-        typeof chat.memberCount === 'number'
-          ? `${chat.memberCount} members`
-          : 'unknown member count';
       const updated = chat.lastUpdatedDateTime
         ? new Date(chat.lastUpdatedDateTime).toLocaleString()
         : 'unknown date';
       const preview = chat.lastMessagePreview ? chat.lastMessagePreview.replace(/\r?\n/g, ' ') : '';
 
-      return `${index + 1}. ${topic}\nMembers: ${members}\nLast updated: ${updated}\nID: ${chat.id}\n${preview}\n`;
+      return `${index + 1}. ${topic}\nLast updated: ${updated}\nID: ${chat.id}\n${preview}\n`;
     })
     .join('\n');
 

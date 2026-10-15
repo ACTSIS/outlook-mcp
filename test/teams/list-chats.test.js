@@ -14,14 +14,12 @@ describe('handleListChats', () => {
       topic: 'Project Alpha',
       lastMessagePreview: 'Last message body',
       lastUpdatedDateTime: '2024-03-15T10:30:00Z',
-      memberCount: 5,
     },
     {
       id: 'chat-2',
       topic: 'One-on-one',
       lastMessagePreview: 'Hello there',
       lastUpdatedDateTime: '2024-03-14T09:00:00Z',
-      memberCount: 2,
     },
   ];
 
@@ -109,7 +107,6 @@ describe('handleListChats', () => {
             id: 'chat-3',
             lastMessagePreview: 'Hi',
             lastUpdatedDateTime: '2024-03-13T08:00:00Z',
-            memberCount: 2,
           },
         ],
       });
