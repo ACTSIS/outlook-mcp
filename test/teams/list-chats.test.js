@@ -200,7 +200,9 @@ describe('handleListChats', () => {
     function sweepWith(chats) {
       callGraphAPIPaginated.mockImplementation(async (token, method, path) => {
         if (path === 'me/chats') {
-          return { value: chats };
+          // Clone so handler mutations (lastActivityDateTime probing) on one
+          // test's chat objects cannot leak into the next test.
+          return { value: chats.map((chat) => ({ ...chat })) };
         }
         return { value: [] };
       });
@@ -248,6 +250,39 @@ describe('handleListChats', () => {
 
       expect(result.content[0].text).toContain('Blas chat');
       expect(result.content[0].text).toContain('ID: stale-one-on-one');
+    });
+
+    test('falls back to the chat metadata when the probe returns no message', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      sweepWith([staleChat]);
+      callGraphAPI.mockResolvedValue({ value: [] });
+
+      const result = await handleListChats({ count: 1 });
+
+      const text = result.content[0].text;
+      expect(text).toContain('Blas chat');
+      // The empty probe leaves no probed activity time, so the rendered
+      // "Last updated" must come from the swept metadata.
+      expect(text).toContain(new Date(staleChat.lastUpdatedDateTime).toLocaleString());
+    });
+
+    test('renders the probed activity time as the shown Last updated', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      sweepWith([staleChat]);
+      callGraphAPI.mockImplementation(async (token, method, path) => {
+        if (path.startsWith('me/chats/stale-one-on-one/messages')) {
+          return { value: [{ id: 'm1', createdDateTime: '2026-10-15T16:53:16Z' }] };
+        }
+        return { value: [] };
+      });
+
+      const result = await handleListChats({ count: 1 });
+
+      const text = result.content[0].text;
+      // Graph reported April, but the probed message arrived in October: the
+      // rendered date must be the probed one, not the stale metadata.
+      expect(text).toContain(new Date('2026-10-15T16:53:16Z').toLocaleString());
+      expect(text).not.toContain(new Date(staleChat.lastUpdatedDateTime).toLocaleString());
     });
   });
 });
