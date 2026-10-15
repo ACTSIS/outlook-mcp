@@ -28,6 +28,9 @@ Branch: `feat/sites-content-redirect`.
 - T2 (S1, S2) fix(sites): redirect implementation in sites/download-site-file.js, GREEN + suite
 - T3 (S3) verification: live end-to-end + full suite + lint + format
 - T4 (S3) docs: OpenSpec sharepoint spec + README; commits; PR (Fixes #43)
+  → DONE: commits f49dadd (fix), 4ec32ec (docs); PR #44 opened and MERGEABLE;
+  native assess risk medium / reviewDue=false (under_budget, 5 files / 137 lines);
+  CI PASS both runs (Node 22.22.1 + 24). Merge owner decision.
 
 ## Log
 
