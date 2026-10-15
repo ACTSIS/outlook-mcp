@@ -39,3 +39,4 @@ Source: user question (2026-10-14) about replicating the Outlook "From" behavior
 
 - L1 (2026-10-14): user question verbatim in S1; approach agreed: delegated `.Shared` scopes (not app-only) to mirror Outlook's per-user control.
 - L2 (2026-10-14): Entra ID app "M365 MCP Server" permissions added by user: `Mail.Send.Shared`, `Mail.ReadWrite.Shared`, `Calendars.Read.Shared` (pending admin consent at doc time); consent via "Conceder consentimiento de administrador".
+- L3 (2026-10-14): T1-T3 implemented test-first (RED: 29 focused failures observed; GREEN: 81/81 focused, 832/832 full). Worker run timed out once mid-bash and resumed; deliverables completed. Deviations: two pre-existing draft schema tests relaxed to `stringContaining` (descriptions still guard the contract); `forward-draft` deliberately out of scope (own copy of the native-reply flow — candidate for a later task). Commit evidence recorded after parent review.

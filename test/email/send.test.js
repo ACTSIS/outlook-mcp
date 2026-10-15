@@ -288,6 +288,116 @@ describe('handleSendEmail', () => {
   });
 });
 
+describe('send-email with the from shared mailbox parameter (issue #28)', () => {
+  const accessToken = 'dummy_access_token';
+  const mailbox = 'sac.soporte@actsis.com';
+  const mailoboxPrefix = 'users/sac.soporte%40actsis.com/';
+
+  beforeEach(() => {
+    ensureAuthenticated.mockReset();
+    ensureAuthenticated.mockResolvedValue(accessToken);
+    callGraphAPI.mockReset();
+    callGraphAPI.mockResolvedValue({});
+    composeEmail.mockImplementation(({ body, isHtml }) =>
+      Promise.resolve({ body, contentType: isHtml ? 'html' : 'text', attachments: [] })
+    );
+  });
+
+  test('sends a new email via users/{from}/sendMail', async () => {
+    const result = await handleSendEmail({
+      from: mailbox,
+      to: 'client@example.com',
+      subject: 'SAC issue',
+      body: 'Body',
+    });
+
+    expect(callGraphAPI).toHaveBeenCalledWith(
+      accessToken,
+      'POST',
+      `${mailoboxPrefix}sendMail`,
+      expect.objectContaining({
+        message: expect.objectContaining({ subject: 'SAC issue' }),
+        saveToSentItems: true,
+      })
+    );
+    expect(result.content[0].text).toContain('Email sent successfully');
+  });
+
+  test('sends an unsigned shared-mailbox reply through users/{from}/messages/{id}/reply', async () => {
+    await handleSendEmail({ from: mailbox, replyToId: 'orig-id', body: 'Reply' });
+
+    expect(callGraphAPI).toHaveBeenCalledTimes(1);
+    expect(callGraphAPI).toHaveBeenCalledWith(
+      accessToken,
+      'POST',
+      `${mailoboxPrefix}messages/orig-id/reply`,
+      { message: { body: { contentType: 'text', content: 'Reply' } } }
+    );
+  });
+
+  test('routes a signed native reply through the shared mailbox', async () => {
+    composeEmail.mockResolvedValue({
+      body: '<p>Reply</p>',
+      contentType: 'html',
+      attachments: [],
+      hasSignature: true,
+    });
+    callGraphAPI
+      .mockResolvedValueOnce({ id: 'draft-9', body: { content: '<blockquote>Q</blockquote>' } })
+      .mockResolvedValue({});
+
+    await handleSendEmail({ from: mailbox, replyToId: 'orig-id', body: 'Reply' });
+
+    expect(callGraphAPI.mock.calls.map((c) => c[2])).toEqual([
+      `${mailoboxPrefix}messages/orig-id/createReply`,
+      `${mailoboxPrefix}messages/draft-9`,
+      `${mailoboxPrefix}messages/draft-9/send`,
+    ]);
+  });
+
+  test('rejects a malformed from address before authentication', async () => {
+    for (const badFrom of ['sac.soporte@', '@actsis.com', 'not-an-email', '']) {
+      const result = await handleSendEmail({
+        from: badFrom,
+        to: 'client@example.com',
+        subject: 'Subject',
+        body: 'Body',
+      });
+
+      expect(result.content[0].text).toContain('Invalid from address');
+      expect(ensureAuthenticated).not.toHaveBeenCalled();
+      expect(callGraphAPI).not.toHaveBeenCalled();
+    }
+  });
+
+  test('maps a shared-mailbox 403 to MAILBOX_ACCESS_DENIED without a /me fallback', async () => {
+    callGraphAPI.mockRejectedValue(
+      new Error('API call failed with status 403: {"error":{"code":"ErrorAccessDenied"}}')
+    );
+
+    const result = await handleSendEmail({
+      from: mailbox,
+      to: 'client@example.com',
+      subject: 'Subject',
+      body: 'Body',
+    });
+
+    const text = result.content[0].text;
+    expect(text).toContain('MAILBOX_ACCESS_DENIED');
+    expect(text).toContain(mailbox);
+    expect(text).toContain('Send As');
+    expect(text).toContain('Full Access');
+    expect(text).toContain('403');
+    expect(callGraphAPI).toHaveBeenCalledTimes(1);
+  });
+
+  test('routes user-supplied shared-mailbox arguments without disturbing the /me path', async () => {
+    await handleSendEmail({ to: 'a@b.com', subject: 'S', body: 'B' });
+
+    expect(callGraphAPI.mock.calls[0][2]).toBe('me/sendMail');
+  });
+});
+
 describe('send-email tool schema', () => {
   test('issue #4: accepts replyToId and requires only body globally', () => {
     const sendTool = emailTools.find(({ name }) => name === 'send-email');
@@ -295,8 +405,9 @@ describe('send-email tool schema', () => {
     expect(sendTool.inputSchema.required).toEqual(['body']);
     expect(sendTool.inputSchema.properties.replyToId).toEqual({
       type: 'string',
-      description:
-        'ID of the existing message to reply to. When provided, recipients and subject are inherited from the original message.',
+      description: expect.stringContaining(
+        'ID of the existing message to reply to. When provided, recipients and subject are inherited from the original message.'
+      ),
     });
     expect(sendTool.inputSchema.properties.to.description).toContain(
       'Required when creating a new email'
@@ -304,5 +415,14 @@ describe('send-email tool schema', () => {
     expect(sendTool.inputSchema.properties.subject.description).toContain(
       'Required when creating a new email'
     );
+  });
+
+  test('issue #28: declares the optional from shared mailbox parameter', () => {
+    const sendTool = emailTools.find(({ name }) => name === 'send-email');
+
+    expect(sendTool.inputSchema.properties.from).toEqual({
+      type: 'string',
+      description: expect.stringContaining('shared mailbox'),
+    });
   });
 });

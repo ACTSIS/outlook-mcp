@@ -9,6 +9,12 @@ describe('config constants', () => {
     expect(config.AUTH_CONFIG.scopes).toContain('Chat.ReadWrite');
   });
 
+  test('issue #28: default Graph scope list includes the delegated shared-mailbox scopes', () => {
+    expect(config.AUTH_CONFIG.scopes).toEqual(
+      expect.arrayContaining(['Mail.Send.Shared', 'Mail.ReadWrite.Shared', 'Calendars.Read.Shared'])
+    );
+  });
+
   test('default Graph scope list requests only the Teams chat scope needed for the chat tools', () => {
     const chatScopes = config.AUTH_CONFIG.scopes.filter((scope) => scope.startsWith('Chat.'));
     expect(chatScopes).toEqual(['Chat.ReadWrite']);

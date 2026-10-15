@@ -329,6 +329,94 @@ describe('handleDraftEmail', () => {
   });
 });
 
+describe('draft-email with the from shared mailbox parameter (issue #28)', () => {
+  const accessToken = 'dummy_access_token';
+  const mailbox = 'sac.soporte@actsis.com';
+  const mailoboxPrefix = 'users/sac.soporte%40actsis.com/';
+
+  beforeEach(() => {
+    callGraphAPI.mockReset();
+    ensureAuthenticated.mockReset();
+    ensureAuthenticated.mockResolvedValue(accessToken);
+    callGraphAPI.mockResolvedValue({ id: 'draft-123', subject: 'Test subject' });
+    composeEmail.mockImplementation(({ body = '', isHtml }) =>
+      Promise.resolve({ body, contentType: isHtml === true ? 'html' : 'text', attachments: [] })
+    );
+  });
+
+  test('creates a new draft under users/{from}/messages', async () => {
+    const result = await handleDraftEmail({
+      from: mailbox,
+      to: 'client@external.com',
+      body: 'Body',
+    });
+
+    expect(callGraphAPI.mock.calls[0][2]).toBe(`${mailoboxPrefix}messages`);
+    expect(callGraphAPI.mock.calls[0][3].toRecipients).toEqual([
+      { emailAddress: { address: 'client@external.com' } },
+    ]);
+    expect(result.content[0].text).toContain('Draft created successfully');
+  });
+
+  test('creates an unsigned reply draft inside the shared mailbox', async () => {
+    await handleDraftEmail({ from: mailbox, replyToId: 'orig-id', body: 'Reply' });
+
+    expect(callGraphAPI.mock.calls.map((c) => c[2])).toEqual([
+      `${mailoboxPrefix}messages/orig-id/createReply`,
+      `${mailoboxPrefix}messages/draft-123`,
+    ]);
+  });
+
+  test('creates a signed reply draft and posts attachments inside the shared mailbox', async () => {
+    composeEmail.mockResolvedValue({
+      body: '<p>Reply</p>',
+      contentType: 'html',
+      attachments: [{ contentId: 'logo', contentBytes: 'aA==' }],
+      hasSignature: true,
+    });
+    callGraphAPI
+      .mockResolvedValueOnce({ id: 'draft-9', body: { content: '<blockquote>Q</blockquote>' } })
+      .mockResolvedValue({});
+
+    await handleDraftEmail({ from: mailbox, replyToId: 'orig-id', body: 'Reply' });
+
+    expect(callGraphAPI.mock.calls.map((c) => c[2])).toEqual([
+      `${mailoboxPrefix}messages/orig-id/createReply`,
+      `${mailoboxPrefix}messages/draft-9`,
+      `${mailoboxPrefix}messages/draft-9/attachments`,
+    ]);
+  });
+
+  test('rejects a malformed from address before authentication', async () => {
+    const result = await handleDraftEmail({ from: 'sac.soporte@', body: 'Body' });
+
+    expect(result.content[0].text).toContain('Invalid from address');
+    expect(ensureAuthenticated).not.toHaveBeenCalled();
+    expect(callGraphAPI).not.toHaveBeenCalled();
+  });
+
+  test('maps a shared-mailbox 403 to MAILBOX_ACCESS_DENIED without a /me fallback', async () => {
+    callGraphAPI.mockRejectedValue(
+      new Error('API call failed with status 403: {"error":{"code":"ErrorAccessDenied"}}')
+    );
+
+    const result = await handleDraftEmail({ from: mailbox, to: 'a@b.com', body: 'Body' });
+
+    const text = result.content[0].text;
+    expect(text).toContain('MAILBOX_ACCESS_DENIED');
+    expect(text).toContain(mailbox);
+    expect(text).toContain('Full Access');
+    expect(text).toContain('403');
+    expect(callGraphAPI).toHaveBeenCalledTimes(1);
+  });
+
+  test('keeps the /me draft path when from is absent', async () => {
+    await handleDraftEmail({ to: 'a@b.com' });
+
+    expect(callGraphAPI.mock.calls[0][2]).toBe('me/messages');
+  });
+});
+
 describe('draft-email tool schema', () => {
   test('declares the optional isHtml boolean with fallback behavior', () => {
     const draftTool = emailTools.find(({ name }) => name === 'draft-email');
@@ -341,14 +429,25 @@ describe('draft-email tool schema', () => {
     });
   });
 
+  test('issue #28: exposes the optional from shared mailbox parameter', () => {
+    const draftTool = emailTools.find(({ name }) => name === 'draft-email');
+
+    expect(draftTool.inputSchema.properties.from).toEqual({
+      type: 'string',
+      description: expect.stringContaining('shared mailbox'),
+    });
+    expect(draftTool.inputSchema.required).toEqual([]);
+  });
+
   test('issue #4: exposes replyToId without requiring new-message fields', () => {
     const draftTool = emailTools.find(({ name }) => name === 'draft-email');
 
     expect(draftTool.inputSchema.required).toEqual([]);
     expect(draftTool.inputSchema.properties.replyToId).toEqual({
       type: 'string',
-      description:
-        'ID of the existing message to reply to. When provided, recipients and subject are inherited from the original message.',
+      description: expect.stringContaining(
+        'ID of the existing message to reply to. When provided, recipients and subject are inherited from the original message.'
+      ),
     });
   });
 });

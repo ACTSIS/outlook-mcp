@@ -143,6 +143,11 @@ const emailTools = [
           description:
             'Comma-separated list of recipient email addresses. Required when creating a new email; inherited from the original message when replying.',
         },
+        from: {
+          type: 'string',
+          description:
+            "Optional shared mailbox UPN/email (e.g. 'sac.soporte@actsis.com') to send from. Requires the delegated Mail.Send.Shared scope plus Exchange Send As or Full Access delegation on that mailbox for your account; on a missing delegation Graph returns 403 (MAILBOX_ACCESS_DENIED) with no fallback. Omit to send from your own mailbox.",
+        },
         cc: {
           type: 'string',
           description: 'Comma-separated list of CC recipient email addresses',
@@ -168,7 +173,7 @@ const emailTools = [
         replyToId: {
           type: 'string',
           description:
-            'ID of the existing message to reply to. When provided, recipients and subject are inherited from the original message.',
+            'ID of the existing message to reply to. When provided, recipients and subject are inherited from the original message. With from set, the ID must exist in that shared mailbox.',
         },
         signatureName: {
           type: 'string',
@@ -203,6 +208,11 @@ const emailTools = [
           type: 'string',
           description: 'Comma-separated list of recipient email addresses',
         },
+        from: {
+          type: 'string',
+          description:
+            "Optional shared mailbox UPN/email (e.g. 'sac.soporte@actsis.com') to create the draft in. Requires the delegated Mail.ReadWrite.Shared scope plus Exchange Full Access or Send As delegation on that mailbox for your account; on a missing delegation Graph returns 403 (MAILBOX_ACCESS_DENIED) with no fallback. Omit to draft in your own mailbox.",
+        },
         cc: {
           type: 'string',
           description: 'Comma-separated list of CC recipient email addresses',
@@ -227,7 +237,7 @@ const emailTools = [
         replyToId: {
           type: 'string',
           description:
-            'ID of the existing message to reply to. When provided, recipients and subject are inherited from the original message.',
+            'ID of the existing message to reply to. When provided, recipients and subject are inherited from the original message. With from set, the ID must exist in that shared mailbox.',
         },
         signatureName: {
           type: 'string',
