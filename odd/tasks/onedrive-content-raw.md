@@ -43,7 +43,10 @@ ACTSIS/outlook-mcp#41. Branch: `feat/onedrive-content-raw`.
   900/900 tests, eslint clean, prettier clean; drive test artifacts deleted)
 - T5 (S4) docs: README + OpenSpec onedrive spec; record evidence
   → DONE: commit 27fdea9 (new openspec/specs/onedrive/spec.md + traceability row)
-- T4 (S5) docs: README + OpenSpec onedrive spec; record evidence
+- T6 delivery: PR #42 (Fixes #41, base main, head feat/onedrive-content-raw).
+  Native assess: risk medium, reviewDue=false (under_budget, base-diff 13 files / 874 lines,
+  plan writerSelfVerification only) — no native review lineage opened per contract.
+  CI (Node 22.22.1/24: npm ci, lint, test): both runs PASS — merged as accf2c8.
 
 ## Log
 

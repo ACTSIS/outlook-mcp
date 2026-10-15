@@ -10,6 +10,7 @@ This document maps current canonical specifications to the archived changes that
 | Flow token lifecycle  | [`specs/flow-token-management/spec.md`](specs/flow-token-management/spec.md) | `outlook-auth-server.js`, `auth/token-storage.js`                         |
 | Power Automate tools  | [`specs/power-automate/spec.md`](specs/power-automate/spec.md)               | `power-automate/` handlers and `flow-api.js`                              |
 | SharePoint site tools | [`specs/sharepoint/spec.md`](specs/sharepoint/spec.md)                       | `sites/` handlers (`list-sites`, `list-site-files`, `download-site-file`) |
+| OneDrive file tools   | [`specs/onedrive/spec.md`](specs/onedrive/spec.md)                           | `onedrive/` handlers (`upload`, `upload-large`, `download`)               |
 
 ## Archived Change Lineage
 
