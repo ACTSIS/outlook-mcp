@@ -25,18 +25,30 @@ async function handleListChats(args) {
       response = pageResponse;
     } else {
       const queryParams = {
-        $top: Math.min(config.MAX_RESULT_COUNT, requestedCount),
+        $top: config.MAX_RESULT_COUNT >= requestedCount ? requestedCount : config.MAX_RESULT_COUNT,
         $select: config.CHAT_SELECT_FIELDS,
       };
 
-      // Make API call with pagination support
-      response = await callGraphAPIPaginated(
+      // Graph v1.0 rejects $orderby on lastUpdatedDateTime (issue #35), so the
+      // page order is arbitrary: sweep up to CHATS_SWEEP_LIMIT chats and sort
+      // newest-first client-side before returning the requested count.
+      const sweepLimit = Math.max(config.CHATS_SWEEP_LIMIT, requestedCount);
+      const swept = await callGraphAPIPaginated(
         accessToken,
         'GET',
         'me/chats',
         queryParams,
-        requestedCount
+        sweepLimit
       );
+      const chats = Array.isArray(swept.value) ? swept.value : [];
+      response = {
+        ...swept,
+        value: chats
+          .sort(
+            (a, b) => new Date(b.lastUpdatedDateTime || 0) - new Date(a.lastUpdatedDateTime || 0)
+          )
+          .slice(0, requestedCount),
+      };
     }
 
     return formatListResults(response);
