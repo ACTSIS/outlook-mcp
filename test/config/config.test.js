@@ -24,6 +24,15 @@ describe('config constants', () => {
     expect(config.CHAT_SELECT_FIELDS).not.toContain('memberCount');
   });
 
+  test('issue #18 (reduced): default Graph scope list includes delegated Sites.Read.All', () => {
+    expect(config.AUTH_CONFIG.scopes).toContain('Sites.Read.All');
+  });
+
+  test('issue #18 (reduced): no write or app-only SharePoint scope is requested by default', () => {
+    expect(config.AUTH_CONFIG.scopes).not.toContain('Sites.ReadWrite.All');
+    expect(config.AUTH_CONFIG.scopes).not.toContain('Sites.Selected');
+  });
+
   test('uses MS_* credentials when OUTLOOK_* credentials are absent', () => {
     const originalOutlookClientId = process.env.OUTLOOK_CLIENT_ID;
     const originalOutlookClientSecret = process.env.OUTLOOK_CLIENT_SECRET;
