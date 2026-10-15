@@ -101,6 +101,9 @@ module.exports = {
 
   // Teams chat constants
   CHAT_SELECT_FIELDS: 'id,topic,lastMessagePreview,lastUpdatedDateTime',
+  // Graph v1.0 rejects $orderby on chats (issue #35): sweep up to this many
+  // chats via nextLink pagination, then sort by lastUpdatedDateTime client-side.
+  CHATS_SWEEP_LIMIT: 200,
 
   // Pagination
   DEFAULT_PAGE_SIZE: 25,

@@ -50,7 +50,7 @@ describe('handleListChats', () => {
           $top: config.MAX_RESULT_COUNT,
           $select: config.CHAT_SELECT_FIELDS,
         }),
-        config.MAX_RESULT_COUNT
+        config.CHATS_SWEEP_LIMIT
       );
       expect(result.content[0].text).toContain('Found 2 chats');
       expect(result.content[0].text).toContain('Project Alpha');
@@ -59,16 +59,18 @@ describe('handleListChats', () => {
 
     test('should respect a custom count parameter', async () => {
       ensureAuthenticated.mockResolvedValue(mockAccessToken);
-      callGraphAPIPaginated.mockResolvedValue({ value: [mockChats[0]] });
+      // The sweep always pages up to CHATS_SWEEP_LIMIT; the custom count only
+      // bounds the rendered result.
+      callGraphAPIPaginated.mockResolvedValue({ value: [mockChats[0], mockChats[1]] });
 
-      const result = await handleListChats({ count: 5 });
+      const result = await handleListChats({ count: 1 });
 
       expect(callGraphAPIPaginated).toHaveBeenCalledWith(
         mockAccessToken,
         'GET',
         'me/chats',
-        expect.objectContaining({ $top: 5 }),
-        5
+        expect.objectContaining({ $top: 1 }),
+        config.CHATS_SWEEP_LIMIT
       );
       expect(result.content[0].text).toContain('Found 1 chats');
     });
@@ -156,6 +158,26 @@ describe('handleListChats', () => {
       const result = await handleListChats({});
 
       expect(result.content[0].text).toBe('Error listing chats: UNAUTHORIZED');
+    });
+  });
+
+  describe('activity ordering (issue #35)', () => {
+    test('sweeps unsorted pages and renders newest-first', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      // Graph pages accumulate unsorted (issue #35): the older chat can arrive
+      // before the fresher one within the swept value array.
+      callGraphAPIPaginated.mockResolvedValue({
+        value: [
+          { id: 'chat-old', topic: 'Old chat', lastUpdatedDateTime: '2024-01-01T00:00:00Z' },
+          { id: 'chat-new', topic: 'Fresh chat', lastUpdatedDateTime: '2025-01-05T00:00:00Z' },
+        ],
+      });
+
+      const result = await handleListChats({ count: 2 });
+
+      const text = result.content[0].text;
+      expect(text.indexOf('1. Fresh chat')).toBeGreaterThan(-1);
+      expect(text.indexOf('Old chat')).toBeGreaterThan(text.indexOf('Fresh chat'));
     });
   });
 });
