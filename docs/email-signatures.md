@@ -17,6 +17,12 @@ Selection order for every `send-email` and `draft-email` operation is:
 3. Otherwise, the shared default is used when configured.
 4. Without a selected signature, the existing unsigned email behavior is preserved.
 
+`forward-draft` (issue #15) builds a forward draft that quotes the original thread as embedded
+content (inline images and the quoted signature intact) with empty recipients. The same selection
+order applies: `includeSignature: false` omits it, `signatureName` forces a specific one, and the
+shared default is prepended above the quoted thread along with any caller-supplied `body` text.
+Like `draft-email`, it saves a draft only — no mail is sent.
+
 ## HTML and CID images
 
 Signature HTML is allowlisted. Scripts, event handlers, remote URLs, `data:` images, unsupported
