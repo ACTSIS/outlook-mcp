@@ -17,13 +17,13 @@ Source: owner decision 2026-10-15 — keep the delegated `.Shared`-style approac
 
 ## Tasks
 
-### T1: Scope + `sites/` domain (TDD)
+### T1: Scope + `sites/` domain (TDD) — DONE (commit 39067e2)
 
 - RED first: `test/config/` scope-union test including `Sites.Read.All`; `test/sites/` handler tests for the three tools (validation, success endpoints/fixtures, error mapping).
 - GREEN: add scope to `config.js` (`DEFAULT_AUTH_SCOPES`), create `sites/list-sites.js`, `sites/list-site-files.js`, `sites/download-site-file.js`, `sites/index.js`; wire into root `index.js` and add `SITE_SELECT_FIELDS` to `config.js`.
 - Focused: `npx jest test/sites test/config test/index.test.js`.
 
-### T2: Docs + OpenSpec + full gate
+### T2: Docs + OpenSpec + full gate — DONE (commit 9de8efc)
 
 - README tool table rows + section; `docs/authentication.md` scope union + delegated-only note (incl. the `MS_SCOPES` override warning); new `openspec/specs/sharepoint/spec.md` following the per-behavior rule.
 - Focused: docs consistency check; then full `npm test`, `npm run lint`, `npm run format:check`.
@@ -36,3 +36,4 @@ Source: owner decision 2026-10-15 — keep the delegated `.Shared`-style approac
 
 - L1 (2026-10-15): user mandate (verbatim): "Vamos con tu sugerencia, ya le he dado el permiso a la app en Entra ID, solo falta implementarlo aquí". Standing constraint from the #28 discussion: no application permissions; delegated `Sites.Read.All` only. Scope per S2-S5; acceptance criteria from the rewritten issue.
 - L2 (2026-10-15): Live-token note: a previously acquired token keeps its old `scp`; the user must re-run initial acquisition (`npm run auth-server` flow) once so the token contains `Sites.Read.All`. Verification of the token's `scp` is an explicit acceptance check after T1.
+- L3 (2026-10-15): TDD cycle completed: RED (missing modules/scope) → GREEN. One defect caught by tests during GREEN: full-path encodeURIComponent corrupted the `root:/a/b` separators; fixed by per-segment encoding in both list-site-files and download-site-file, pinned by a multi-segment test. Focused 37/37; later 869/869 full suite, lint + Prettier clean. Commits 39067e2 (T1), 9de8efc (T2).
