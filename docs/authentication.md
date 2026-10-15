@@ -45,7 +45,9 @@ Graph initial acquisition requests the configured built-in delegated scope union
 
 ```text
 offline_access User.Read Mail.Read Mail.ReadWrite Mail.Send
-Calendars.Read Calendars.ReadWrite Contacts.Read Files.Read Files.ReadWrite
+Mail.Send.Shared Mail.ReadWrite.Shared
+Calendars.Read Calendars.ReadWrite Calendars.Read.Shared
+Contacts.Read Files.Read Files.ReadWrite
 ```
 
 `offline_access` is required for Microsoft to issue a refresh token. Power Automate uses a separate authorization and token exchange with:
@@ -55,6 +57,21 @@ https://service.flow.microsoft.com/.default
 ```
 
 The active callback server creates a random 32-byte state value, keeps it in memory for up to ten minutes, records whether it belongs to Graph or Flow, and consumes it once at callback. Restarting the auth server invalidates outstanding states.
+
+### Per-user shared-mailbox enforcement
+
+The delegated `.Shared` scopes (`Mail.Send.Shared`, `Mail.ReadWrite.Shared`, `Calendars.Read.Shared`)
+enable acting on mailboxes other than the signed-in user, but they authorize **nobody by default**.
+Whether a given user may send or draft in a shared mailbox is decided by Exchange delegation on that
+mailbox — Send As, Send on Behalf, or Full Access granted to that user by the mailbox owner or an
+Exchange administrator — not by the MCP or the app registration.
+
+This is delegated authorization only: no client-credentials flow, no app-only policy, no bypass of
+the per-user right (see issue #18 for the separate app-only question). The optional `from`
+parameter of `send-email` and `draft-email` targets `users/{from}/...` Graph endpoints; a caller
+lacking the delegation gets Graph HTTP 403, which the email tools surface as a
+`MAILBOX_ACCESS_DENIED` failure naming the mailbox and the missing delegation. There is never a
+silent fallback to the caller's own mailbox.
 
 ## Storage contract
 
@@ -146,4 +163,4 @@ Additional interface asymmetries:
 - For a Flow-only problem, call `flow-list-environments`, then complete `authenticate-flow` if needed.
 - After Graph reauthentication, verify Flow separately because the shared-file overwrite can remove Flow fields.
 - Delete `~/.outlook-mcp-tokens.json` only when intentionally resetting **both** Graph and Flow. The server has no selective public logout.
-- For HTTP 401, reauthenticate the corresponding token family; API 401 responses do not force local token invalidation. For HTTP 403, verify permissions, consent, ownership, and resource eligibility; repeating authentication alone may not fix authorization.
+- For HTTP 401, reauthenticate the corresponding token family; API 401 responses do not force local token invalidation. For HTTP 403, verify permissions, consent, ownership, and resource eligibility; repeating authentication alone may not fix authorization. When acting on a shared mailbox (`from` parameter), a 403 usually means the Exchange Send As / Full Access delegation is missing — surface it as `MAILBOX_ACCESS_DENIED` — and an administrator must grant the delegation rather than the user re-authenticating.

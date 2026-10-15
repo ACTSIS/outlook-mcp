@@ -8,19 +8,22 @@ const {
   composeReply,
   hasManagedSignature,
   deliverNativeReply,
+  isEmailLikeAddress,
+  sharedMailboxPrefix,
 } = require('./graph-message-flow');
 const { buildFileAttachments } = require('./attachment-builder');
 
 /**
  * Draft email handler
  * Creates a draft in Outlook using Microsoft Graph:
- * POST /me/messages
+ * POST /me/messages (or POST /users/{from}/messages for a shared mailbox)
  * @param {object} args - Tool arguments
  * @returns {object} - MCP response
  */
 async function handleDraftEmail(args) {
   const {
     to,
+    from,
     cc,
     bcc,
     subject = '',
@@ -30,6 +33,24 @@ async function handleDraftEmail(args) {
     replyToId,
     attachments,
   } = args || {};
+
+  // Optional shared mailbox (issue #28): validate before authenticating so a
+  // malformed address can never reach Microsoft Graph. Only an omitted `from`
+  // (undefined/null) means "use my own mailbox"; any provided value, including
+  // an empty string, must be a valid email-like address.
+  const fromProvided = from !== undefined && from !== null;
+  const fromArgument = !fromProvided ? '' : typeof from === 'string' ? from.trim() : String(from);
+  if (fromProvided && !isEmailLikeAddress(fromArgument)) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Invalid from address: '${from}'. Provide the UPN or email address of a shared mailbox (e.g. sac.soporte@actsis.com) with Full Access or Send As delegation granted to you in Exchange.`,
+        },
+      ],
+    };
+  }
+  const messagePrefix = fromArgument ? sharedMailboxPrefix(fromArgument) : 'me/';
 
   try {
     // Build Graph fileAttachment objects from local paths BEFORE any Graph call
@@ -82,7 +103,8 @@ async function handleDraftEmail(args) {
           replyToId,
           composed,
           false,
-          callGraphAPI
+          callGraphAPI,
+          fromArgument || undefined
         );
         // Post user-supplied attachments to the reply draft (issue #14)
         const nativeReplyDraftId = updatedDraft.id || replyDraft.id;
@@ -90,7 +112,7 @@ async function handleDraftEmail(args) {
           await callGraphAPI(
             accessToken,
             'POST',
-            `me/messages/${encodeURIComponent(nativeReplyDraftId)}/attachments`,
+            `${messagePrefix}messages/${encodeURIComponent(nativeReplyDraftId)}/attachments`,
             attachment
           );
         }
@@ -106,7 +128,7 @@ async function handleDraftEmail(args) {
       const replyDraft = await callGraphAPI(
         accessToken,
         'POST',
-        `me/messages/${encodeURIComponent(replyToId)}/createReply`
+        `${messagePrefix}messages/${encodeURIComponent(replyToId)}/createReply`
       );
       if (!replyDraft || !replyDraft.id) {
         throw new Error('Microsoft Graph createReply did not return a draft ID');
@@ -114,7 +136,7 @@ async function handleDraftEmail(args) {
       const updatedDraft = await callGraphAPI(
         accessToken,
         'PATCH',
-        `me/messages/${encodeURIComponent(replyDraft.id)}`,
+        `${messagePrefix}messages/${encodeURIComponent(replyDraft.id)}`,
         {
           body: {
             contentType,
@@ -129,7 +151,7 @@ async function handleDraftEmail(args) {
         await callGraphAPI(
           accessToken,
           'POST',
-          `me/messages/${encodeURIComponent(replyDraftId)}/attachments`,
+          `${messagePrefix}messages/${encodeURIComponent(replyDraftId)}/attachments`,
           attachment
         );
       }
@@ -160,7 +182,12 @@ async function handleDraftEmail(args) {
 
     // Create draft message
     const accessToken = await ensureAuthenticated();
-    const draft = await callGraphAPI(accessToken, 'POST', 'me/messages', messageObject);
+    const draft = await callGraphAPI(
+      accessToken,
+      'POST',
+      `${messagePrefix}messages`,
+      messageObject
+    );
 
     return {
       content: [
@@ -183,6 +210,19 @@ async function handleDraftEmail(args) {
     }
 
     if (error.message && error.message.includes('status 403')) {
+      // Shared-mailbox 403 (issue #28): the caller lacks the Exchange
+      // delegation on the target mailbox. Surface it clearly, without the
+      // generic Mail.ReadWrite consent guidance and without a /me fallback.
+      if (fromArgument) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Draft creation in shared mailbox '${fromArgument}' was denied by Microsoft Graph (HTTP 403; error code: MAILBOX_ACCESS_DENIED). You are missing the Full Access or Send As Exchange delegation on that mailbox; the mailbox owner or an admin must grant it to you. No fallback to your own mailbox was performed.`,
+            },
+          ],
+        };
+      }
       return {
         content: [
           {

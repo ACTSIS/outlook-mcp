@@ -23,13 +23,17 @@ You need Node.js 22.22.1 or later and a Microsoft Entra app registration.
 
    ```text
    offline_access User.Read Mail.Read Mail.ReadWrite Mail.Send
-   Chat.ReadWrite Calendars.Read Calendars.ReadWrite Contacts.Read Files.Read Files.ReadWrite
+   Mail.Send.Shared Mail.ReadWrite.Shared
+   Chat.ReadWrite Calendars.Read Calendars.ReadWrite Calendars.Read.Shared
+   Contacts.Read Files.Read Files.ReadWrite
    ```
 
    The Teams chat tools (`list-chats`, `get-chat-messages`, `send-chat-message`) require the
-   `Chat.ReadWrite` delegated permission. If your Graph token was acquired before this scope was
-   added, re-acquire credentials by running `npm run auth-server` and completing the consent flow
-   again (this re-issues Graph credentials; see the shared-file warning below).
+   `Chat.ReadWrite` delegated permission, and the shared-mailbox `from` parameter of
+   `send-email`/`draft-email` requires the delegated `.Shared` mail scopes. If your Graph token
+   was acquired before these scopes were added, re-acquire credentials by running
+   `npm run auth-server` and completing the consent flow again (this re-issues Graph credentials;
+   see the shared-file warning below).
 
 3. Put the application client ID, client secret **value**, and tenant ID in `.env`:
 
@@ -474,8 +478,8 @@ Nested mail-folder paths such as `Parent/Child/Archive` are resolved segment by 
 | `list-emails`         | List recent messages in a mail folder                                                                                            |
 | `search-emails`       | Search by text, sender, recipient, subject, attachments, or unread state                                                         |
 | `read-email`          | Read sanitized visible content; raw HTML is an explicit unsafe debug option                                                      |
-| `send-email`          | Send a new message or reply to an existing message                                                                               |
-| `draft-email`         | Create a new draft or reply draft with optional local file attachments                                                           |
+| `send-email`          | Send a new message or reply to an existing message, optionally from a shared mailbox with delegation                             |
+| `draft-email`         | Create a new draft or reply draft with optional local file attachments, optionally in a shared mailbox with delegation           |
 | `forward-draft`       | Create a forward draft quoting the original thread with empty recipients                                                         |
 | `mark-as-read`        | Mark a message read or unread                                                                                                    |
 | `delete-email`        | Move a message to Deleted Items or permanently delete it                                                                         |
@@ -498,6 +502,23 @@ native reply or forward drafts.
 Use `signatureName` for a per-operation override or `includeSignature: false` to opt out. See
 [Managed email signatures](docs/email-signatures.md) for CID image, storage, limit, and recovery
 details.
+
+### Sending from a shared mailbox
+
+`send-email` and `draft-email` accept an optional `from` parameter with the UPN or email address
+of a shared mailbox (e.g. `sac.soporte@actsis.com`), mirroring Outlook's "From" selector:
+
+- With `from`, requests target `users/{from}/...` Graph endpoints (drafts, replies, and native
+  reply/attachment/send calls included); without it, the existing `/me` behavior is unchanged.
+- Requires the delegated `Mail.Send.Shared` / `Mail.ReadWrite.Shared` permissions (included in
+  the default scope list; re-acquire credentials if your token predates them) **and** an Exchange
+  delegation on that mailbox granted to your account: Send As or Send on Behalf for sending,
+  Full Access (and a delegate Sent Items rule, if desired) for drafts and replies.
+- Exchange enforces the per-user right — the MCP never bypasses it. A missing delegation returns
+  a clear `MAILBOX_ACCESS_DENIED` error (Graph HTTP 403) naming the mailbox; there is no silent
+  fallback to your own mailbox.
+- `replyToId` with `from` must reference a message inside the shared mailbox; attachments and
+  managed-signature behavior are identical either way.
 
 ### Mail folders (3)
 

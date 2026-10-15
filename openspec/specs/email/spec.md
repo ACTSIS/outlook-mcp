@@ -308,3 +308,74 @@ The test-mode mock SHALL honor `$filter` on message listings so date-filter beha
 - WHEN `forward-draft` is called
 - THEN HTTP 403 SHALL produce the Mail.ReadWrite consent guidance
 - AND other failures SHALL surface as `Error creating forward draft: <message>`
+
+---
+
+### Requirement: Shared Mailbox Send and Draft via Optional from Parameter
+
+`send-email` and `draft-email` SHALL accept an optional `from` string parameter (a shared mailbox
+UPN/email). When present and valid, every Graph call for the operation MUST target
+`users/{from}/...` instead of `/me` — including new-message send/draft creation, native reply
+paths (`reply`, `createReply`, draft PATCH, attachments, and send), and user-supplied attachment
+posting. When absent, existing `/me` behavior MUST remain exactly unchanged. A provided `from`
+that is not an email-like address MUST be rejected before authentication. Delegated
+`Mail.Send.Shared`, `Mail.ReadWrite.Shared`, and `Calendars.Read.Shared` scopes SHALL be part of
+the default Graph scope union. Exchange Send As / Full Access delegation on the mailbox is what
+enables the caller; the MCP SHALL NOT bypass it and SHALL NOT be an app-only mechanism.
+(Previously: `send-email` and `draft-email` were hard-wired to `/me` endpoints.)
+
+#### Scenario: send-email with from targets the shared mailbox
+
+- GIVEN `send-email` is called with `from: "sac.soporte@actsis.com"` and new-message fields
+- WHEN the send is executed
+- THEN Graph SHALL receive `POST users/sac.soporte%40actsis.com/sendMail` with the same message payload shape
+- AND no request SHALL be made against `me/sendMail`
+
+#### Scenario: send-email replyToId with from replies through the shared mailbox
+
+- GIVEN `send-email` is called with `from` and `replyToId` referencing a message in that mailbox
+- WHEN a native reply is executed
+- THEN the reply endpoints SHALL target `users/{from}/messages/{id}/...` (reply, createReply,
+  PATCH, attachments, and send included)
+
+#### Scenario: absent from keeps the /me behavior
+
+- GIVEN `send-email` or `draft-email` is called without `from`
+- WHEN the operation runs
+- THEN all Graph calls SHALL target the existing `/me` endpoints exactly as before
+- AND no shared-mailbox validation SHALL change the responses
+
+#### Scenario: malformed from is rejected before authentication
+
+- GIVEN `send-email` or `draft-email` is called with a `from` value that is not an email-like
+  address (including an empty string)
+- WHEN the handler validates input
+- THEN it SHALL return a clear `Invalid from address` error naming the expectation of a shared
+  mailbox UPN/email
+- AND neither authentication nor any Graph call SHALL be made
+
+#### Scenario: missing Exchange delegation surfaces MAILBOX_ACCESS_DENIED without fallback
+
+- GIVEN the caller holds the delegated `.Shared` scopes but lacks Send As / Full Access
+  delegation on the mailbox given in `from`
+- WHEN Graph responds with HTTP 403
+- THEN the tool response SHALL clearly name the mailbox, the missing Exchange delegation, and an
+  identifying error code (e.g. `MAILBOX_ACCESS_DENIED`)
+- AND the handler SHALL NOT silently retry or fall back to the caller's own `/me` mailbox
+- AND a 403 without `from` SHALL keep the existing Mail.ReadWrite consent guidance and error text
+
+#### Scenario: draft-email with from creates drafts inside the shared mailbox
+
+- GIVEN `draft-email` is called with `from` (with or without `replyToId` and attachments)
+- WHEN the draft is created
+- THEN new drafts SHALL be created via `POST users/{from}/messages`
+- AND reply drafts SHALL resolve via `users/{from}/messages/{id}/createReply` with PATCH,
+  attachments, and signature behavior identical to the `/me` paths
+
+#### Scenario: default scopes include the delegated shared-mailbox permissions
+
+- GIVEN the built-in default scope configuration
+- WHEN the initial Graph acquisition is requested
+- THEN the scope union SHALL include `Mail.Send.Shared`, `Mail.ReadWrite.Shared`, and
+  `Calendars.Read.Shared`
+- AND no client-credentials / app-only authorization SHALL be introduced by this feature
