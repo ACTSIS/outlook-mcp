@@ -68,8 +68,8 @@ Exchange administrator — not by the MCP or the app registration.
 
 This is delegated authorization only: no client-credentials flow, no app-only policy, no bypass of
 the per-user right (see issue #18 for the separate app-only question). The optional `from`
-parameter of `send-email` and `draft-email` targets `users/{from}/...` Graph endpoints; a caller
-lacking the delegation gets Graph HTTP 403, which the email tools surface as a
+parameter of `send-email`, `draft-email`, and `forward-draft` targets `users/{from}/...` Graph
+endpoints; a caller lacking the delegation gets Graph HTTP 403, which the email tools surface as a
 `MAILBOX_ACCESS_DENIED` failure naming the mailbox and the missing delegation. There is never a
 silent fallback to the caller's own mailbox.
 

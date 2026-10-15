@@ -279,7 +279,13 @@ The test-mode mock SHALL honor `$filter` on message listings so date-filter beha
 
 ### Requirement: Forward Draft With Empty Recipients
 
-`forward-draft` SHALL create a forwarded-message draft via Graph `createForward` for the message identified by the required `emailId` parameter. The draft SHALL quote the original message thread as embedded content (inline images and signatures intact). The draft SHALL start with EMPTY recipients: the handler MUST PATCH `toRecipients`, `ccRecipients`, and `bccRecipients` to `[]` after creation so recipients are never inherited from the original message. The handler SHALL apply the composed caller text above the quoted thread when a managed signature is present, mirror the reply draft error mapping (Authentication required / 403 / generic `Error creating forward draft: <msg>`), and accept optional `body`, `subject`, `isHtml`, `importance`, `attachments`, `signatureName`, and `includeSignature` inputs.
+`forward-draft` SHALL create a forwarded-message draft via Graph `createForward` for the message identified by the required `emailId` parameter. The draft SHALL quote the original message thread as embedded content (inline images and signatures intact). The draft SHALL start with EMPTY recipients: the handler MUST PATCH `toRecipients`, `ccRecipients`, and `bccRecipients` to `[]` after creation so recipients are never inherited from the original message. The handler SHALL apply the composed caller text above the quoted thread when a managed signature is present, mirror the reply draft error mapping (Authentication required / 403 / generic `Error creating forward draft: <msg>`), and accept optional `body`, `subject`, `isHtml`, `importance`, `attachments`, `signatureName`, `includeSignature`, and `from` inputs.
+
+The optional `from` string (a shared mailbox UPN/email, issue #37) routes the source-message fetch
+and the entire forward draft flow through `users/{from}/...` instead of `/me`; when absent, the
+existing `/me` paths MUST remain exactly unchanged. A provided `from` that is not an email-like
+address MUST be rejected before authentication, and a Graph HTTP 403 with `from` MUST surface
+`MAILBOX_ACCESS_DENIED` naming the mailbox with no `/me` fallback.
 
 #### Scenario: Forward draft is created with empty recipients quoting the original thread
 
@@ -308,6 +314,29 @@ The test-mode mock SHALL honor `$filter` on message listings so date-filter beha
 - WHEN `forward-draft` is called
 - THEN HTTP 403 SHALL produce the Mail.ReadWrite consent guidance
 - AND other failures SHALL surface as `Error creating forward draft: <message>`
+
+#### Scenario: forward-draft with from routes through the shared mailbox
+
+- GIVEN `forward-draft` is called with `from: "sac.soporte@actsis.com"` and an `emailId` that exists in that shared mailbox
+- WHEN the forward is executed
+- THEN the source message SHALL be addressed via `POST users/{from}/messages/{emailId}/createForward`
+- AND the draft PATCH, recipient-clearing PATCH, and attachment posts SHALL target `users/{from}/messages/{draftId}...`
+- AND empty-recipient, quoted-thread, inline-image, and managed-signature behavior SHALL be identical to the `/me` paths
+
+#### Scenario: forward-draft malformed from is rejected before authentication
+
+- GIVEN `forward-draft` is called with a `from` value that is not an email-like address (including an empty string)
+- WHEN the handler validates input
+- THEN it SHALL return a clear `Invalid from address` error naming the expectation of a shared mailbox UPN/email
+- AND neither authentication nor any Graph call SHALL be made
+
+#### Scenario: forward-draft missing Exchange delegation surfaces MAILBOX_ACCESS_DENIED without fallback
+
+- GIVEN the caller holds the delegated `Mail.ReadWrite.Shared` scope but lacks Send As / Full Access delegation on the mailbox given in `from`
+- WHEN Graph responds with HTTP 403
+- THEN the tool response SHALL clearly name the mailbox, the missing Exchange delegation, and `MAILBOX_ACCESS_DENIED`
+- AND the handler SHALL NOT silently retry or fall back to the caller's own `/me` mailbox
+- AND a 403 without `from` SHALL keep the existing Mail.ReadWrite consent guidance and error text
 
 ---
 

@@ -480,7 +480,7 @@ Nested mail-folder paths such as `Parent/Child/Archive` are resolved segment by 
 | `read-email`          | Read sanitized visible content; raw HTML is an explicit unsafe debug option                                                      |
 | `send-email`          | Send a new message or reply to an existing message, optionally from a shared mailbox with delegation                             |
 | `draft-email`         | Create a new draft or reply draft with optional local file attachments, optionally in a shared mailbox with delegation           |
-| `forward-draft`       | Create a forward draft quoting the original thread with empty recipients                                                         |
+| `forward-draft`       | Create a forward draft quoting the original thread with empty recipients, optionally from a shared mailbox with delegation       |
 | `mark-as-read`        | Mark a message read or unread                                                                                                    |
 | `delete-email`        | Move a message to Deleted Items or permanently delete it                                                                         |
 | `list-attachments`    | List attachment metadata for a message (sizes are Graph server-reported metadata and may differ slightly from the actual binary) |
@@ -505,11 +505,13 @@ details.
 
 ### Sending from a shared mailbox
 
-`send-email` and `draft-email` accept an optional `from` parameter with the UPN or email address
-of a shared mailbox (e.g. `sac.soporte@actsis.com`), mirroring Outlook's "From" selector:
+`send-email`, `draft-email`, and `forward-draft` accept an optional `from` parameter with the UPN
+or email address of a shared mailbox (e.g. `sac.soporte@actsis.com`), mirroring Outlook's "From"
+selector:
 
-- With `from`, requests target `users/{from}/...` Graph endpoints (drafts, replies, and native
-  reply/attachment/send calls included); without it, the existing `/me` behavior is unchanged.
+- With `from`, requests target `users/{from}/...` Graph endpoints (drafts, replies, native
+  reply/attachment/send calls, the forward source-message fetch, and forward drafts included);
+  without it, the existing `/me` behavior is unchanged.
 - Requires the delegated `Mail.Send.Shared` / `Mail.ReadWrite.Shared` permissions (included in
   the default scope list; re-acquire credentials if your token predates them) **and** an Exchange
   delegation on that mailbox granted to your account: Send As or Send on Behalf for sending,
@@ -517,8 +519,8 @@ of a shared mailbox (e.g. `sac.soporte@actsis.com`), mirroring Outlook's "From" 
 - Exchange enforces the per-user right — the MCP never bypasses it. A missing delegation returns
   a clear `MAILBOX_ACCESS_DENIED` error (Graph HTTP 403) naming the mailbox; there is no silent
   fallback to your own mailbox.
-- `replyToId` with `from` must reference a message inside the shared mailbox; attachments and
-  managed-signature behavior are identical either way.
+- `replyToId` with `from` must reference a message inside the shared mailbox, as must `forward-draft`'s
+  `emailId`; attachments and managed-signature behavior are identical either way.
 
 ### Mail folders (3)
 
