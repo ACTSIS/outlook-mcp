@@ -47,7 +47,7 @@ Graph initial acquisition requests the configured built-in delegated scope union
 offline_access User.Read Mail.Read Mail.ReadWrite Mail.Send
 Mail.Send.Shared Mail.ReadWrite.Shared
 Calendars.Read Calendars.ReadWrite Calendars.Read.Shared
-Contacts.Read Files.Read Files.ReadWrite
+Contacts.Read Files.Read Files.ReadWrite Sites.Read.All
 ```
 
 `offline_access` is required for Microsoft to issue a refresh token. Power Automate uses a separate authorization and token exchange with:
@@ -67,11 +67,21 @@ mailbox — Send As, Send on Behalf, or Full Access granted to that user by the 
 Exchange administrator — not by the MCP or the app registration.
 
 This is delegated authorization only: no client-credentials flow, no app-only policy, no bypass of
-the per-user right (see issue #18 for the separate app-only question). The optional `from`
-parameter of `send-email`, `draft-email`, and `forward-draft` targets `users/{from}/...` Graph
-endpoints; a caller lacking the delegation gets Graph HTTP 403, which the email tools surface as a
-`MAILBOX_ACCESS_DENIED` failure naming the mailbox and the missing delegation. There is never a
-silent fallback to the caller's own mailbox.
+the per-user right. The optional `from` parameter of `send-email`, `draft-email`, and `forward-draft`
+targets `users/{from}/...` Graph endpoints; a caller lacking the delegation gets Graph HTTP 403,
+which the email tools surface as a `MAILBOX_ACCESS_DENIED` failure naming the mailbox and the
+missing delegation. There is never a silent fallback to the caller's own mailbox.
+
+### SharePoint site tools: delegated read only
+
+The `sites/` tools (`list-sites`, `list-site-files`, `download-site-file`) use the delegated
+`Sites.Read.All` scope inside the same authorization-code flow, and SharePoint itself enforces
+per-user access to each site collection: the scope grants no site that your account cannot read.
+Graph HTTP 403 there surfaces as `SITE_ACCESS_DENIED` naming the site, with no fallback identity.
+No client-credentials flow and no application permission is used for SharePoint: that capability
+is deferred in issue #18 until an unattended use case justifies global-admin consent, a
+certificate credential, and an Application Access Policy. If `MS_SCOPES` overrides the scope
+union, it MUST include `Sites.Read.All` explicitly, or the site tools fail consent errors.
 
 ## Storage contract
 
