@@ -12,6 +12,7 @@ const DEFAULT_AUTH_SCOPES = Object.freeze([
   'Mail.Read',
   'Mail.ReadWrite',
   'Mail.Send',
+  'Chat.ReadWrite',
   'Calendars.Read',
   'Calendars.ReadWrite',
   'Contacts.Read',
@@ -94,6 +95,9 @@ module.exports = {
     'id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,hasAttachments,importance,isRead',
   EMAIL_DETAIL_FIELDS:
     'id,subject,from,toRecipients,ccRecipients,bccRecipients,receivedDateTime,bodyPreview,body,hasAttachments,importance,isRead,internetMessageHeaders',
+
+  // Teams chat constants
+  CHAT_SELECT_FIELDS: 'id,topic,lastMessagePreview,lastUpdatedDateTime,memberCount',
 
   // Pagination
   DEFAULT_PAGE_SIZE: 25,
