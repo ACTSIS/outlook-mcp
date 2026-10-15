@@ -105,6 +105,11 @@ module.exports = {
   // Graph v1.0 rejects $orderby on chats (issue #35): sweep up to this many
   // chats via nextLink pagination, then sort by lastUpdatedDateTime client-side.
   CHATS_SWEEP_LIMIT: 200,
+  // Graph keeps lastUpdatedDateTime stale for oneOnOne chats (activity hidden
+  // behind months-old metadata): probe the newest message of non-meeting chats
+  // and rank by real activity instead. Disable to cut listing latency.
+  CHATS_ACTIVITY_PROBING: true,
+  CHATS_PROBE_CONCURRENCY: 8,
 
   // Pagination
   DEFAULT_PAGE_SIZE: 25,

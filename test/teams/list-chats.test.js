@@ -180,4 +180,74 @@ describe('handleListChats', () => {
       expect(text.indexOf('Old chat')).toBeGreaterThan(text.indexOf('Fresh chat'));
     });
   });
+
+  describe('stale lastUpdatedDateTime ordering', () => {
+    // Graph keeps lastUpdatedDateTime stale for oneOnOne chats: a chat with
+    // messages received today can still report a months-old timestamp.
+    const staleChat = {
+      id: 'stale-one-on-one',
+      topic: 'Blas chat',
+      chatType: 'oneOnOne',
+      lastUpdatedDateTime: '2026-04-17T18:49:08Z',
+    };
+    const freshMeeting = {
+      id: 'fresh-meeting',
+      topic: 'Meeting chat',
+      chatType: 'meeting',
+      lastUpdatedDateTime: '2026-10-14T16:41:49Z',
+    };
+
+    function sweepWith(chats) {
+      callGraphAPIPaginated.mockImplementation(async (token, method, path) => {
+        if (path === 'me/chats') {
+          return { value: chats };
+        }
+        return { value: [] };
+      });
+    }
+
+    test('ranks a oneOnOne chat by its latest real message, not stale metadata', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      sweepWith([staleChat, freshMeeting]);
+      callGraphAPI.mockImplementation(async (token, method, path) => {
+        if (path.startsWith('me/chats/stale-one-on-one/messages')) {
+          return { value: [{ id: 'm1', createdDateTime: '2026-10-15T16:53:16Z' }] };
+        }
+        return { value: [] };
+      });
+
+      const result = await handleListChats({ count: 2 });
+
+      const text = result.content[0].text;
+      expect(text.indexOf('1. Blas chat')).toBeGreaterThan(-1);
+      expect(text.indexOf('Meeting chat')).toBeGreaterThan(text.indexOf('Blas chat'));
+    });
+
+    test('does not probe meeting chats, whose metadata is reliable', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      sweepWith([freshMeeting]);
+
+      const result = await handleListChats({ count: 1 });
+
+      expect(callGraphAPI).not.toHaveBeenCalledWith(
+        mockAccessToken,
+        'GET',
+        'me/chats/fresh-meeting/messages',
+        expect.anything(),
+        expect.anything()
+      );
+      expect(result.content[0].text).toContain('Found 1 chats');
+    });
+
+    test('falls back to the chat metadata when the probe fails', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      sweepWith([staleChat]);
+      callGraphAPI.mockRejectedValue(new Error('probe failed'));
+
+      const result = await handleListChats({ count: 1 });
+
+      expect(result.content[0].text).toContain('Blas chat');
+      expect(result.content[0].text).toContain('ID: stale-one-on-one');
+    });
+  });
 });

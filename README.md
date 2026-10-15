@@ -565,11 +565,11 @@ selector:
 
 ### Teams chats (3)
 
-| Tool                | Purpose                                                                                   |
-| ------------------- | ----------------------------------------------------------------------------------------- |
-| `list-chats`        | List Teams chats (one-on-one and group) for the signed-in user, most recent first         |
-| `get-chat-messages` | Read messages from a chat by ID, with optional date-range filtering on message timestamps |
-| `send-chat-message` | Send a plain-text or HTML message to a chat by ID                                         |
+| Tool                | Purpose                                                                                                                                                                                                                                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list-chats`        | List Teams chats (one-on-one and group) for the signed-in user, most recent first; one-on-one ordering probes each chat's newest message because Graph keeps `lastUpdatedDateTime` stale for them (adds a bounded API sweep — tune `CHATS_ACTIVITY_PROBING` / `CHATS_PROBE_CONCURRENCY` in `config.js`) |
+| `get-chat-messages` | Read messages from a chat by ID, with optional date-range filtering on message timestamps                                                                                                                                                                                                               |
+| `send-chat-message` | Send a plain-text or HTML message to a chat by ID                                                                                                                                                                                                                                                       |
 
 The Teams chat tools use the `Chat.ReadWrite` delegated scope, which is part of the default Graph
 scope set. Tokens acquired before this scope was added must be re-acquired: run `npm run auth-server`

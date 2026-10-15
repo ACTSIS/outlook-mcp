@@ -27,12 +27,24 @@ Teams chat tools MUST obtain a Graph access token via `ensureAuthenticated()` an
 
 `list-chats` MUST list Teams chats for the signed-in user, selecting id, topic, last message preview, last update time, and member count.
 
+Graph v1.0 keeps `lastUpdatedDateTime` stale for some chat types, notably oneOnOne chats, so ordering MUST be derived from real chat activity when such staleness is suspected: for every swept non-meeting chat, the handler MUST probe the newest message and use its `createdDateTime` as the effective activity time, falling back to the swept metadata when the probe fails or returns nothing. Meeting chats MUST keep the swept metadata without a probe.
+
 #### Scenario: Chats are returned
 
 - GIVEN the signed-in user has chats
 - WHEN `list-chats` is invoked
 - THEN the result MUST show each chat's topic (or an unnamed marker), member count, last update date, and ID
 - AND it MUST expose the pagination `nextLink` cursor when the source has more pages
+
+#### Scenario: Ordering survives stale chat metadata
+
+- GIVEN `nextLink` is not provided
+- AND Graph reports a stale `lastUpdatedDateTime` for a non-meeting chat with recent messages
+- WHEN `list-chats` is invoked
+- THEN the probe of that chat's newest message MUST rank it by its real activity time
+- AND the shown "Last updated" MUST use the probed activity time when present
+- AND a failed or empty probe MUST fall back to the swept `lastUpdatedDateTime`
+- AND meeting chats MUST be ordered without a probe
 
 #### Scenario: No chats are returned
 
