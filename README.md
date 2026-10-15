@@ -4,7 +4,7 @@
 [![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frafaga2469%2Foutlook-mcp%2Fbadges%2Fcoverage.json)](https://github.com/rafaga2469/outlook-mcp/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frafaga2469%2Foutlook-mcp%2Fbadges%2Ftests.json)](https://github.com/rafaga2469/outlook-mcp/actions/workflows/ci.yml)
 
-An independently maintained fork of [ryaker/outlook-mcp](https://github.com/ryaker/outlook-mcp). It exposes 46 MCP tools for Outlook mail and calendar, OneDrive, inbox rules, and Power Automate.
+An independently maintained fork of [ryaker/outlook-mcp](https://github.com/ryaker/outlook-mcp). It exposes 49 MCP tools for Outlook mail and calendar, Teams chats, OneDrive, inbox rules, and Power Automate.
 
 ## Quick start
 
@@ -23,8 +23,13 @@ You need Node.js 22.22.1 or later and a Microsoft Entra app registration.
 
    ```text
    offline_access User.Read Mail.Read Mail.ReadWrite Mail.Send
-   Calendars.Read Calendars.ReadWrite Contacts.Read Files.Read Files.ReadWrite
+   Chat.ReadWrite Calendars.Read Calendars.ReadWrite Contacts.Read Files.Read Files.ReadWrite
    ```
+
+   The Teams chat tools (`list-chats`, `get-chat-messages`, `send-chat-message`) require the
+   `Chat.ReadWrite` delegated permission. If your Graph token was acquired before this scope was
+   added, re-acquire credentials by running `npm run auth-server` and completing the consent flow
+   again (this re-issues Graph credentials; see the shared-file warning below).
 
 3. Put the application client ID, client secret **value**, and tenant ID in `.env`:
 
@@ -439,7 +444,7 @@ The existing npm installation remains supported through `bin/m365-mcp.js`, which
 
 Nested mail-folder paths such as `Parent/Child/Archive` are resolved segment by segment by `create-folder` and `move-emails`. A literal `/` in a folder name is not supported because `/` is always the path separator.
 
-## Tool inventory (46)
+## Tool inventory (49)
 
 ### Authentication (6)
 
@@ -533,6 +538,21 @@ details.
 | `flow-list-runs`         | List recent runs for a flow                     |
 | `flow-toggle`            | Start or stop a flow                            |
 
+### Teams chats (3)
+
+| Tool                | Purpose                                                                                   |
+| ------------------- | ----------------------------------------------------------------------------------------- |
+| `list-chats`        | List Teams chats (one-on-one and group) for the signed-in user, most recent first         |
+| `get-chat-messages` | Read messages from a chat by ID, with optional date-range filtering on message timestamps |
+| `send-chat-message` | Send a plain-text or HTML message to a chat by ID                                         |
+
+The Teams chat tools use the `Chat.ReadWrite` delegated scope, which is part of the default Graph
+scope set. Tokens acquired before this scope was added must be re-acquired: run `npm run auth-server`
+and complete the consent flow again (this re-issues Graph credentials; see the shared-file warning
+below). The date-range filter on `get-chat-messages` applies `receivedAfter`/`receivedBefore` to the
+message `createdDateTime` as a client-side post-filter because Graph does not accept a server-side
+`$filter` on that property.
+
 ## Authentication model
 
 `TokenStorage` in `auth/token-storage.js` is the runtime token authority for both APIs. Graph handlers call `ensureAuthenticated()`, while Power Automate handlers call `getValidFlowAccessToken()`. Both token sets share `~/.outlook-mcp-tokens.json`; writes request owner-only mode `0600`. The runtime uses `HOME` first and `USERPROFILE` second to locate that file; these are OS home-directory variables, not OAuth settings that normally belong in `.env`.
@@ -557,7 +577,7 @@ For the npm path, `bin/m365-mcp.js` loads the project `.env` before starting eit
 | `OUTLOOK_CLIENT_SECRET` | MCP runtime, auth server, and `TokenStorage` | Preferred over `MS_CLIENT_SECRET`      | Convenient for MCP client configuration                   |
 | `MS_TENANT_ID`          | Both                                         | `common`                               | Use the tenant GUID for single-tenant applications        |
 | `MS_AUTHORITY_HOST`     | Both                                         | `https://login.microsoftonline.com`    | Trailing slashes are removed                              |
-| `MS_SCOPES`             | Auth server and `TokenStorage`               | Built-in ten-scope Graph list          | Space-separated; include `offline_access`                 |
+| `MS_SCOPES`             | Auth server and `TokenStorage`               | Built-in eleven-scope Graph list       | Space-separated; include `offline_access`                 |
 | `MS_REDIRECT_URI`       | Auth server and `TokenStorage`               | `http://localhost:3333/auth/callback`  | Used by initial acquisition and refresh/exchange          |
 | `MS_TOKEN_ENDPOINT`     | Auth server and `TokenStorage`               | Derived v2 token endpoint              | Used by initial acquisition and refresh/exchange          |
 | `USE_TEST_MODE`         | MCP server                                   | `false`                                | Enables mocks; see test-mode limitation in the auth guide |

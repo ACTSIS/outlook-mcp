@@ -5,6 +5,15 @@ describe('config constants', () => {
     expect(config.ATTACHMENT_SIZE_WARNING_THRESHOLD).toBe(10 * 1024 * 1024);
   });
 
+  test('default Graph scope list includes the Teams Chat.ReadWrite scope', () => {
+    expect(config.AUTH_CONFIG.scopes).toContain('Chat.ReadWrite');
+  });
+
+  test('default Graph scope list requests only the Teams chat scope needed for the chat tools', () => {
+    const chatScopes = config.AUTH_CONFIG.scopes.filter((scope) => scope.startsWith('Chat.'));
+    expect(chatScopes).toEqual(['Chat.ReadWrite']);
+  });
+
   test('uses MS_* credentials when OUTLOOK_* credentials are absent', () => {
     const originalOutlookClientId = process.env.OUTLOOK_CLIENT_ID;
     const originalOutlookClientSecret = process.env.OUTLOOK_CLIENT_SECRET;
