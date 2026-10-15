@@ -20,6 +20,10 @@ describe('config constants', () => {
     expect(chatScopes).toEqual(['Chat.ReadWrite']);
   });
 
+  test('CHAT_SELECT_FIELDS excludes non-selectable chat properties (issue #33)', () => {
+    expect(config.CHAT_SELECT_FIELDS).not.toContain('memberCount');
+  });
+
   test('uses MS_* credentials when OUTLOOK_* credentials are absent', () => {
     const originalOutlookClientId = process.env.OUTLOOK_CLIENT_ID;
     const originalOutlookClientSecret = process.env.OUTLOOK_CLIENT_SECRET;

@@ -100,7 +100,7 @@ module.exports = {
     'id,subject,from,toRecipients,ccRecipients,bccRecipients,receivedDateTime,bodyPreview,body,hasAttachments,importance,isRead,internetMessageHeaders',
 
   // Teams chat constants
-  CHAT_SELECT_FIELDS: 'id,topic,lastMessagePreview,lastUpdatedDateTime,memberCount',
+  CHAT_SELECT_FIELDS: 'id,topic,lastMessagePreview,lastUpdatedDateTime',
 
   // Pagination
   DEFAULT_PAGE_SIZE: 25,
