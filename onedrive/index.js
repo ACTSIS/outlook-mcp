@@ -71,7 +71,8 @@ const onedriveTools = [
   },
   {
     name: 'onedrive-upload',
-    description: 'Upload a small file (< 4MB) to OneDrive',
+    description:
+      'Upload a small file (< 4MB) to OneDrive; text is sent verbatim, binary via base64 flag (issue #41)',
     inputSchema: {
       type: 'object',
       properties: {
