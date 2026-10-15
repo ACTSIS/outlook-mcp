@@ -15,6 +15,7 @@ const CHUNK_SIZE = 320 * 1024 * 10; // 3.2MB chunks (must be multiple of 320KB)
 async function handleUploadLarge(args) {
   const path = args.path;
   const content = args.content;
+  const isBase64 = args.base64 === true;
   const conflictBehavior = args.conflictBehavior || 'rename';
 
   if (!path) {
@@ -40,9 +41,13 @@ async function handleUploadLarge(args) {
   }
 
   try {
-    const accessToken = await ensureAuthenticated();
-    const contentBuffer = Buffer.from(content);
+    // Chunked uploads stream raw bytes via their own https transport, so the
+    // only corruption risk is the content arriving as MCP JSON: decode the
+    // base64 flag first so binary payloads stay intact.
+    const contentBuffer = isBase64 ? Buffer.from(content, 'base64') : Buffer.from(content);
     const fileSize = contentBuffer.length;
+
+    const accessToken = await ensureAuthenticated();
 
     // Normalize path
     const normalizedPath = path.replace(/^\/+|\/+$/g, '');

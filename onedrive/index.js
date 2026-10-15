@@ -83,6 +83,11 @@ const onedriveTools = [
           type: 'string',
           description: 'File content to upload',
         },
+        base64: {
+          type: 'boolean',
+          description:
+            'Set true when content is base64-encoded binary data; it is decoded and sent as application/octet-stream',
+        },
         conflictBehavior: {
           type: 'string',
           description: "Behavior when file exists: 'rename' (default), 'replace', or 'fail'",
@@ -106,6 +111,11 @@ const onedriveTools = [
         content: {
           type: 'string',
           description: 'File content to upload',
+        },
+        base64: {
+          type: 'boolean',
+          description:
+            'Set true when content is base64-encoded binary data; it is decoded before chunked upload',
         },
         conflictBehavior: {
           type: 'string',
