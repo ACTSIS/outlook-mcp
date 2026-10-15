@@ -46,3 +46,6 @@ Source: user conversation (2026-10-14): no Teams connectivity in the MCP; resolv
 
 - L1 (2026-10-14): user's original request verbatim: "Tenemos pendientes aquí?" → pending list → user: "no tenemos capacidad para coectarnos de alguna manera al chat de teams, vía Graphql quizá?" — resolved: Microsoft Graph (REST, delegated token), module proposal, user approval: "Iniciemos".
 - L2 (2026-10-14): Entra ID permissions added by user (pending consent at doc time): `Chat.ReadWrite` (keep), plus redundant `Chat.Read`/`Chat.ReadBasic`/`Chat.Create` (recommended for removal).
+- L3 (2026-10-14): T1-T4 implemented test-first by gentle-ai-worker (RED: missing modules; GREEN: 35 focused, 802 full). Commit `1a9124a`.
+- L4 (2026-10-14): Native review `review-8c8f092db6ff80b8` (tier high, lenses risk + reliability) approved and acknowledged (authority burned). Non-blocking advisory findings for later work: R1-nextlink-passthrough (`teams/list-chats.js:24`), R3-001/R3-002 (`teams/get-chat-messages.js:79-90`, date post-filter), R3-003 (`test/teams/list-chats.test.js:57-59`, suggestion).
+- L5 (2026-10-14): Independent gentle-ai-verify: PASS S1-S5; one doc finding fixed (README intro tool count 46 -> 49).
