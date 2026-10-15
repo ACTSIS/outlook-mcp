@@ -50,10 +50,10 @@ Calendars.Read Calendars.ReadWrite Calendars.Read.Shared
 Contacts.Read Files.Read Files.ReadWrite Sites.Read.All
 ```
 
-`offline_access` is required for Microsoft to issue a refresh token. Power Automate uses a separate authorization and token exchange with:
+`offline_access` is required for Microsoft to issue a refresh token. Power Automate uses a separate authorization and token exchange with `config.FLOW_SCOPE`, which combines `offline_access` with the Flow resource scope — without `offline_access` the Flow token exchange returns no refresh token and `authenticate-flow` must be repeated at every expiry:
 
 ```text
-https://service.flow.microsoft.com/.default
+offline_access https://service.flow.microsoft.com/.default
 ```
 
 The active callback server creates a random 32-byte state value, keeps it in memory for up to ten minutes, records whether it belongs to Graph or Flow, and consumes it once at callback. Restarting the auth server invalidates outstanding states.
@@ -150,6 +150,8 @@ The active initial-acquisition server obtains redirect URI and Graph scopes from
 ## Known limitations
 
 These are verified implementation limitations, not promised fixes:
+
+0. **Flow credentials acquired before the `offline_access` scope still lack a refresh token.** `config.FLOW_SCOPE` now requests `offline_access`, so fresh `authenticate-flow` grants receive a refresh token and auto-refresh works. Tokens acquired under the older scope (without `offline_access`) hold only `flow_access_token` + `flow_expires_at`; when they expire, run the Flow acquisition once more to pick up a refresh-capable grant.
 
 1. **Graph token invalidation is not persisted.** On a Graph refresh failure or an expired Graph token without a refresh token, `getValidAccessToken()` sets `this.tokens = null` and then calls `_saveTokensToFile()`. That save is a no-op when `this.tokens` is null, so stale Microsoft credentials survive on disk and can be loaded after restart. A confirmed permanent Entra failure separately invalidates the Vault identity cache.
 2. **Graph reauthentication can erase Flow credentials.** Active Graph initial acquisition in `outlook-auth-server.js` raw-writes the shared token file instead of merging with existing data. Existing `flow_*` fields are removed. Complete `authenticate-flow` again after Graph reauthentication when needed.

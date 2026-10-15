@@ -14,15 +14,15 @@ The productive auth server MUST acquire Flow credentials through `/auth/flow` us
 
 - GIVEN the auth server has valid Microsoft identity credentials
 - WHEN a client requests `GET /auth/flow`
-- THEN the server MUST redirect to Microsoft identity with scope `https://service.flow.microsoft.com/.default`
+- THEN the server MUST redirect to Microsoft identity with `config.FLOW_SCOPE`, which MUST contain `offline_access` followed by `https://service.flow.microsoft.com/.default`
 - AND it MUST store `{ flow: true }` with the generated CSRF state
 
 #### Scenario: Flow code is exchanged
 
 - GIVEN the callback contains a valid state marked as Flow
 - WHEN the server exchanges its authorization code
-- THEN the exchange MUST use `config.FLOW_SCOPE`
-- AND the token response MUST be passed to `TokenStorage.saveFlowTokens()`
+- THEN the exchange MUST use `config.FLOW_SCOPE` (including its `offline_access` scope)
+- AND the token response MUST be passed to `TokenStorage.saveFlowTokens()``
 
 ### Requirement: Shared Token File
 
@@ -80,14 +80,14 @@ An expired or near-expiry Flow token MUST be refreshed only when `flow_refresh_t
 
 ### Requirement: Flow Refresh Request
 
-`refreshFlowAccessToken()` MUST call the configured Microsoft token endpoint with a 30-second timeout, the stored Flow refresh token, and `config.FLOW_SCOPE`.
+`refreshFlowAccessToken()` MUST call the configured Microsoft token endpoint with a 30-second timeout, the stored Flow refresh token, and `config.FLOW_SCOPE` (including its `offline_access` scope).
 
 #### Scenario: Token endpoint returns success
 
 - GIVEN a stored `flow_refresh_token`
 - WHEN the Flow refresh request succeeds
 - THEN the request MUST use `grant_type=refresh_token`
-- AND it MUST include the configured client credentials and `https://service.flow.microsoft.com/.default`
+- AND it MUST include the configured client credentials and `config.FLOW_SCOPE` with `offline_access` so Microsoft rotates or re-issues the refresh token
 - AND TokenStorage MUST persist the new `flow_access_token` and `flow_expires_at`
 
 #### Scenario: Flow refresh token rotates

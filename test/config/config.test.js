@@ -33,6 +33,11 @@ describe('config constants', () => {
     expect(config.AUTH_CONFIG.scopes).not.toContain('Sites.Selected');
   });
 
+  test('FLOW_SCOPE requests offline_access so Entra issues a Flow refresh token', () => {
+    expect(config.FLOW_SCOPE).toContain('offline_access');
+    expect(config.FLOW_SCOPE).toContain('https://service.flow.microsoft.com/.default');
+  });
+
   test('uses MS_* credentials when OUTLOOK_* credentials are absent', () => {
     const originalOutlookClientId = process.env.OUTLOOK_CLIENT_ID;
     const originalOutlookClientSecret = process.env.OUTLOOK_CLIENT_SECRET;

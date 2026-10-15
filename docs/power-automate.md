@@ -6,7 +6,7 @@ Power Automate support uses the Flow API, not Microsoft Graph. It has a separate
 
 1. Complete normal Graph authentication first.
 2. Call `authenticate-flow`, copy the URL returned as the first response line, and open it in your browser. The browser is not opened automatically; the MCP process starts the callback server automatically.
-3. Consent to `https://service.flow.microsoft.com/.default`.
+3. Consent to `config.FLOW_SCOPE` — `offline_access` plus `https://service.flow.microsoft.com/.default` (the `offline_access` part is what makes Microsoft return a Flow refresh token, enabling automatic refresh at expiry).
 4. Call `flow-list-environments` and copy an environment ID such as `Default-12345`.
 5. Call `flow-list` with that `environmentId` and copy the flow ID from its `ID` field.
 6. Use the exact environment and flow IDs with `flow-run`, `flow-list-runs`, or `flow-toggle`.
