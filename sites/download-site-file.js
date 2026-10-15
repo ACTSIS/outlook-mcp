@@ -1,7 +1,10 @@
 /**
- * SharePoint get site file download URL functionality (issue #18, delegated access)
+ * SharePoint get site file download URL functionality (issue #18, delegated access;
+ * issue #43: the pre-authenticated URL is obtained from the 302 redirect of the
+ * `/content` endpoint, because `@microsoft.graph.downloadUrl` is not populated
+ * in delegated contexts)
  */
-const { callGraphAPI } = require('../utils/graph-api');
+const { callGraphAPI, callGraphAPIDownload } = require('../utils/graph-api');
 const { ensureAuthenticated } = require('../auth');
 
 function formatSize(bytes) {
@@ -47,10 +50,12 @@ async function handleDownloadSiteFile(args) {
   try {
     const accessToken = await ensureAuthenticated();
 
-    // Build endpoint - by ID or by path within the site's default drive
+    // Build endpoints - by ID or by path within the site's default drive
     let endpoint;
+    let contentEndpoint;
     if (itemId) {
       endpoint = `sites/${encodeURIComponent(siteId)}/drive/items/${encodeURIComponent(itemId)}`;
+      contentEndpoint = `${endpoint}/content`;
     } else {
       const normalizedPath = path.replace(/^\/+|\/+$/g, '');
       // Encode each segment; encoding the whole path would corrupt the '/' separators.
@@ -59,10 +64,12 @@ async function handleDownloadSiteFile(args) {
         .map((segment) => encodeURIComponent(segment))
         .join('/');
       endpoint = `sites/${encodeURIComponent(siteId)}/drive/root:/${encodedPath}`;
+      // The colon syntax is part of the Graph URL grammar and stays literal.
+      contentEndpoint = `${endpoint}:/content`;
     }
 
     const queryParams = {
-      $select: 'id,name,size,@microsoft.graph.downloadUrl',
+      $select: 'id,name,size,folder',
     };
 
     const response = await callGraphAPI(accessToken, 'GET', endpoint, null, queryParams);
@@ -78,29 +85,20 @@ async function handleDownloadSiteFile(args) {
       };
     }
 
-    const downloadUrl = response['@microsoft.graph.downloadUrl'];
-
-    if (!downloadUrl) {
-      if (response.folder) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `"${response.name}" is a folder and cannot be downloaded directly. List its files with list-site-files first.`,
-            },
-          ],
-        };
-      }
-
+    if (response.folder) {
       return {
         content: [
           {
             type: 'text',
-            text: 'Could not get download URL for this item.',
+            text: `"${response.name}" is a folder and cannot be downloaded directly. List its files with list-site-files first.`,
           },
         ],
       };
     }
+
+    // GET .../content responds 302 with a pre-authenticated download URL in the
+    // Location header; the downloadUrl property is not populated reliably.
+    const downloadUrl = await callGraphAPIDownload(accessToken, contentEndpoint);
 
     return {
       content: [
