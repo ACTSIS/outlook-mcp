@@ -352,8 +352,11 @@ describe('handleListEmails', () => {
     });
 
     test('mock honors le predicate and boolean predicates joined with and', () => {
-      const nowIso = new Date().toISOString();
-      const leValue = 'receivedDateTime le ' + nowIso + ' and isRead eq false';
+      // Upper bound one minute ahead: the mock stamps its newest message with
+      // its own `new Date()` after this line runs, so a bound of exactly "now"
+      // races the clock and intermittently excludes it (issue #30).
+      const upperBound = new Date(Date.now() + 60000).toISOString();
+      const leValue = 'receivedDateTime le ' + upperBound + ' and isRead eq false';
       const messages = simulateGraphAPIResponse('GET', 'me/mailFolders/inbox/messages', null, {
         $filter: leValue,
       });
