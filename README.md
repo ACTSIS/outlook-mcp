@@ -4,7 +4,7 @@
 [![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frafaga2469%2Foutlook-mcp%2Fbadges%2Fcoverage.json)](https://github.com/rafaga2469/outlook-mcp/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Frafaga2469%2Foutlook-mcp%2Fbadges%2Ftests.json)](https://github.com/rafaga2469/outlook-mcp/actions/workflows/ci.yml)
 
-An independently maintained fork of [ryaker/outlook-mcp](https://github.com/ryaker/outlook-mcp). It exposes 49 MCP tools for Outlook mail and calendar, Teams chats, OneDrive, inbox rules, and Power Automate.
+An independently maintained fork of [ryaker/outlook-mcp](https://github.com/ryaker/outlook-mcp). It exposes 52 MCP tools for Outlook mail and calendar, Teams chats, OneDrive, SharePoint sites, inbox rules, and Power Automate.
 
 ## Quick start
 
@@ -25,13 +25,15 @@ You need Node.js 22.22.1 or later and a Microsoft Entra app registration.
    offline_access User.Read Mail.Read Mail.ReadWrite Mail.Send
    Mail.Send.Shared Mail.ReadWrite.Shared
    Chat.ReadWrite Calendars.Read Calendars.ReadWrite Calendars.Read.Shared
-   Contacts.Read Files.Read Files.ReadWrite
+   Contacts.Read Files.Read Files.ReadWrite Sites.Read.All
    ```
 
    The Teams chat tools (`list-chats`, `get-chat-messages`, `send-chat-message`) require the
-   `Chat.ReadWrite` delegated permission, and the shared-mailbox `from` parameter of
-   `send-email`/`draft-email` requires the delegated `.Shared` mail scopes. If your Graph token
-   was acquired before these scopes were added, re-acquire credentials by running
+   `Chat.ReadWrite` delegated permission, the shared-mailbox `from` parameter of
+   `send-email`/`draft-email` requires the delegated `.Shared` mail scopes, and the SharePoint
+   site tools (`list-sites`, `list-site-files`, `download-site-file`) require the delegated
+   `Sites.Read.All` permission. If your Graph token was acquired before these scopes were added,
+   re-acquire credentials by running
    `npm run auth-server` and completing the consent flow again (this re-issues Graph credentials;
    see the shared-file warning below).
 
@@ -575,6 +577,20 @@ and complete the consent flow again (this re-issues Graph credentials; see the s
 below). The date-range filter on `get-chat-messages` applies `receivedAfter`/`receivedBefore` to the
 message `createdDateTime` as a client-side post-filter because Graph does not accept a server-side
 `$filter` on that property.
+
+### SharePoint sites (3)
+
+| Tool                 | Purpose                                                              |
+| -------------------- | -------------------------------------------------------------------- |
+| `list-sites`         | List or search SharePoint team sites accessible to your account      |
+| `list-site-files`    | List a site's default document library items at a path               |
+| `download-site-file` | Get a pre-authenticated download URL for a site file (by ID or path) |
+
+The SharePoint site tools use the `Sites.Read.All` delegated scope and follow the same model as
+the shared-mailbox `from` parameter: delegated access only, with access decided per-user by
+SharePoint permissions — no application (client-credentials) flow is used. A token acquired
+before this scope was added must be re-acquired via `npm run auth-server`. Read access to a site
+you do not have gets Graph HTTP 403 as `SITE_ACCESS_DENIED` without a fallback identity.
 
 ## Authentication model
 

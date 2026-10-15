@@ -21,6 +21,7 @@ const DEFAULT_AUTH_SCOPES = Object.freeze([
   'Contacts.Read',
   'Files.Read',
   'Files.ReadWrite',
+  'Sites.Read.All',
 ]);
 
 function getAuthorityHost() {
@@ -132,6 +133,7 @@ module.exports = {
 
   // OneDrive constants
   ONEDRIVE_SELECT_FIELDS: 'id,name,size,lastModifiedDateTime,webUrl,folder,file,parentReference',
+  SITE_SELECT_FIELDS: 'id,name,displayName,webUrl',
   ONEDRIVE_UPLOAD_THRESHOLD: 4 * 1024 * 1024, // 4MB - files larger than this need chunked upload
 
   // Attachment constants
