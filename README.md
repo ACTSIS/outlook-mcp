@@ -580,11 +580,11 @@ message `createdDateTime` as a client-side post-filter because Graph does not ac
 
 ### SharePoint sites (3)
 
-| Tool                 | Purpose                                                              |
-| -------------------- | -------------------------------------------------------------------- |
-| `list-sites`         | List or search SharePoint team sites accessible to your account      |
-| `list-site-files`    | List a site's default document library items at a path               |
-| `download-site-file` | Get a pre-authenticated download URL for a site file (by ID or path) |
+| Tool                 | Purpose                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------- |
+| `list-sites`         | List or search SharePoint team sites accessible to your account                                   |
+| `list-site-files`    | List a site's default document library items at a path                                            |
+| `download-site-file` | Get a pre-authenticated download URL for a site file (by ID or path, via the `/content` redirect) |
 
 The SharePoint site tools use the `Sites.Read.All` delegated scope and follow the same model as
 the shared-mailbox `from` parameter: delegated access only, with access decided per-user by

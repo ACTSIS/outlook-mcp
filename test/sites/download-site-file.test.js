@@ -1,5 +1,5 @@
 const handleDownloadSiteFile = require('../../sites/download-site-file');
-const { callGraphAPI } = require('../../utils/graph-api');
+const { callGraphAPI, callGraphAPIDownload } = require('../../utils/graph-api');
 const { ensureAuthenticated } = require('../../auth');
 
 jest.mock('../../utils/graph-api');
@@ -11,12 +11,14 @@ describe('handleDownloadSiteFile', () => {
     id: 'item-1',
     name: 'disponibilidad.xlsx',
     size: 20480,
-    '@microsoft.graph.downloadUrl': 'https://download.example/pre-authenticated',
   };
 
   beforeEach(() => {
     callGraphAPI.mockClear();
+    callGraphAPIDownload.mockClear();
+    callGraphAPIDownload.mockResolvedValue('https://download.example/pre-authenticated');
     ensureAuthenticated.mockClear();
+    ensureAuthenticated.mockResolvedValue(mockAccessToken);
     jest.spyOn(console, 'error').mockImplementation(() => {});
   });
 
@@ -43,8 +45,8 @@ describe('handleDownloadSiteFile', () => {
   });
 
   describe('successful retrieval', () => {
-    test('resolves the download URL by item ID', async () => {
-      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+    test('resolves the download URL by item ID via the /content redirect', async () => {
+      callGraphAPI.mockClear();
       callGraphAPI.mockResolvedValue(mockFile);
 
       const result = await handleDownloadSiteFile({ siteId: 'site-1', itemId: 'item-1' });
@@ -55,17 +57,18 @@ describe('handleDownloadSiteFile', () => {
         'sites/site-1/drive/items/item-1',
         null,
         expect.objectContaining({
-          $select: 'id,name,size,@microsoft.graph.downloadUrl',
+          $select: 'id,name,size,folder',
         })
+      );
+      expect(callGraphAPIDownload).toHaveBeenCalledWith(
+        mockAccessToken,
+        'sites/site-1/drive/items/item-1/content'
       );
       expect(result.content[0].text).toContain('disponibilidad.xlsx');
       expect(result.content[0].text).toContain('https://download.example/pre-authenticated');
     });
 
-    test('resolves the download URL by url-encoded path', async () => {
-      ensureAuthenticated.mockResolvedValue(mockAccessToken);
-      callGraphAPI.mockResolvedValue(mockFile);
-
+    test('resolves the download URL by url-encoded path and appends :/content', async () => {
       await handleDownloadSiteFile({
         siteId: 'site 1',
         path: '/Reportes 2026/disponibilidad.xlsx',
@@ -78,18 +81,35 @@ describe('handleDownloadSiteFile', () => {
         null,
         expect.anything()
       );
+      expect(callGraphAPIDownload).toHaveBeenCalledWith(
+        mockAccessToken,
+        'sites/site%201/drive/root:/Reportes%202026/disponibilidad.xlsx:/content'
+      );
     });
   });
 
   describe('folder and error handling', () => {
-    test('refuses a folder without a download URL', async () => {
-      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+    test('refuses a folder without issuing a /content request', async () => {
       callGraphAPI.mockResolvedValue({ id: 'item-2', name: 'reportes', folder: { childCount: 4 } });
 
       const result = await handleDownloadSiteFile({ siteId: 'site-1', itemId: 'item-2' });
 
+      expect(callGraphAPIDownload).not.toHaveBeenCalled();
       expect(result.content[0].text).toContain('is a folder');
       expect(result.content[0].text).not.toContain('https://download.example');
+    });
+
+    test('surfaces the redirect error for items without a download URL', async () => {
+      callGraphAPI.mockResolvedValue(mockFile);
+      callGraphAPIDownload.mockRejectedValue(
+        new Error('Download request failed with status 404: not found')
+      );
+
+      const result = await handleDownloadSiteFile({ siteId: 'site-1', itemId: 'item-1' });
+
+      expect(result.content[0].text).toBe(
+        'Error getting site file download URL: Download request failed with status 404: not found'
+      );
     });
 
     test('requires authentication before resolving', async () => {

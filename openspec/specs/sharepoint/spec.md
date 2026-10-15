@@ -72,20 +72,23 @@ SharePoint site tools MUST obtain a Graph access token via `ensureAuthenticated(
 
 ### Requirement: Download Site File
 
-`download-site-file` MUST resolve a file's pre-authenticated `@microsoft.graph.downloadUrl` either by item ID (`sites/{siteId}/drive/items/{id}`) or by path (`sites/{siteId}/drive/root:/{path}`), selecting only id, name, size, and the download URL.
+`download-site-file` MUST resolve a file's pre-authenticated download URL from the HTTP 302 `Location` returned by the `/content` endpoint of the item either by item ID (`sites/{siteId}/drive/items/{id}/content`) or by path (`sites/{siteId}/drive/root:/{path}:/content`, through the shared `callGraphAPIDownload` transport), selecting only id, name, size, and the `folder` facet in the metadata request. The URL-returning contract is unchanged; the tool MUST NOT depend on `@microsoft.graph.downloadUrl` being populated in item metadata (issue #43; same pattern as issue #41).
 
 #### Scenario: A file download URL is returned
 
 - GIVEN a valid site ID and either `itemId` or `path`
 - WHEN `download-site-file` resolves a file
-- THEN the response MUST include the file name, size, and pre-authenticated download URL
+- THEN the handler MUST fetch metadata (`$select=id,name,size,folder`) for size, name, and folder validation
+- AND MUST request the `/content` endpoint to obtain the 302 pre-authenticated download URL
+- AND the response MUST include the file name, size, and pre-authenticated download URL
 - AND the response MUST warn that the URL expires after a short time
 
 #### Scenario: The item is a folder
 
-- GIVEN Graph returns an item with a `folder` facet
+- GIVEN Graph returns an item with a `folder` facet in the `$select` response
 - WHEN `download-site-file` runs
 - THEN the tool MUST refuse it with a clear folder message and no download URL
+- AND the tool MUST NOT issue a `/content` request for a folder
 
 #### Scenario: Neither item ID nor path is given
 
