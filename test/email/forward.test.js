@@ -295,6 +295,109 @@ describe('handleForwardDraft', () => {
     ]);
   });
 
+  test('rejects an invalid from address before authenticating', async () => {
+    const result = await handleForwardDraft({ emailId: 'original-id', from: 'not-an-email' });
+
+    expect(result.content[0].text).toContain("Invalid from address: 'not-an-email'");
+    expect(ensureAuthenticated).not.toHaveBeenCalled();
+    expect(callGraphAPI).not.toHaveBeenCalled();
+  });
+
+  test('rejects an empty from address before authenticating', async () => {
+    const result = await handleForwardDraft({ emailId: 'original-id', from: '   ' });
+
+    expect(result.content[0].text).toContain('Invalid from address');
+    expect(ensureAuthenticated).not.toHaveBeenCalled();
+    expect(callGraphAPI).not.toHaveBeenCalled();
+  });
+
+  test('creates a signed forward draft through the shared mailbox', async () => {
+    const composedAttachment = { contentId: 'logo', isInline: true, contentBytes: 'aA==' };
+    composeEmail.mockResolvedValue({
+      body: '<p>My note</p><p>Signed</p>',
+      contentType: 'html',
+      attachments: [composedAttachment],
+      hasSignature: true,
+    });
+    callGraphAPI
+      .mockResolvedValueOnce({
+        id: 'forward-draft-1',
+        subject: 'FW: Original',
+        body: { content: '<div>Quoted thread</div>' },
+      })
+      .mockResolvedValueOnce({ id: 'forward-draft-1', subject: 'FW: Original' })
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({});
+
+    const result = await handleForwardDraft({
+      emailId: 'original-id',
+      from: 'sac.soporte@actsis.com',
+      body: 'My note',
+      includeSignature: true,
+    });
+
+    expect(callGraphAPI.mock.calls).toEqual([
+      [
+        'dummy_access_token',
+        'POST',
+        'users/sac.soporte%40actsis.com/messages/original-id/createForward',
+      ],
+      [
+        'dummy_access_token',
+        'PATCH',
+        'users/sac.soporte%40actsis.com/messages/forward-draft-1',
+        {
+          body: {
+            contentType: 'html',
+            content: '<p>My note</p><p>Signed</p><div>Quoted thread</div>',
+          },
+        },
+      ],
+      [
+        'dummy_access_token',
+        'PATCH',
+        'users/sac.soporte%40actsis.com/messages/forward-draft-1',
+        { toRecipients: [], ccRecipients: [], bccRecipients: [] },
+      ],
+      [
+        'dummy_access_token',
+        'POST',
+        'users/sac.soporte%40actsis.com/messages/forward-draft-1/attachments',
+        composedAttachment,
+      ],
+    ]);
+    expect(result.content[0].text).toContain('Forward draft created successfully!');
+    expect(result.content[0].text).toContain('Recipients: none (set them before sending)');
+  });
+
+  test('url-encodes a shared mailbox address with special characters', async () => {
+    callGraphAPI
+      .mockResolvedValueOnce({ id: 'forward-draft-1', subject: 'FW: Original' })
+      .mockResolvedValueOnce({});
+
+    await handleForwardDraft({ emailId: 'original-id', from: 'box+1@tenant.onmicrosoft.com' });
+
+    expect(callGraphAPI.mock.calls[0]).toEqual([
+      accessToken,
+      'POST',
+      'users/box%2B1%40tenant.onmicrosoft.com/messages/original-id/createForward',
+    ]);
+  });
+
+  test('maps a shared mailbox 403 to MAILBOX_ACCESS_DENIED without /me fallback', async () => {
+    callGraphAPI.mockRejectedValue(new Error('API request failed with status 403: Forbidden'));
+
+    const result = await handleForwardDraft({
+      emailId: 'original-id',
+      from: 'sac.soporte@actsis.com',
+    });
+
+    expect(result.content[0].text).toContain("shared mailbox 'sac.soporte@actsis.com'");
+    expect(result.content[0].text).toContain('MAILBOX_ACCESS_DENIED');
+    expect(result.content[0].text).toContain('Send As Exchange delegation');
+    expect(result.content[0].text).toContain('No fallback');
+  });
+
   test('returns the Mail.ReadWrite guidance for a 403 response', async () => {
     callGraphAPI.mockRejectedValue(new Error('API request failed with status 403: Forbidden'));
 

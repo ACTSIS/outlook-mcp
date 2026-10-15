@@ -3,13 +3,19 @@
  */
 const { callGraphAPI } = require('../utils/graph-api');
 const { ensureAuthenticated } = require('../auth');
-const { composeReply, hasManagedSignature } = require('./graph-message-flow');
+const {
+  composeReply,
+  hasManagedSignature,
+  isEmailLikeAddress,
+  sharedMailboxPrefix,
+} = require('./graph-message-flow');
 const { buildFileAttachments } = require('./attachment-builder');
 
 /**
  * Forward draft handler
  * Creates a forwarded-message draft via Microsoft Graph:
- * POST /me/messages/{id}/createForward
+ * POST /me/messages/{id}/createForward (or
+ * POST /users/{from}/messages/{id}/createForward for a shared mailbox)
  *
  * The draft quotes the original message thread (embedded images and signature
  * stay intact) and always starts with empty recipients so nothing leaks from
@@ -20,6 +26,7 @@ const { buildFileAttachments } = require('./attachment-builder');
 async function handleForwardDraft(args) {
   const {
     emailId,
+    from,
     body = '',
     subject,
     importance = 'normal',
@@ -28,6 +35,24 @@ async function handleForwardDraft(args) {
     signatureName,
     includeSignature,
   } = args || {};
+
+  // Optional shared mailbox (issue #37): validate before authenticating so a
+  // malformed address can never reach Microsoft Graph. Only an omitted `from`
+  // (undefined/null) means "use my own mailbox"; any provided value, including
+  // an empty string, must be a valid email-like address.
+  const fromProvided = from !== undefined && from !== null;
+  const fromArgument = !fromProvided ? '' : typeof from === 'string' ? from.trim() : String(from);
+  if (fromProvided && !isEmailLikeAddress(fromArgument)) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Invalid from address: '${from}'. Provide the UPN or email address of a shared mailbox (e.g. sac.soporte@actsis.com) with Full Access or Send As delegation granted to you in Exchange.`,
+        },
+      ],
+    };
+  }
+  const mailboxPrefix = fromArgument ? sharedMailboxPrefix(fromArgument) : 'me/';
 
   try {
     if (!emailId) {
@@ -53,14 +78,14 @@ async function handleForwardDraft(args) {
     });
 
     const accessToken = await ensureAuthenticated();
-    const createEndpoint = `me/messages/${encodeURIComponent(emailId)}/createForward`;
+    const createEndpoint = `${mailboxPrefix}messages/${encodeURIComponent(emailId)}/createForward`;
     const forwardDraft = await callGraphAPI(accessToken, 'POST', createEndpoint);
     if (!forwardDraft || !forwardDraft.id) {
       throw new Error('Microsoft Graph createForward did not return a draft ID');
     }
 
     const draftId = forwardDraft.id;
-    const endpoint = `me/messages/${encodeURIComponent(draftId)}`;
+    const endpoint = `${mailboxPrefix}messages/${encodeURIComponent(draftId)}`;
     const signed = hasManagedSignature(composed);
     let updatedDraft = forwardDraft;
 
@@ -126,6 +151,19 @@ async function handleForwardDraft(args) {
     }
 
     if (error.message && error.message.includes('status 403')) {
+      // Shared-mailbox 403 (issue #37): the caller lacks the Exchange
+      // delegation on the target mailbox. Surface it clearly, without the
+      // generic Mail.ReadWrite consent guidance and without a /me fallback.
+      if (fromArgument) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Forward draft creation in shared mailbox '${fromArgument}' was denied by Microsoft Graph (HTTP 403; error code: MAILBOX_ACCESS_DENIED). You are missing the Full Access or Send As Exchange delegation on that mailbox; the mailbox owner or an admin must grant it to you. No fallback to your own mailbox was performed.`,
+            },
+          ],
+        };
+      }
       return {
         content: [
           {
