@@ -32,7 +32,7 @@ SharePoint site tools MUST obtain a Graph access token via `ensureAuthenticated(
 - GIVEN Graph returns site documents
 - WHEN `list-sites` runs with a `query`
 - THEN the response MUST show each site's display name, web URL, and ID
-- AND the Graph query MUST carry `$select` with the site select fields and `$search` with the trimmed query
+- AND the Graph query MUST carry `$select` with the site select fields and the `search` query parameter with the trimmed query
 
 #### Scenario: No query is provided
 

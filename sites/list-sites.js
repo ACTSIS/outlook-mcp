@@ -32,7 +32,7 @@ async function handleListSites(args) {
       $top: Math.min(50, count),
     };
     if (query) {
-      queryParams.$search = query;
+      queryParams.search = query;
     }
 
     const response = await callGraphAPI(accessToken, 'GET', 'sites', null, queryParams);

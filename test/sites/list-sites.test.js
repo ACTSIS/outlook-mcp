@@ -48,7 +48,7 @@ describe('handleListSites', () => {
         null,
         expect.objectContaining({
           $select: config.SITE_SELECT_FIELDS,
-          $search: 'disponibilidad',
+          search: 'disponibilidad',
         })
       );
       expect(result.content[0].text).toContain('SAC Disponibilidad');
@@ -82,7 +82,7 @@ describe('handleListSites', () => {
         'GET',
         'sites',
         null,
-        expect.not.objectContaining({ $search: expect.anything() })
+        expect.not.objectContaining({ search: expect.anything() })
       );
       expect(result.content[0].text).toContain('Equipos Internos');
     });
