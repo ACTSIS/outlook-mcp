@@ -266,13 +266,19 @@ const emailTools = [
   {
     name: 'forward-draft',
     description:
-      'Creates a forwarded-message draft quoting the original message thread as embedded content (inline images and signature intact) with empty recipients; add recipients before sending.',
+      'Creates a forwarded-message draft quoting the original message thread as embedded content (inline images and signature intact) with empty recipients; add recipients before sending. Optionally created in a shared mailbox with delegation.',
     inputSchema: {
       type: 'object',
       properties: {
         emailId: {
           type: 'string',
-          description: 'ID of the message to forward',
+          description:
+            'ID of the message to forward. With from set, the ID must exist in that shared mailbox.',
+        },
+        from: {
+          type: 'string',
+          description:
+            "Optional shared mailbox UPN/email (e.g. 'sac.soporte@actsis.com') to forward from. The source message is read and the forward draft is created inside that mailbox (users/{from}/... endpoints). Requires the delegated Mail.ReadWrite.Shared scope plus Exchange Full Access or Send As delegation on that mailbox for your account; on a missing delegation Graph returns 403 (MAILBOX_ACCESS_DENIED) with no fallback. Omit to forward from your own mailbox.",
         },
         body: {
           type: 'string',
