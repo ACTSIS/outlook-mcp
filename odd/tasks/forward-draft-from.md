@@ -14,12 +14,12 @@ Source: deferred task recorded in odd/tasks/shared-mailbox-from.md L3 (forward.j
 
 ## Tasks
 
-### T1: `from` on forward-draft
+### T1: `from` on forward-draft — DONE (commit a2ebfcc)
 
 - `email/forward.js`: optional `from`; message fetch and draft creation route through `users/{from}/...`; reuse the #28 helpers (`isEmailLikeAddress`, `sharedMailboxPrefix`) from `email/graph-message-flow.js` instead of duplicating.
 - Handler tests in `test/email/forward.test.js`: validation (invalid/empty from pre-auth), success with `from` (endpoints), 403 no-fallback, unchanged no-`from` path, signature/inline-image/empty-recipient regressions kept.
 
-### T2: Docs + spec commit
+### T2: Docs + spec commit — DONE (commit ebe2abd)
 
 - `email/index.js` schema description for `from` on forward-draft; README rows/section; `docs/authentication.md` note already mentions enforcement — extend if needed; OpenSpec `email` spec forward scenario.
 - Focused: `npx jest test/email/forward.test.js test/email/graph-message-flow.test.js test/config/` then full suite, lint, Prettier.
@@ -31,3 +31,4 @@ Source: deferred task recorded in odd/tasks/shared-mailbox-from.md L3 (forward.j
 ## Log
 
 - L1 (2026-10-14): user mandate: "Ataquemos los pientes de una vez" (sic). Scope per S2-S4; forward.js owns its native flow copy, so reuse #28 helpers rather than duplicating again.
+- L2 (2026-10-15): Implementation resumed and verified: forward.js routes createForward + draft patches via sharedMailboxPrefix (no source-message fetch needed; createForward quotes the thread server-side). Tests: focused forward 20/20, full suite 839/839, lint + Prettier clean. Commits a2ebfcc (T1), ebe2abd (T2).
