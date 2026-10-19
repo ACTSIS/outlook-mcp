@@ -62,6 +62,10 @@ async function handleGetChatMessages(args) {
     } else {
       const queryParams = {
         $top: Math.min(config.MAX_RESULT_COUNT, requestedCount),
+        // Graph guarantees no ordering without an explicit $orderby (its
+        // implicit order follows lastModifiedDateTime, so edited or embedded
+        // messages float around); newest-first must be requested explicitly.
+        $orderby: 'createdDateTime desc',
       };
 
       // Make API call with pagination support

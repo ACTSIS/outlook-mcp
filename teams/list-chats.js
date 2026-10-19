@@ -9,6 +9,9 @@ const { ensureAuthenticated } = require('../auth');
  * Reads the newest message's creation time for one chat.
  * Graph v1.0 keeps `lastUpdatedDateTime` stale for some chat types (notably
  * oneOnOne chats), so their real activity can only be seen via messages.
+ * Graph guarantees no ordering without an explicit $orderby (its implicit
+ * order follows lastModifiedDateTime), so the probe must request newest first
+ * itself and skip system event entries, which carry no user activity.
  * Returns ISO string or null when Graph returns no message.
  * @param {string} accessToken - Graph access token
  * @param {string} chatId - Chat ID
@@ -19,11 +22,19 @@ async function fetchLatestMessageDateTime(accessToken, chatId) {
     accessToken,
     'GET',
     `me/chats/${encodeURIComponent(chatId)}/messages`,
-    { $top: 1, $select: 'id,createdDateTime' },
-    {}
+    {
+      $top: 5,
+      $select: 'id,createdDateTime,body',
+      $orderby: 'createdDateTime desc',
+    }
   );
   const messages = response && Array.isArray(response.value) ? response.value : [];
-  const first = messages[0];
+  const first = messages.find(
+    (message) =>
+      !message.body ||
+      !message.body.content ||
+      !message.body.content.trim().startsWith('<systemEventMessage')
+  );
   return first && first.createdDateTime ? first.createdDateTime : null;
 }
 
@@ -164,7 +175,8 @@ function formatListResults(response) {
     };
   }
 
-  // Format results
+  // Format results; state the swept total so a capped render is never
+  // mistaken for a complete listing.
   const chatList = response.value
     .map((chat, index) => {
       const topic = chat.topic || '(unnamed chat)';
@@ -179,6 +191,12 @@ function formatListResults(response) {
     })
     .join('\n');
 
+  const sweptTotal = response['@odata.count'];
+  const headerText =
+    Number.isFinite(sweptTotal) && sweptTotal > response.value.length
+      ? `Found ${response.value.length} of ${sweptTotal} chats:`
+      : `Found ${response.value.length} chats:`;
+
   // Surface the pagination cursor when the source has more pages
   const nextLinkNote = response.nextLink ? `\n(nextLink: ${response.nextLink})` : '';
 
@@ -186,7 +204,7 @@ function formatListResults(response) {
     content: [
       {
         type: 'text',
-        text: `Found ${response.value.length} chats:\n\n${chatList}${nextLinkNote}`,
+        text: `${headerText}\n\n${chatList}${nextLinkNote}`,
       },
     ],
   };

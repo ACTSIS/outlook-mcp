@@ -152,6 +152,25 @@ describe('handleGetChatMessages', () => {
 
       expect(result.content[0].text).toContain('[html]');
     });
+
+    // Graph does not guarantee any ordering without an explicit $orderby; its
+    // implicit order follows lastModifiedDateTime, so edited or embedded
+    // messages float around and "newest" is not actually newest. The tool
+    // promises newest-first output, so it must ask Graph to order explicitly.
+    test('requests an explicit newest-first order from Graph', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      callGraphAPIPaginated.mockResolvedValue({ value: mockMessages });
+
+      await handleGetChatMessages({ chatId: 'chat-1' });
+
+      expect(callGraphAPIPaginated).toHaveBeenCalledWith(
+        mockAccessToken,
+        'GET',
+        `chats/${encodeURIComponent('chat-1')}/messages`,
+        expect.objectContaining({ $orderby: 'createdDateTime desc' }),
+        expect.any(Number)
+      );
+    });
   });
 
   describe('empty results', () => {
