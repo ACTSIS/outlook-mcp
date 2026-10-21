@@ -235,6 +235,74 @@ describe('runtime/vault-client', () => {
     });
   });
 
+  function createMockResponse(statusCode, body) {
+    const handlers = {};
+    return {
+      statusCode,
+      resume: jest.fn(),
+      setEncoding: jest.fn(),
+      on: jest.fn((event, handler) => {
+        handlers[event] = handler;
+      }),
+      emitBody() {
+        if (body !== undefined && handlers.data) handlers.data(body);
+        if (handlers.end) handlers.end();
+      },
+    };
+  }
+
+  async function requestWithMockResponse(response) {
+    const request = { on: jest.fn(), write: jest.fn(), end: jest.fn() };
+    const httpsTransport = {
+      request: jest.fn((target, options, callback) => {
+        callback(response);
+        return request;
+      }),
+    };
+    const promise = requestJson(
+      {
+        method: 'GET',
+        operation: 'Vault KV read',
+        url: 'https://vault.example.test/v1/kv/data/outlook-mcp/actsis',
+        headers: { 'X-Vault-Token': 'opaque-vault-token' },
+      },
+      { https: httpsTransport }
+    );
+    response.emitBody();
+    return promise.catch((caught) => caught);
+  }
+
+  it('classifies a sealed Vault 503 response as VAULT_SEALED', async () => {
+    const error = await requestWithMockResponse(
+      createMockResponse(503, JSON.stringify({ errors: ['Vault is sealed'] }))
+    );
+    expect(error).toMatchObject({ code: 'VAULT_SEALED', status: 503 });
+    expect(error.message).toContain('Vault KV read failed');
+    expect(error.message).toContain('Vault at https://vault.example.test/ is sealed');
+    expect(error.message).toContain('vault operator unseal');
+    expect(error.message).not.toContain('opaque-vault-token');
+  });
+
+  it('keeps VAULT_HTTP_ERROR for other 503 responses', async () => {
+    const error = await requestWithMockResponse(
+      createMockResponse(503, JSON.stringify({ errors: ['standby node'] }))
+    );
+    expect(error).toMatchObject({ code: 'VAULT_HTTP_ERROR', status: 503 });
+    expect(error.message).toContain('Vault request failed with HTTP status 503.');
+  });
+
+  it('keeps VAULT_HTTP_ERROR when a 503 body is not JSON', async () => {
+    const error = await requestWithMockResponse(createMockResponse(503, '<html>oops</html>'));
+    expect(error).toMatchObject({ code: 'VAULT_HTTP_ERROR', status: 503 });
+  });
+
+  it('keeps VAULT_UNAUTHORIZED for 403 responses', async () => {
+    const error = await requestWithMockResponse(
+      createMockResponse(403, JSON.stringify({ errors: ['permission denied'] }))
+    );
+    expect(error).toMatchObject({ code: 'VAULT_UNAUTHORIZED', status: 403 });
+  });
+
   it('contextualizes Vault transport errors with the operation and safe target', async () => {
     const request = {
       on: jest.fn(),

@@ -284,6 +284,25 @@ function wrapVaultRequestError(operation, endpoint, error, config, extraSecrets,
   return new VaultError(contextual.message, contextual.code || fallbackCode, contextual.status);
 }
 
+function isVaultSealedBody(body) {
+  if (!body) return false;
+  try {
+    const parsed = JSON.parse(body);
+    const errors = Array.isArray(parsed?.errors) ? parsed.errors : [];
+    return errors.some((entry) => typeof entry === 'string' && /vault is sealed/i.test(entry));
+  } catch {
+    return false;
+  }
+}
+
+function safeOrigin(url) {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return 'the configured VAULT_ADDR';
+  }
+}
+
 /**
  * Execute a JSON request against Vault without exposing response bodies in
  * errors. The default TLS behavior is preserved; certificate verification is
@@ -353,21 +372,45 @@ function requestJson(options, deps = {}) {
         },
         (response) => {
           if (response.statusCode < 200 || response.statusCode >= 300) {
-            if (typeof response.resume === 'function') response.resume();
-            const responseError = new VaultError(
-              `Vault request failed with HTTP status ${response.statusCode}.`,
-              response.statusCode === 401 || response.statusCode === 403
-                ? 'VAULT_UNAUTHORIZED'
-                : 'VAULT_HTTP_ERROR',
-              response.statusCode
-            );
-            finish(
-              contextualize(
-                responseError,
-                responseError.code,
-                `Vault request failed with HTTP status ${response.statusCode}.`
-              )
-            );
+            const statusCode = response.statusCode;
+            const fallbackMessage = `Vault request failed with HTTP status ${statusCode}.`;
+            const finishWithHttpError = (errorBody) => {
+              const sealed = statusCode === 503 && isVaultSealedBody(errorBody);
+              const responseError = sealed
+                ? new VaultError(
+                    `Vault at ${safeOrigin(options.url)} is sealed. Ask the Vault operator to unseal it (vault operator unseal) and retry; no auth method or token works while Vault is sealed.`,
+                    'VAULT_SEALED',
+                    statusCode
+                  )
+                : new VaultError(
+                    fallbackMessage,
+                    statusCode === 401 || statusCode === 403
+                      ? 'VAULT_UNAUTHORIZED'
+                      : 'VAULT_HTTP_ERROR',
+                    statusCode
+                  );
+              finish(contextualize(responseError, responseError.code, fallbackMessage));
+            };
+
+            if (typeof response.on !== 'function') {
+              if (typeof response.resume === 'function') response.resume();
+              finishWithHttpError('');
+              return;
+            }
+
+            let errorBody = '';
+            let errorBodyTruncated = false;
+            if (typeof response.setEncoding === 'function') response.setEncoding('utf8');
+            response.on('data', (chunk) => {
+              if (errorBodyTruncated) return;
+              errorBody += chunk;
+              if (Buffer.byteLength(errorBody, 'utf8') > MAX_RESPONSE_BYTES) {
+                errorBodyTruncated = true;
+                errorBody = '';
+              }
+            });
+            response.on('end', () => finishWithHttpError(errorBody));
+            response.on('error', () => finishWithHttpError(''));
             return;
           }
 
