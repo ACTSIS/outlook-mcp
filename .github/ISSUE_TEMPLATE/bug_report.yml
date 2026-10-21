@@ -1,0 +1,64 @@
+name: Bug report
+description: Report unexpected behavior in outlook-mcp
+title: "[Bug]: "
+labels: ["type:bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before submitting, remove access tokens, credentials, personal data, and private hostnames from logs or screenshots.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the problem and its impact.
+      placeholder: A clear, concise description of the unexpected behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest sequence of steps that reproduces the problem.
+      placeholder: |
+        1. Configure...
+        2. Run...
+        3. Observe...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include the exact error with sensitive values redacted.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: outlook-mcp version
+      description: Include the release version or commit if known.
+      placeholder: e.g. 1.2.3
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment and additional context
+      description: Include the operating system, MCP client, and any relevant safe logs.
+      render: text
+    validations:
+      required: false
