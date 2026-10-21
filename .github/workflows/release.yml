@@ -1,11 +1,25 @@
 name: Release
 
-# Only an explicitly pushed tag may publish a release. Branch pushes and
-# pull requests never trigger this workflow (threat: pushed-tag state).
+# Only an explicitly pushed tag or a validated reusable-workflow call may
+# publish a release. Branch pushes and pull requests never trigger this workflow.
 on:
   push:
     tags:
       - 'v*'
+  workflow_call:
+    inputs:
+      tag:
+        description: Semantic version tag to release
+        required: true
+        type: string
+    secrets:
+      NETBIRD_SETUP_KEY:
+        required: false
+      PROGET_API_KEY:
+        required: false
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   build:
@@ -26,6 +40,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -66,6 +82,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Download packaged artifact
         uses: actions/download-artifact@v4
@@ -127,6 +145,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Download packaged artifacts
         uses: actions/download-artifact@v4
@@ -154,6 +174,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Download packaged artifacts
         uses: actions/download-artifact@v4
@@ -174,7 +196,7 @@ jobs:
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/outlook-mcp-win-x64.exe dist/outlook-mcp-linux-x64 --generate-notes
+        run: gh release create "$RELEASE_TAG" dist/outlook-mcp-win-x64.exe dist/outlook-mcp-linux-x64 --generate-notes
 
   installer-windows:
     name: Build Windows installer
@@ -187,20 +209,22 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Set version
         id: version
         shell: bash
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Verify tag matches package version
         shell: bash
         run: |
           set -euo pipefail
-          tag_version="${GITHUB_REF_NAME#v}"
+          tag_version="${RELEASE_TAG#v}"
           pkg_version="$(node -e "console.log(require('./package.json').version)")"
           if [ "$tag_version" != "$pkg_version" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $pkg_version"
+            echo "::error::tag $RELEASE_TAG does not match package.json version $pkg_version"
             exit 1
           fi
 
@@ -239,20 +263,22 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Set version
         id: version
         shell: bash
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Verify tag matches package version
         shell: bash
         run: |
           set -euo pipefail
-          tag_version="${GITHUB_REF_NAME#v}"
+          tag_version="${RELEASE_TAG#v}"
           pkg_version="$(node -e "console.log(require('./package.json').version)")"
           if [ "$tag_version" != "$pkg_version" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $pkg_version"
+            echo "::error::tag $RELEASE_TAG does not match package.json version $pkg_version"
             exit 1
           fi
 
@@ -270,7 +296,7 @@ jobs:
         shell: bash
         run: build/linux/package-deb.sh
         env:
-          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_REF_NAME: ${{ inputs.tag || github.ref_name }}
           GITHUB_SHA: ${{ github.sha }}
 
       - name: Scan .deb payload for secrets
@@ -303,11 +329,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Set version
         id: version
         shell: bash
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Download installer artifacts
         uses: actions/download-artifact@v4
@@ -339,11 +367,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Set version
         id: version
         shell: bash
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Download raw product artifacts
         uses: actions/download-artifact@v4
@@ -402,6 +432,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -415,7 +447,7 @@ jobs:
       - name: Set version
         id: version
         shell: bash
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Download raw product artifacts
         uses: actions/download-artifact@v4

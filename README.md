@@ -128,6 +128,8 @@ Windows file Properties identify the executable as **M365 Assistant MCP Server**
 
    In MCP mode, the executable relaunches itself in `auth` mode when an authentication tool needs the callback server, so one file covers the whole flow. If a future release must use separate fallback artifacts, it will document `outlook-mcp-<target>-mcp` and `outlook-mcp-<target>-auth` names and the same mode-specific invocation.
 
+Maintainers can publish a semantic release from GitHub Actions by running **Semantic version** on `main` and selecting `patch`, `minor`, or `major`. The workflow dispatches CI for the current `main` commit and waits for success before updating package metadata, pushing the matching version tag, and invoking the release pipeline. It uses the repository's built-in `GITHUB_TOKEN`; no personal access token is required.
+
 ### Intranet installation (ACTSIS ProGet)
 
 ACTSIS collaborators can install releases from the corporate ProGet Asset Directory at `https://artifacts.actsis.com`. Assets live in the dedicated `outlook-mcp` asset directory, under the `releases/` prefix:

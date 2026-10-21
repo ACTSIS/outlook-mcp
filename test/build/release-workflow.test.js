@@ -2,9 +2,8 @@
  * Release workflow tests (.github/workflows/release.yml).
  *
  * Threat contract from the design:
- * - Push state: only an explicit pushed tag releases; branch pushes, and
- *   tag-vs-ref cases, are distinguished (tag-only trigger, no branch
- *   trigger).
+ * - Push state: tag pushes release directly; the version workflow can call
+ *   this pipeline only with a selected semantic version tag.
  * - Failed builds never invoke release creation: the publish job must
  *   depend on every required job (build, validation, secret scan) and must
  *   not bypass failure (no `if: always()`), so no incomplete release is
@@ -55,19 +54,23 @@ describe('release workflow', () => {
     });
 
     it('never releases on a branch push or non-tag event', () => {
-      expect(Object.keys(doc.on)).toEqual(['push']);
+      expect(Object.keys(doc.on)).toEqual(['push', 'workflow_call']);
       expect(doc.on.push).not.toHaveProperty('branches');
       expect(doc.on.push).not.toHaveProperty('branches-ignore');
     });
 
-    it('offers no manual dispatch bypass of the tag gate', () => {
+    it('supports tag pushes and reusable workflow calls, but no direct manual release', () => {
       expect(doc.on.workflow_dispatch).toBeUndefined();
-      expect(doc.on.schedule).toBeUndefined();
+      expect(doc.on.workflow_call.inputs.tag).toEqual({
+        description: 'Semantic version tag to release',
+        required: true,
+        type: 'string',
+      });
     });
 
     it('binds release creation to the pushed tag ref itself', () => {
       const releaseSteps = stepsScript(doc, 'release');
-      expect(releaseSteps).toMatch(/GITHUB_REF_NAME/);
+      expect(releaseSteps).toMatch(/RELEASE_TAG/);
       expect(releaseSteps).not.toMatch(/GITHUB_HEAD_REF/);
       expect(releaseSteps).not.toMatch(/GITHUB_BASE_REF/);
     });
@@ -151,6 +154,18 @@ describe('release workflow', () => {
       const releaseSteps = stepsScript(doc, 'release');
       expect(releaseSteps).toMatch(/outlook-mcp-win-x64\.exe/);
       expect(releaseSteps).toMatch(/outlook-mcp-linux-x64/);
+    });
+  });
+
+  describe('reusable release source', () => {
+    it('checks out and publishes the requested tag when called by the version workflow', () => {
+      const checkoutRefs = Object.values(doc.jobs)
+        .flatMap((job) => job.steps || [])
+        .filter((step) => step.uses === 'actions/checkout@v4')
+        .map((step) => step.with?.ref);
+      expect(checkoutRefs.length).toBeGreaterThan(0);
+      expect(checkoutRefs.every((ref) => ref === '${{ inputs.tag || github.ref }}')).toBe(true);
+      expect(doc.jobs.release.steps.at(-1).run).toContain('$RELEASE_TAG');
     });
   });
 
@@ -260,8 +275,8 @@ describe('release workflow', () => {
       const linuxScript = stepsScript(doc, 'installer-linux');
       expect(windowsScript).toMatch(/package\.json.*version/);
       expect(linuxScript).toMatch(/package\.json.*version/);
-      expect(windowsScript).toMatch(/GITHUB_REF_NAME/);
-      expect(linuxScript).toMatch(/GITHUB_REF_NAME/);
+      expect(windowsScript).toMatch(/RELEASE_TAG/);
+      expect(linuxScript).toMatch(/RELEASE_TAG/);
     });
 
     it('keeps the existing release job block byte-for-byte unchanged', () => {
