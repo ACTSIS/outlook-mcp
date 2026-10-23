@@ -208,6 +208,68 @@ describe('handleListChats', () => {
       });
     }
 
+    // Graph does not guarantee message ordering without an explicit $orderby
+    // (its implicit order follows lastModifiedDateTime), so the probe's
+    // "$top: 1 without order" used to hand back an old message and bury a
+    // recently active oneOnOne chat beyond the rendered slice. The probe must
+    // ask Graph for newest first and skip system event entries.
+    test('probe asks Graph for newest-first and skips system events', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      sweepWith([staleChat]);
+      callGraphAPI.mockImplementation(async (token, method, path) => {
+        if (path.startsWith('me/chats/stale-one-on-one/messages')) {
+          // Newest first, as $orderby desc guarantees: the first entry is a
+          // system event, the real latest message follows.
+          return {
+            value: [
+              {
+                id: 'evt',
+                createdDateTime: '2026-10-16T00:00:00Z',
+                body: { content: '<systemEventMessage/>' },
+              },
+              {
+                id: 'm1',
+                createdDateTime: '2026-10-15T16:53:16Z',
+                body: { content: '<p>real</p>' },
+              },
+            ],
+          };
+        }
+        return { value: [] };
+      });
+
+      const result = await handleListChats({ count: 1 });
+
+      // The probe request itself must carry the explicit order.
+      expect(callGraphAPI).toHaveBeenCalledWith(
+        mockAccessToken,
+        'GET',
+        expect.stringContaining('me/chats/stale-one-on-one/messages'),
+        expect.objectContaining({ $orderby: 'createdDateTime desc' })
+      );
+      // The system event must not be taken as the chat's latest activity.
+      expect(result.content[0].text).toContain(new Date('2026-10-15T16:53:16Z').toLocaleString());
+    });
+
+    test('states how many swept chats were truncated from the render', async () => {
+      ensureAuthenticated.mockResolvedValue(mockAccessToken);
+      // Full sweep of 173 chats, rendered count capped at 50: the caller must
+      // never read "Found 50 chats" as a complete listing.
+      const many = Array.from({ length: 173 }, (_, i) => ({
+        id: `chat-${i}`,
+        topic: `Chat ${i}`,
+        lastUpdatedDateTime: `2026-01-${String((i % 28) + 1).padStart(2, '0')}T00:00:00Z`,
+      }));
+      callGraphAPIPaginated.mockResolvedValue({
+        value: many,
+        '@odata.count': 173,
+      });
+
+      const result = await handleListChats({ count: 50 });
+
+      expect(result.content[0].text).toContain('Found 50 of 173 chats');
+    });
+
     test('ranks a oneOnOne chat by its latest real message, not stale metadata', async () => {
       ensureAuthenticated.mockResolvedValue(mockAccessToken);
       sweepWith([staleChat, freshMeeting]);
