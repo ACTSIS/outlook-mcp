@@ -56,6 +56,53 @@ function sendRequest(child, message) {
   });
 }
 
+describe('MCP server factory', () => {
+  it('creates an independent server for each connection', () => {
+    const { createMCPServer } = require('../index');
+    const first = createMCPServer();
+    const second = createMCPServer();
+
+    expect(first).not.toBe(second);
+    expect(first.connect).toEqual(expect.any(Function));
+    expect(second.connect).toEqual(expect.any(Function));
+  });
+
+  it('keeps every tool registered for the default stdio factory', async () => {
+    const { createMCPServer, TOOLS } = require('../index');
+    const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+    const { InMemoryTransport } = require('@modelcontextprotocol/sdk/inMemory.js');
+
+    const client = new Client({ name: 'factory-default', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([
+      createMCPServer().connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const { tools } = await client.listTools();
+    expect(tools.map((tool) => tool.name).sort()).toEqual(TOOLS.map((tool) => tool.name).sort());
+  });
+
+  it('applies the tool filter to both the remote tool list and tool invocation', async () => {
+    const { createMCPServer, TOOLS } = require('../index');
+    const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+    const { InMemoryTransport } = require('@modelcontextprotocol/sdk/inMemory.js');
+
+    const visible = TOOLS.map((tool) => tool.name).filter((name) => name !== 'authenticate');
+    const client = new Client({ name: 'factory-filter', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = createMCPServer({ toolFilter: (name) => name !== 'authenticate' });
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const { tools } = await client.listTools();
+    expect(tools.map((tool) => tool.name).sort()).toEqual(visible.sort());
+
+    await expect(client.callTool({ name: 'authenticate', arguments: {} })).rejects.toThrow(
+      /not found|not available/i
+    );
+  });
+});
+
 describe('MCP handshake', () => {
   let child;
 

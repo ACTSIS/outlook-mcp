@@ -364,3 +364,50 @@ describe('toggle flow', () => {
     expect(textOf(await handleToggleFlow(flowArgs))).toMatch(expected);
   });
 });
+
+describe('per-user Flow handler credential boundary', () => {
+  it('serves two overlapping handlers from their own request stores without touching the local singleton', async () => {
+    jest.resetModules();
+    jest.doMock('../../auth/index', () => jest.requireActual('../../auth/index'));
+    const realAuthIndex = require('../../auth/index');
+    const scopedHandleListEnvironments = require('../../power-automate/list-environments');
+    // Restore the file-level mock registration after this test's fresh load.
+    jest.doMock('../../auth/index', () => ({
+      tokenStorage: {
+        getValidFlowAccessToken: mockGetValidFlowAccessToken,
+      },
+    }));
+
+    const localFallbackSpy = jest.fn().mockResolvedValue('local-credential-marker');
+    realAuthIndex.tokenStorage.getValidFlowAccessToken = localFallbackSpy;
+
+    const userStoreFor = (name) => ({
+      getValidFlowAccessToken: jest.fn().mockResolvedValue(`${name}-flow-token`),
+    });
+    const userAStore = userStoreFor('user-a');
+    const userBStore = userStoreFor('user-b');
+
+    mockCallFlowAPI.mockImplementation(async (accessToken) => ({
+      value: [{ name: `env-for-${accessToken}`, properties: {} }],
+    }));
+
+    try {
+      const [resultA, resultB] = await Promise.all([
+        realAuthIndex.runWithTokenStorage(userAStore, () => scopedHandleListEnvironments({})),
+        realAuthIndex.runWithTokenStorage(userBStore, () => scopedHandleListEnvironments({})),
+      ]);
+
+      expect(textOf(resultA)).toMatch(/env-for-user-a-flow-token/);
+      expect(textOf(resultB)).toMatch(/env-for-user-b-flow-token/);
+      expect(mockCallFlowAPI.mock.calls.map(([accessToken]) => accessToken)).toEqual([
+        'user-a-flow-token',
+        'user-b-flow-token',
+      ]);
+      expect(userAStore.getValidFlowAccessToken).toHaveBeenCalledTimes(1);
+      expect(userBStore.getValidFlowAccessToken).toHaveBeenCalledTimes(1);
+      expect(localFallbackSpy).not.toHaveBeenCalled();
+    } finally {
+      delete realAuthIndex.tokenStorage.getValidFlowAccessToken;
+    }
+  });
+});

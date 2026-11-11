@@ -48,44 +48,54 @@ const TOOLS = [
   ...sitesTools,
 ];
 
-// Create server with tools capabilities
-const server = new Server(
-  { name: config.SERVER_NAME, version: config.SERVER_VERSION },
-  {
-    capabilities: {
-      tools: {},
-    },
-  }
-);
+// Each transport connection needs its own protocol server. An optional
+// `toolFilter` predicate restricts which tools this connection exposes, for
+// example the remote HTTP mode filtering out local auth/Vault/server-lifecycle
+// tools. The filter applies to both tools/list and tools/call.
+function createMCPServer(options = {}) {
+  const toolFilter = options.toolFilter || null;
+  const connectionTools = toolFilter ? TOOLS.filter((tool) => toolFilter(tool.name)) : TOOLS;
 
-// The SDK registers initialize automatically. Register application handlers with
-// the supported request schemas so they are dispatched by the SDK protocol.
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  console.error('TOOLS LIST REQUEST');
-  console.error(`TOOLS COUNT: ${TOOLS.length}`);
-  console.error(`TOOLS NAMES: ${TOOLS.map((t) => t.name).join(', ')}`);
+  const server = new Server(
+    { name: config.SERVER_NAME, version: config.SERVER_VERSION },
+    {
+      capabilities: {
+        tools: {},
+      },
+    }
+  );
 
-  return {
-    tools: TOOLS.map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: tool.inputSchema,
-    })),
-  };
-});
+  // The SDK registers initialize automatically. Register application handlers with
+  // the supported request schemas so they are dispatched by the SDK protocol.
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    console.error('TOOLS LIST REQUEST');
+    console.error(`TOOLS COUNT: ${connectionTools.length}`);
+    console.error(`TOOLS NAMES: ${connectionTools.map((t) => t.name).join(', ')}`);
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args = {} } = request.params || {};
+    return {
+      tools: connectionTools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      })),
+    };
+  });
 
-  console.error(`TOOL CALL: ${name}`);
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args = {} } = request.params || {};
 
-  const tool = TOOLS.find((candidate) => candidate.name === name);
-  if (!tool || !tool.handler) {
-    throw new Error(`Tool not found: ${name}`);
-  }
+    console.error(`TOOL CALL: ${name}`);
 
-  return tool.handler(args);
-});
+    const tool = connectionTools.find((candidate) => candidate.name === name);
+    if (!tool || !tool.handler) {
+      throw new Error(`Tool not found: ${name}`);
+    }
+
+    return tool.handler(args);
+  });
+
+  return server;
+}
 
 // Make the script executable
 process.on('SIGTERM', () => {
@@ -99,6 +109,7 @@ process.on('SIGTERM', () => {
  */
 function startMCP() {
   const transport = new StdioServerTransport();
+  const server = createMCPServer();
   return server
     .connect(transport)
     .then(() => console.error(`${config.SERVER_NAME} connected and listening`))
@@ -114,4 +125,4 @@ if (require.main === module) {
   startMCP();
 }
 
-module.exports = { startMCP };
+module.exports = { startMCP, createMCPServer, TOOLS };
