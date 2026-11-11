@@ -4,13 +4,14 @@ This document maps current canonical specifications to the archived changes that
 
 ## Canonical Map
 
-| Current domain        | Canonical specification                                                      | Primary implementation evidence                                           |
-| --------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Graph authentication  | [`specs/auth/spec.md`](specs/auth/spec.md)                                   | `outlook-auth-server.js`, `auth/token-storage.js`, `auth/tools.js`        |
-| Flow token lifecycle  | [`specs/flow-token-management/spec.md`](specs/flow-token-management/spec.md) | `outlook-auth-server.js`, `auth/token-storage.js`                         |
-| Power Automate tools  | [`specs/power-automate/spec.md`](specs/power-automate/spec.md)               | `power-automate/` handlers and `flow-api.js`                              |
-| SharePoint site tools | [`specs/sharepoint/spec.md`](specs/sharepoint/spec.md)                       | `sites/` handlers (`list-sites`, `list-site-files`, `download-site-file`) |
-| OneDrive file tools   | [`specs/onedrive/spec.md`](specs/onedrive/spec.md)                           | `onedrive/` handlers (`upload`, `upload-large`, `download`)               |
+| Current domain        | Canonical specification                                                      | Primary implementation evidence                                             |
+| --------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Graph authentication  | [`specs/auth/spec.md`](specs/auth/spec.md)                                   | `outlook-auth-server.js`, `auth/token-storage.js`, `auth/tools.js`          |
+| Flow token lifecycle  | [`specs/flow-token-management/spec.md`](specs/flow-token-management/spec.md) | `outlook-auth-server.js`, `auth/token-storage.js`                           |
+| Power Automate tools  | [`specs/power-automate/spec.md`](specs/power-automate/spec.md)               | `power-automate/` handlers and `flow-api.js`                                |
+| SharePoint site tools | [`specs/sharepoint/spec.md`](specs/sharepoint/spec.md)                       | `sites/` handlers (`list-sites`, `list-site-files`, `download-site-file`)   |
+| OneDrive file tools   | [`specs/onedrive/spec.md`](specs/onedrive/spec.md)                           | `onedrive/` handlers (`upload`, `upload-large`, `download`)                 |
+| Remote HTTP auth      | [`specs/remote-auth/spec.md`](specs/remote-auth/spec.md)                     | `remote/http-server.js`, `remote/entra-auth.js`, `remote/oauth-provider.js` |
 
 ## Archived Change Lineage
 
@@ -47,6 +48,12 @@ The initial-acquisition archive contains both an `auth` delta and a `power-autom
 The initial-acquisition delta described Flow detection by inspecting the token response `scope`. Its design, implementation, and tests instead pass an `isFlow` intent derived from server-side CSRF state metadata.
 
 **Resolution:** canonical auth and Flow-token specs require routing by stored state metadata. Response-scope detection is historical wording, not current behavior.
+
+### The remote HTTP authentication work was first documented only in README/docs
+
+The intranet HTTP listener (delegated Entra identity on `remote/http-server.js`) shipped with user-facing documentation only, so its mode-selector, discovery-metadata, and stateless-validation requirements had no canonical specification owner and the local stdio `auth` spec was wrongly implied to cover them.
+
+**Resolution:** `specs/remote-auth/spec.md` now owns remote HTTP authentication (the `MCP_HTTP_AUTH_MODE=entra|bridge` selector semantics, direct-Entra discovery/challenge metadata with resource-qualified scopes, legacy bridge metadata preservation, and the stateless bearer boundary). The local `auth` spec keeps owning stdio acquisition and refresh only.
 
 ## Known Implementation Gaps
 
