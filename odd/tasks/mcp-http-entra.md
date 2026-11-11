@@ -44,6 +44,7 @@ Delivery: auto-chain, chain_strategy=feature-branch-chain; forecast >400 authore
 - T4 [S1-S11] blocked — Independent security verification and full checks; route: gentle-ai-verify; commit: pending; independent capability remains unavailable, not retried or substituted; prior full-suite timeout still requires separately authorized bounded work.
 
 ## Log
+- L87: Tracker-only commit c32a67b pushed; L86 lineage updated for af708eb, no further tracker commits for this line unless the workflow produces a concrete outcome.
 - L86: Tracker-only follow-up commit af708eb pushed after main publication (no code changes); feature-lineage recorded. Branch state af708eb on top of tag 000b779.
 - L84: Worker publication mwcjmfjj-d-igyd completed: 8 work-unit commits 796ad7d..000b779 incl chore(release) v2.4.2 (package.json/lockfiles only version bump), push branch feat/mcp-http-entra and annotated tag v2.4.2 (63110ff9 to 000b779) accepted by ACTSIS origin, no force/rewrite; .env.docker/tls/secrets never staged; totals 46 files +19638/-85. Focused checks: unit1 57, test/remote 340+2skips, docker/dispatcher 63, release suites pass, package 35/36 known Windows Git-root baseline failure only, scoped lint exit0, compose config -q both OK, frozen-yarn consistency check passed (offline jws tarball fetch is environmental). First parent check: v2.4.2 release run total_count 0; monitor job-6 started (no manual dispatch/retries). Scratch deferred. Independent verification remains unavailable; no final signoff.
 --
