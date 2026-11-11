@@ -21,6 +21,27 @@ const SECRET_ASSIGNMENT_PATTERN =
 const GENERIC_SECRET_PATTERN = /client[-_ ]?secret["']?\s*[:=]\s*["'][^"']+["']/i;
 const PRIVATE_KEY_PATTERN = /BEGIN (?:RSA )?PRIVATE KEY/;
 
+// Fail-closed narrowing: a bare header is suppressed ONLY when it appears
+// verbatim and alone inside quotes as the argument of an indexOf format
+// comparison, e.g. pkcs8.indexOf(<BARE_MARKER>) !== 0; such an argument
+// carries no key body. Comparison occurrences are masked (never removed)
+// so suppression cannot join surrounding fragments into a new match.
+const PRIVATE_KEY_FORMAT_COMPARISON_PATTERN =
+  /\.indexOf\(\s*(['"])-----BEGIN (?:RSA )?PRIVATE KEY-----\1\s*\)/g;
+// A header split across a string concatenation is not a comparison
+// argument and stays flagged fail-closed the same as a plain bare header.
+const PRIVATE_KEY_SPLIT_HEADER_PATTERN = /BEGIN\s*['"]\s*\+\s*['"](?:RSA )?PRIVATE KEY/;
+
+function isPrivateKeyMatch(line) {
+  if (!PRIVATE_KEY_PATTERN.test(line) && !PRIVATE_KEY_SPLIT_HEADER_PATTERN.test(line)) {
+    return false;
+  }
+  const masked = line.replace(PRIVATE_KEY_FORMAT_COMPARISON_PATTERN, (match) =>
+    ' '.repeat(match.length)
+  );
+  return PRIVATE_KEY_PATTERN.test(masked) || PRIVATE_KEY_SPLIT_HEADER_PATTERN.test(masked);
+}
+
 /**
  * True when a single line embeds a credential value (not merely references a
  * runtime environment variable or configuration property).
@@ -31,7 +52,7 @@ function isCredentialLine(line) {
   return (
     SECRET_ASSIGNMENT_PATTERN.test(line) ||
     GENERIC_SECRET_PATTERN.test(line) ||
-    PRIVATE_KEY_PATTERN.test(line)
+    isPrivateKeyMatch(line)
   );
 }
 
