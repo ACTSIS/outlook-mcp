@@ -1,0 +1,43 @@
+# Build-context whitelist for the MCP HTTP server image.
+#
+# Everything is excluded by default; only the runtime module graph is
+# re-included below. This guarantees that local credential files (.env*,
+# tokens, PEM keys), the dependency tree, and repository history can never
+# enter the Docker build context, even if they are present in the working
+# tree at build time. The explicit negative patterns at the end are defense
+# in depth against a future re-inclusion mistake.
+
+*
+
+!package.json
+!package-lock.json
+!config.js
+!index.js
+!outlook-auth-server.js
+!bin/
+!auth/
+!calendar/
+!email/
+!folder/
+!onedrive/
+!power-automate/
+!remote/
+!rules/
+!runtime/
+!signature/
+!sites/
+!teams/
+!utils/
+
+# Defense in depth: never build with dependency trees, history, or secrets.
+node_modules/
+.git/
+.env
+.env.*
+*.pem
+*.key
+*.cert
+*.token.json
+vault-token.json
+.outlook-mcp-tokens.json
+vault-token.json*

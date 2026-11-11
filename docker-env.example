@@ -1,0 +1,163 @@
+# Docker Compose runtime configuration sample for the intranet MCP HTTP
+# service.
+#
+# This sample contains only dummy, non-working placeholder values. Create your
+# real runtime configuration file `.env.docker` from it (compose.yaml injects
+# that file through `env_file` at start), replace every `replace-with...`
+# placeholder with your deployment's real values, and keep `.env.docker` out
+# of version control: it is git-ignored and docker-ignored, is only read at
+# container start, and is never baked into the image.
+# See "Docker Compose (direct TLS listener in the container)" in README.md.
+
+# -- Required remote configuration -------------------------------------------
+# Specific Microsoft Entra directory (tenant) GUID; "common" and domain names
+# are refused at startup. Replace with your tenant's directory (tenant) ID.
+ENTRA_TENANT_ID=00000000-0000-0000-0000-000000000000
+
+# Confidential client (Application (client) ID) registered for this MCP
+# deployment; holds no secret itself. Replace with your application ID.
+ENTRA_CLIENT_ID=11111111-1111-1111-1111-111111111111
+
+# Client secret of the confidential client used for the on-behalf-of token
+# exchange. Replace with your real client secret value (never commit it).
+ENTRA_CLIENT_SECRET=replace-with-your-entra-client-secret
+
+# -- Optional audience/scope overrides (defaults derive from ENTRA_CLIENT_ID) --
+# With the Entra v2.0 endpoint the minimal setup derives all three of these
+# from the client id above: the token audience defaults to the API app's
+# client ID GUID, the required short scp scope defaults to mcp.access, and the
+# upstream authorization request scope defaults to
+# api://<ENTRA_CLIENT_ID>/<required short scope>. Set an override only when
+# your deployment differs:
+#
+# Audience (aud claim) your issued tokens actually carry, when they differ
+# from the client ID GUID default (for example a v1-style app ID URI).
+#MCP_HTTP_AUDIENCE=11111111-1111-1111-1111-111111111111
+#
+# The short scope name(s) every token must carry in its scp claim when the
+# derived one is not what your tokens carry. API-qualified api:// URIs are
+# refused here; with MCP_HTTP_UPSTREAM_SCOPES set, the required scopes derive
+# from that override's short scope part(s) instead of mcp.access.
+#MCP_HTTP_REQUIRED_SCOPES=mcp.access
+#
+# Resource-qualified delegated scope(s) the upstream Microsoft Entra
+# authorization request must use for your custom API (api://<app-id>/<scope>
+# or https://<host>/<scope>). Set this explicitly when your app's Application
+# ID URI differs from api://<ENTRA_CLIENT_ID> — no other URI shape is ever
+# guessed; short form is never accepted here. In this single app setup it is
+# the exposed API scope of the same application that owns
+# ENTRA_CLIENT_ID.
+#MCP_HTTP_UPSTREAM_SCOPES=api://11111111-1111-1111-1111-111111111111/mcp.access
+
+# Every verified authenticated user may run the MCP tools. There is no separate
+# mutation-group setting: tool authorization beyond delegated authentication is
+# owned by the Entra enterprise-application assignment and the user's own
+# Microsoft 365 permissions.
+
+# Absolute https:// URL that MCP clients use to reach this deployment. The
+# container binds a wildcard address (0.0.0.0), so there is no usable
+# listener-derived default: set this to the externally reachable host name and
+# port (for example https://<your-intranet-host>:8443) or the listener refuses
+# to start. Required for the Compose deployment. This one exact URL (the
+# "canonical" address) is what discovery, OAuth issuer metadata, and
+# WWW-Authenticate challenges advertise; it is never derived from bind or Host
+# header. For a local functional test it can be https://localhost:<port> (the
+# default publish target is 127.0.0.1); the certificate must then carry
+# "localhost" in its SANs and clients must trust it explicitly, for example
+# with `curl --cacert tls/ca.pem ...` (never `--insecure`).
+MCP_HTTP_EXTERNAL_BASE_URL=https://localhost:8443
+
+# -- Optional remote configuration -------------------------------------------
+# Comma-separated absolute https:// origins accepted from browser-based MCP
+# clients (loopback origins stay allowed). Uncomment and adjust if needed.
+#MCP_HTTP_ALLOWED_ORIGINS=https://replace-with-your-intranet-client.example
+
+# -- Authentication mode (persistent bridge chosen; direct optional) --------
+# "bridge" (chosen, persistent): the standards OAuth sign-in flow below. The
+# service holds each user's delegated upstream Entra credential, renews it
+# with the tenant-pinned refresh grant (offline_access), keeps rotating
+# refresh-token families for MCP clients in an encrypted durable store
+# (bridge-store), and only a genuinely unusable upstream credential (the
+# user repeating consent, or a revoked family) forces a fresh browser
+# sign-in. Transient upstream or renewal outages answer 503 and retry.
+# "entra" (direct mode, optional): MCP clients authorize directly against the
+# tenant Entra authorization server (`https://login.microsoftonline.com/<tenant>/v2.0`
+# advertised in discovery), using a pre-registered public client application
+# with PKCE; the agent keeps its own refresh token client-side and the MCP
+# server stores no user refresh tokens. Discovery then advertises only the
+# Entra issuer and the fully resource-qualified request scopes, and token
+# verification still requires the short scp scope name(s) configured above.
+# No per-agent Entra application registration is required for the preferred
+# bridge mode.
+# Without MCP_HTTP_AUTH_MODE the mode is selected: bridge when
+# MCP_HTTP_LOGIN_REDIRECT_URI is set, direct Entra otherwise.
+#MCP_HTTP_AUTH_MODE=bridge
+
+# -- Bridge sign-in for external MCP clients (the chosen mode) ---------------
+# In direct "entra" mode the settings in this section are ignored. They apply
+# to the bridge mode (automatic when the callback URL below is set, or forced
+# with MCP_HTTP_AUTH_MODE=bridge).
+# Configure the exact HTTPS callback URL registered for this service's browser
+# sign-in (Web platform redirect URI of the MCP service app, ending in
+# /login/callback). Setting this variable enables the standards-based MCP
+# authorization flow described in README.md. Register it in Entra as a Web
+# platform redirect URI on the same confidential app that owns
+# ENTRA_CLIENT_ID/ENTRA_CLIENT_SECRET and exposes the delegated API scope
+# (MCP_HTTP_REQUIRED_SCOPES and MCP_HTTP_UPSTREAM_SCOPES; see the derived
+# defaults above). For a local
+# test this is the canonical base URL plus /login/callback (for example
+# https://localhost:8443/login/callback) and must match the registered Entra
+# redirect exactly.
+#MCP_HTTP_LOGIN_REDIRECT_URI=https://localhost:8443/login/callback
+
+# Durable, encrypted bridge credential store directory: MCP refresh-token
+# families, delegated identities, and the server-held upstream Entra refresh
+# credentials (all AES-256-GCM encrypted at rest). The directory must be
+# mounted on a durable volume and used by exactly one service replica; the
+# default in container deployments is /app/data/oauth (the Compose mount of
+# T20). Without this variable the CLI runtime defaults to
+# ~/.outlook-mcp/remote-oauth, which is NOT durable in a container until it
+# is mounted. Store it and its key together in your protected backups.
+#MCP_HTTP_BRIDGE_STORE_DIR=/app/data/oauth
+#
+# Optional separate (already-mounted, read-only-to-the-service) key file with
+# exactly 32 key bytes for the bridge store; the default is a private
+# auto-generated key inside the store directory. The key and the encrypted
+# store files must be backed up together and never share a file.
+#MCP_HTTP_BRIDGE_KEY_FILE=/app/secrets/bridge-store.key
+
+# Pre-registered external MCP clients as a JSON array. Every client carries
+# its exact redirect URI(s) — that client's own browser callback address where
+# the authorization code and state are returned — registered once here and
+# exactly; use clientSecret only for confidential clients (public clients use
+# PKCE). Never place Entra secrets here. Unregistered clients and redirects are
+# refused; dynamic registration is off by default (see below). Per-client
+# OAuth capability was not verified against real MCP clients.
+#MCP_HTTP_OAUTH_CLIENTS=[{"clientId":"external-mcp-client","clientSecret":"replace-for-confidential-clients-only","redirectUris":["https://replace-with-client-callback.example/oauth/callback"]}]
+
+# MCP scope(s) external clients may request (defaults to "mcp"; spaces or
+# commas separate several scopes).
+#MCP_HTTP_OAUTH_SUPPORTED_SCOPES=mcp
+
+# Opt-in dynamic client registration (default off; prefer pre-registration).
+#MCP_HTTP_OAUTH_ALLOW_DYNAMIC_REGISTRATION=false
+
+# -- Local development (compose.local.yaml), HTTP without TLS ---------------
+# For explicitly opted-in LOCAL testing, `compose.local.yaml` (local
+# development only; NOT for intranet or production) overrides the two
+# HTTPS keys above to their plaintext loopback equivalents internally:
+# MCP_HTTP_EXTERNAL_BASE_URL=http://localhost:8443 and
+# MCP_HTTP_LOGIN_REDIRECT_URI=http://localhost:8443/login/callback, and it
+# sets MCP_HTTP_ALLOW_LOCAL_HTTP=true itself. Do not set these overrides
+# here: your production-shaped values above stay untouched, and nothing
+# needs to change in your environment for local runs. Register the loopback
+# HTTP callback `http://localhost:8443/login/callback` in Entra for the
+# local flow (Microsoft permits plain HTTP redirect URIs only for loopback
+# addresses).
+#
+# -- Not applicable here -----------------------------------------------------
+# USE_TEST_MODE is a local-only setting and must stay unset (or false):
+# the HTTP mode refuses to start when USE_TEST_MODE=true.
+# TLS certificate paths are provided by compose.yaml (MCP_HTTP_TLS_CERT /
+# MCP_HTTP_TLS_KEY point at the read-only mount /run/tls); never put private
+# keys in this file.

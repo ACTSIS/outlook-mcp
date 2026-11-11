@@ -1,0 +1,115 @@
+# =====================================================================
+# LOCAL DEVELOPMENT ONLY — explicit opt-in, HTTP without TLS (T9, S4-S6)
+# =====================================================================
+#
+# This is the local functional-test deployment of the authenticated MCP
+# HTTP service. It is NOT for intranet or production use: the listener
+# inside the container runs plaintext HTTP, and unencrypted
+# container-network traffic may be visible to other local Docker
+# workloads on the same bridge network (for example by any container
+# with packet-capture privileges on it).
+#
+# Security posture of this file:
+#   - The published HOST port is hard-pinned to 127.0.0.1; Docker never
+#     exposes this instance beyond the local host. The host-side bind is
+#     not configurable here by design.
+#   - The container still binds all interfaces (MCP_HTTP_HOST=0.0.0.0,
+#     required to reach the published loopback port through the Docker
+#     bridge), but the only listener exposure is the pinned host
+#     loopback publication.
+#   - MCP_HTTP_ALLOW_LOCAL_HTTP=true opts the container into the
+#     explicitly local development HTTP mode: it accepts the plaintext
+#     loopback Entra callback (http://localhost:8443/login/callback,
+#     which Microsoft permits only for loopback addresses, never for
+#     intranet or public hosts) and the plaintext loopback canonical
+#     URL. Production deployments (compose.yaml) ignore this variable
+#     and keep requiring TLS.
+#   - No TLS mount exists here by design (no empty ./tls creation).
+#
+# Runtime configuration (Entra tenant, client credentials, audience,
+# scopes, upstream API-qualified scopes) still comes exclusively from the
+# optional, git-ignored and docker-ignored `.env.docker` file, exactly as
+# in compose.yaml. The `environment` block below deliberately OVERRIDES
+# the two HTTPS-specific keys, so an existing production-shaped
+# .env.docker (with `MCP_HTTP_EXTERNAL_BASE_URL=https://localhost:8443`
+# and `MCP_HTTP_LOGIN_REDIRECT_URI=https://localhost:8443/login/callback`)
+# works unchanged for local testing.
+#
+# One-time Entra change this mode requires: register the loopback HTTP
+# callback `http://localhost:8443/login/callback` as a Web platform
+# redirect URI alongside (or instead of) the HTTPS one.
+#
+# Launch ("Local development (Docker, HTTP only)" in README.md):
+#   docker compose -f compose.local.yaml up -d --build
+#
+services:
+  mcp-http:
+    build: .
+    image: outlook-mcp-http:local
+    command: ['node', 'bin/m365-mcp.js', 'http']
+    restart: unless-stopped
+    # Exactly one replica is required: the encrypted bridge store is a
+    # single-node directory guarded by a generation counter that detects
+    # stale snapshots (a writer that started before another writer committed
+    # fails with BRIDGE_STORE_CONCURRENT_WRITE). That is stale-snapshot
+    # detection, not a distributed lock and not atomic exclusion: two truly
+    # simultaneous writers on one store directory are NOT guaranteed to fail closed,
+    # so a single replica is the only safe configuration. Never
+    # scale this service up.
+    deploy:
+      replicas: 1
+    environment:
+      # The user's chosen persistent standards OAuth sign-in flow,
+      # re-enabled explicitly here so the local deployment works even when
+      # an existing .env.docker currently carries the direct-entra
+      # selector: this compose `environment` entry wins over the env_file.
+      MCP_HTTP_AUTH_MODE: bridge
+      # Plaintext HTTP: explicit local development opt-in (see above).
+      MCP_HTTP_ALLOW_LOCAL_HTTP: 'true'
+      # Container wildcard bind so the published loopback port reaches the
+      # listener through the Docker bridge; exposure is limited by the
+      # pinned 127.0.0.1 host publication below.
+      MCP_HTTP_HOST: 0.0.0.0
+      MCP_HTTP_PORT: 8443
+      # Canonical plaintext loopback URLs; these compose `environment`
+      # entries take precedence over any .env.docker values.
+      MCP_HTTP_EXTERNAL_BASE_URL: http://localhost:8443
+      MCP_HTTP_LOGIN_REDIRECT_URI: http://localhost:8443/login/callback
+      # Durable, encrypted bridge credential store on the named volume
+      # below (T20): signed-in users keep their MCP sessions across
+      # container recreation instead of losing them at the next restart.
+      MCP_HTTP_BRIDGE_STORE_DIR: /app/data/oauth
+    ports:
+      # Hard-pinned to the host loopback address only, with no published-host
+      # variable: the local development instance can never be published to a
+      # public or intranet interface through this file.
+      - '127.0.0.1:${MCP_HTTP_PUBLISHED_PORT:-8443}:8443'
+    env_file:
+      # Optional at compose level, exactly as in compose.yaml: an absent
+      # file means the container starts and then fails closed with a clear
+      # missing-configuration error instead of serving anything
+      # unauthenticated.
+      - path: .env.docker
+        required: false
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      # Durable encrypted bridge credential store (bridge-store.bin plus its
+      # private key live inside the volume). Project-scoped named volume,
+      # with a distinct key from compose.yaml so the local development
+      # project never shares or overwrites a production store.
+      - 'bridge_oauth_local:/app/data/oauth'
+
+volumes:
+  # Project-scoped durable volume for the encrypted bridge credential
+  # store. No `name:` override: the Compose project prefix keeps the
+  # volume unique per deployment, and it is never an external generic
+  # volume. Running `docker compose -f compose.local.yaml down -v` (or
+  # removing this volume) deletes every signed-in user's stored grant
+  # together with its key.
+  bridge_oauth_local:

@@ -1,0 +1,86 @@
+# Docker Compose deployment for the authenticated intranet MCP HTTP server
+# (`node bin/m365-mcp.js http`).
+#
+# The MCP container runs a direct TLS listener on all container interfaces
+# (MCP_HTTP_HOST=0.0.0.0): a separate reverse-proxy container cannot reach an
+# MCP listener bound to the container's own loopback, so TLS terminates inside
+# this container. The host publication defaults to the host loopback address
+# only; opting into an intranet bind is an explicit administrator choice.
+#
+# Runtime configuration (Entra tenant, client credentials, audience, scopes)
+# is provided exclusively through an optional, git-ignored and
+# docker-ignored `.env.docker` file (a documented dummy sample ships as
+# `docker-env.example`). Nothing is
+# baked into the image. TLS certificates come from a read-only mount.
+#
+# Launch: see "Intranet MCP HTTP mode" in README.md.
+
+services:
+  mcp-http:
+    build: .
+    image: outlook-mcp-http:local
+    command: ['node', 'bin/m365-mcp.js', 'http']
+    restart: unless-stopped
+    # Exactly one replica is required: the encrypted bridge store is a
+    # single-node directory guarded by a generation counter that detects
+    # stale snapshots (a writer that started before another writer committed
+    # fails with BRIDGE_STORE_CONCURRENT_WRITE). That is stale-snapshot
+    # detection, not a distributed lock and not atomic exclusion: two truly
+    # simultaneous writers on one store directory are NOT guaranteed to fail closed,
+    # so a single replica is the only safe configuration. Never
+    # scale this service up.
+    deploy:
+      replicas: 1
+    environment:
+      # Inside a Docker bridge network the listener must bind all container
+      # interfaces to be reachable through the published port; TLS (required
+      # for this deployment shape) secures the listener itself.
+      MCP_HTTP_HOST: 0.0.0.0
+      MCP_HTTP_PORT: 8443
+      # Durable, encrypted bridge credential store on the named volume
+      # below. Note: this Compose file deliberately does NOT set
+      # MCP_HTTP_AUTH_MODE — the explicit mode choice stays exactly what
+      # the operator's .env.docker carries (bridge to enable the chosen
+      # persistent sign-in flow, or direct entra as the documented optional
+      # alternative). In direct mode the volume is simply unused.
+      MCP_HTTP_BRIDGE_STORE_DIR: /app/data/oauth
+      # Container-side PEM paths backed by the read-only certificate mount.
+      # Place a PEM certificate chain in ./tls/cert.pem and the matching key
+      # in ./tls/key.pem (readable by uid 1000), or override these paths.
+      MCP_HTTP_TLS_CERT: /run/tls/cert.pem
+      MCP_HTTP_TLS_KEY: /run/tls/key.pem
+    ports:
+      # Default: publish only on the host loopback address. Administrators
+      # opt into an intranet bind by setting MCP_HTTP_PUBLISHED_HOST (for
+      # example the intranet interface or 0.0.0.0) and
+      # MCP_HTTP_PUBLISHED_PORT; see README.md.
+      - '${MCP_HTTP_PUBLISHED_HOST:-127.0.0.1}:${MCP_HTTP_PUBLISHED_PORT:-8443}:8443'
+    volumes:
+      - '${MCP_HTTP_TLS_DIR:-./tls}:/run/tls:ro'
+      # Durable encrypted bridge credential store (bridge-store.bin plus its
+      # private key live inside the volume). Project-scoped named volume: the
+      # Compose project name is part of the on-disk volume name, so separate
+      # deployments never share one store. Never mark it external, never
+      # mount it into another service, and see the single-replica note above.
+      - 'bridge_oauth:/app/data/oauth'
+    env_file:
+      # Optional at compose level: absent file means the container starts and
+      # then fails closed with a clear missing-configuration error instead of
+      # serving anything unauthenticated.
+      - path: .env.docker
+        required: false
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+
+volumes:
+  # Project-scoped durable volume for the encrypted bridge credential
+  # store. No `name:` override: the Compose project prefix keeps the volume
+  # unique per deployment, and it is never an external generic volume.
+  # Running `docker compose down -v` (or removing this volume) deletes
+  # every signed-in user's stored grant together with its key.
+  bridge_oauth:

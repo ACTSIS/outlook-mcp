@@ -20,6 +20,10 @@ dist/
 vault-token.json
 .outlook-mcp-tokens.json
 
+# Local TLS certificate directory used by the Docker Compose deployment
+# (compose.yaml mounts it read-only at /run/tls)
+tls/
+
 # Editor directories and files
 .idea/
 .vscode/
