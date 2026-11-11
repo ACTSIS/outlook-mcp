@@ -36,6 +36,10 @@ describe('bin/m365-mcp dispatcher', () => {
       expect(resolveMode(['--help'])).toBeNull();
       expect(resolveMode(['mcp', 'auth'])).toBeNull();
     });
+
+    it('routes the http argument to the remote MCP HTTP mode', () => {
+      expect(resolveMode(['http'])).toBe('http');
+    });
   });
 
   describe('shouldDispatch (SEA-safe direct-run gate)', () => {
@@ -60,6 +64,36 @@ describe('bin/m365-mcp dispatcher', () => {
   });
 
   describe('run', () => {
+    it('starts the remote MCP HTTP server for the http mode', async () => {
+      const events = [];
+      const startHttp = jest.fn(() => {
+        events.push('start-http');
+        // Resolves once listening; the open server handle keeps the process alive.
+        return Promise.resolve({ port: 47001, host: '127.0.0.1', tls: false });
+      });
+      const loadRuntimeEnv = jest.fn(() => events.push('bootstrap'));
+
+      await run(['http'], { loadRuntimeEnv, startHttp, startMCP: jest.fn(), startAuth: jest.fn() });
+
+      expect(events).toEqual(['bootstrap', 'start-http']);
+      expect(startHttp).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not configure the local auth-server launcher for the http mode', async () => {
+      const setAuthLauncher = jest.fn();
+      const startHttp = jest.fn();
+
+      await run(['http'], {
+        setAuthLauncher,
+        startHttp,
+        loadRuntimeEnv: jest.fn(),
+        startMCP: jest.fn(),
+        startAuth: jest.fn(),
+      });
+
+      expect(setAuthLauncher).not.toHaveBeenCalled();
+    });
+
     it('starts the MCP entry point for the default and mcp modes', async () => {
       const startMCP = jest.fn(() => 0);
       const startAuth = jest.fn(() => 0);
@@ -212,6 +246,7 @@ describe('bin/m365-mcp dispatcher', () => {
       expect(out.text()).toContain('mcp');
       expect(out.text()).toContain('auth');
       expect(out.text()).toContain('vault-setup');
+      expect(out.text()).toContain('http');
       expect(startMCP).not.toHaveBeenCalled();
       expect(startAuth).not.toHaveBeenCalled();
     });

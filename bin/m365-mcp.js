@@ -4,17 +4,18 @@
  * or the authentication callback server.
  *
  * Usage:
- *   m365-mcp          start the MCP server (default)
- *   m365-mcp mcp      start the MCP server
- *   m365-mcp auth     start the authentication callback server (port 3333)
- *   m365-mcp vault-setup  explicitly complete the Vault setup flow
+ *   m365-mcp             start the MCP server (default)
+ *   m365-mcp mcp         start the MCP server
+ *   m365-mcp auth        start the authentication callback server (port 3333)
+ *   m365-mcp vault-setup explicitly complete the Vault setup flow
+ *   m365-mcp http        start the authenticated remote MCP HTTP server
  *
  * Unsupported arguments print usage to stderr and exit 2.
  */
 
 const path = require('path');
 
-const MODES = ['mcp', 'auth', 'vault-setup'];
+const MODES = ['mcp', 'auth', 'vault-setup', 'http'];
 
 /**
  * Resolve the requested mode from the CLI arguments.
@@ -27,6 +28,7 @@ function resolveMode(args) {
   if (mode === undefined || mode === 'mcp') return 'mcp';
   if (mode === 'auth') return 'auth';
   if (mode === 'vault-setup') return 'vault-setup';
+  if (mode === 'http') return 'http';
   return null;
 }
 
@@ -84,6 +86,7 @@ async function runVaultSetup(loadRuntimeEnv, stderr) {
  * @param {Function} deps.loadEnv - Backward-compatible test dependency alias
  * @param {Function} deps.startMCP - Starts the MCP server entry point
  * @param {Function} deps.startAuth - Starts the auth callback server entry point
+ * @param {Function} deps.startHttp - Starts the remote MCP HTTP server entry point
  * @param {Function} deps.setAuthLauncher - Points auth-server-manager at this executable
  * @param {Function} deps.isPackagedExecutable - True when running as a standalone binary
  * @param {string} deps.execPath - Path of the running executable
@@ -97,14 +100,27 @@ async function run(args, deps = {}) {
 
   if (!mode) {
     stderr.write(`Usage: m365-mcp [${MODES.join('|')}]\n`);
-    stderr.write(`  ${MODES[0]}      start the MCP server (default)\n`);
-    stderr.write(`  ${MODES[1]}     start the authentication callback server (port 3333)\n`);
+    stderr.write(`  ${MODES[0]}        start the MCP server (default)\n`);
+    stderr.write(`  ${MODES[1]}       start the authentication callback server (port 3333)\n`);
     stderr.write(`  ${MODES[2]}  perform explicit Vault setup\n`);
+    stderr.write(
+      `  ${MODES[3]}        start the authenticated remote MCP HTTP server (intranet; Entra bearer tokens)\n`
+    );
     return 2;
   }
 
   const loadRuntimeEnv =
     deps.loadRuntimeEnv || deps.loadEnv || require('../runtime/load-runtime-env').loadRuntimeEnv;
+
+  if (mode === 'http') {
+    // The remote MCP HTTP server validates its configuration inside the entry
+    // point; the local auth-server launcher is never relevant for a remote,
+    // token-exchange-based listener.
+    const startHttp = deps.startHttp || require('../remote/http-server').startRemoteMCPHttpServer;
+    await loadRuntimeEnv();
+    await startHttp();
+    return 0;
+  }
 
   if (mode === 'vault-setup') {
     return runVaultSetup(loadRuntimeEnv, stderr);
