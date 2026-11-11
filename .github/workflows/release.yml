@@ -160,10 +160,87 @@ jobs:
           set -euo pipefail
           node -e "const { scanDirectory, canPublish, report } = require('./build/secret-scan'); const findings = scanDirectory('dist'); console.log(report(findings)); if (!canPublish(findings)) process.exit(1);"
 
+  # T21 (S12): downloadable loadable Docker image for the GitHub Releases
+  # channel. Builds the committed Dockerfile at the exact release ref and
+  # uploads it as a loadable archive with a checksum sidecar. GitHub-only:
+  # this job never pushes to a registry and gets no registry permission; the
+  # `docker-image` artifact name deliberately does not match the `artifact-*`
+  # and `installer-*` wildcards that the ProGet provenance/publish jobs
+  # download, so the intranet ProGet payload stays byte-identical.
+  docker-image:
+    name: Build Docker image artifact
+    runs-on: ubuntu-latest
+    needs: [build, validate, scan]
+    permissions:
+      contents: read
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RELEASE_TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *)
+              echo "::error::release tag $RELEASE_TAG is not a v<major>.<minor>.<patch> tag"
+              exit 1
+              ;;
+          esac
+          tag_version="${RELEASE_TAG#v}"
+          pkg_version="$(node -e "console.log(require('./package.json').version)")"
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::tag $RELEASE_TAG does not match package.json version $pkg_version"
+            exit 1
+          fi
+
+      - name: Build image for linux/amd64 with version and local tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --platform linux/amd64 \
+            -t "outlook-mcp-http:${RELEASE_TAG#v}" \
+            -t outlook-mcp-http:local \
+            .
+          docker image inspect "outlook-mcp-http:${RELEASE_TAG#v}" outlook-mcp-http:local
+
+      - name: Save both tags to a checksummed gzipped archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE_DIR="${RUNNER_TEMP}/docker-image-bundle"
+          mkdir -p "$ARCHIVE_DIR"
+          # `docker image save` (never the filesystem-level `export` verb)
+          # produces a loadable archive containing BOTH tags, and `docker
+          # load` restores them as-is.
+          docker image save \
+            -o "$ARCHIVE_DIR/outlook-mcp-docker-image.tar" \
+            "outlook-mcp-http:${RELEASE_TAG#v}" outlook-mcp-http:local
+          gzip "$ARCHIVE_DIR/outlook-mcp-docker-image.tar"
+          cd "$ARCHIVE_DIR"
+          sha256sum outlook-mcp-docker-image.tar.gz > outlook-mcp-docker-image.tar.gz.sha256
+
+      - name: Upload Docker image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: |
+            ${{ runner.temp }}/docker-image-bundle/outlook-mcp-docker-image.tar.gz
+            ${{ runner.temp }}/docker-image-bundle/outlook-mcp-docker-image.tar.gz.sha256
+          if-no-files-found: error
+          # The archive is already gzipped; artifact-level compression only
+          # wastes time on top of it.
+          compression-level: 0
+
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    needs: [build, validate, scan]
+    needs: [build, validate, scan, docker-image]
     permissions:
       contents: write
     timeout-minutes: 15
@@ -183,20 +260,34 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Download Docker image bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: dist/docker-image
+
       - name: Verify complete artifact set before publishing
         shell: bash
         run: |
           set -euo pipefail
-          for FILE in dist/outlook-mcp-win-x64.exe dist/outlook-mcp-linux-x64; do
+          for FILE in dist/outlook-mcp-win-x64.exe dist/outlook-mcp-linux-x64 dist/docker-image/outlook-mcp-docker-image.tar.gz dist/docker-image/outlook-mcp-docker-image.tar.gz.sha256; do
             if [ ! -f "$FILE" ]; then
               echo "missing required artifact: $FILE"; exit 1
             fi
           done
+          echo "$RELEASE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'
+
+      - name: Verify Docker image bundle checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist/docker-image
+          sha256sum -c outlook-mcp-docker-image.tar.gz.sha256
 
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$RELEASE_TAG" dist/outlook-mcp-win-x64.exe dist/outlook-mcp-linux-x64 --generate-notes
+        run: gh release create "$RELEASE_TAG" dist/outlook-mcp-win-x64.exe dist/outlook-mcp-linux-x64 dist/docker-image/outlook-mcp-docker-image.tar.gz dist/docker-image/outlook-mcp-docker-image.tar.gz.sha256 --generate-notes
 
   installer-windows:
     name: Build Windows installer
@@ -539,7 +630,16 @@ jobs:
   cleanup:
     name: Cleanup workflow artifacts
     runs-on: ubuntu-latest
-    needs: [release, installer-windows, installer-linux, smoke, provenance, publish-artifacts]
+    needs:
+      [
+        release,
+        installer-windows,
+        installer-linux,
+        smoke,
+        provenance,
+        publish-artifacts,
+        docker-image,
+      ]
     if: always()
     permissions:
       contents: read
@@ -555,7 +655,7 @@ jobs:
           set -euo pipefail
           REPO="${{ github.repository }}"
           RUN_ID="${{ github.run_id }}"
-          for NAME in artifact-win-x64 artifact-linux-x64 installer-win-x64 installer-linux-x64 provenance; do
+          for NAME in artifact-win-x64 artifact-linux-x64 installer-win-x64 installer-linux-x64 provenance docker-image; do
             echo "deleting artifacts named $NAME"
             IDS="$(gh api --method GET "/repos/${REPO}/actions/runs/${RUN_ID}/artifacts" --jq '.artifacts[] | select(.name == "'"${NAME}"'") | .id')"
             for ID in ${IDS}; do

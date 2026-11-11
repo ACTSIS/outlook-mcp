@@ -270,6 +270,26 @@ Windows file Properties identify the executable as **M365 Assistant MCP Server**
 
 Maintainers can publish a semantic release from GitHub Actions by running **Semantic version** on `main` and selecting `patch`, `minor`, or `major`. The workflow dispatches CI for the current `main` commit and waits for success before updating package metadata, pushing the matching version tag, and invoking the release pipeline. It uses the repository's built-in `GITHUB_TOKEN`; no personal access token is required.
 
+#### Docker image artifact
+
+Every **tagged Release run** also publishes a loadable Docker image archive for **linux/amd64**: `outlook-mcp-docker-image.tar.gz` with a SHA-256 sidecar `outlook-mcp-docker-image.tar.gz.sha256`. The artifact appears on the GitHub Release once that tagged run finishes; branches and pull requests never produce it.
+
+1. Download both files from the release page into your download directory and verify the checksum from that directory:
+
+   ```bash
+   sha256sum -c outlook-mcp-docker-image.tar.gz.sha256
+   ```
+
+2. Load the image (it carries the release version tag **and** the `outlook-mcp-http:local` tag the Compose configuration uses):
+
+   ```bash
+   gzip -dc outlook-mcp-docker-image.tar.gz | docker load
+   ```
+
+3. Start the Compose deployment from the already-loaded image without rebuilding or pulling: `docker compose up -d --no-build --pull never` (or `docker compose -f compose.local.yaml up -d --no-build --pull never` for the explicit local HTTP mode).
+
+No runtime configuration is baked into the image: credentials, tokens, and every other runtime setting still arrive only through your git-ignored `.env.docker` at container start, and `/app/data/oauth` lives on its named volume, so the load never touches sign-in state. The image is distributed only through GitHub Releases; there is no registry pull channel, and this artifact is always linux/amd64.
+
 ### Intranet installation (ACTSIS ProGet)
 
 ACTSIS collaborators can install releases from the corporate ProGet Asset Directory at `https://artifacts.actsis.com`. Assets live in the dedicated `outlook-mcp` asset directory, under the `releases/` prefix:

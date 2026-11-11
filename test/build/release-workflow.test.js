@@ -279,8 +279,12 @@ describe('release workflow', () => {
       expect(linuxScript).toMatch(/RELEASE_TAG/);
     });
 
-    it('keeps the existing release job block byte-for-byte unchanged', () => {
-      expect(doc.jobs.release.needs).toEqual(['build', 'validate', 'scan']);
+    // T21 (S12): the release job is intentionally extended — it also waits
+    // for and downloads the downloadable Docker image bundle and attaches the
+    // archive plus its checksum. The permissions, trigger, concurrency, and
+    // timeout boundaries stay untouched.
+    it('keeps the intentionally extended release job block', () => {
+      expect(doc.jobs.release.needs).toEqual(['build', 'validate', 'scan', 'docker-image']);
       expect(doc.jobs.release.permissions).toEqual({ contents: 'write' });
       expect(doc.jobs.release['timeout-minutes']).toBe(15);
       expect(doc.jobs.release.concurrency).toEqual({
@@ -291,7 +295,9 @@ describe('release workflow', () => {
       expect(stepNames).toEqual([
         'Checkout repository',
         'Download packaged artifacts',
+        'Download Docker image bundle',
         'Verify complete artifact set before publishing',
+        'Verify Docker image bundle checksum',
         'Create release',
       ]);
     });

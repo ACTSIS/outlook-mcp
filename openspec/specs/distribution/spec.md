@@ -150,15 +150,15 @@ The system MUST generate a `latest-stable.json` manifest for each published rele
 - WHEN the manifest generator runs
 - THEN the output MUST be deterministic and covered by automated tests
 
-### Requirement: Public GitHub Release Channel Unchanged
+### Requirement: Public GitHub Release Channel (binaries plus Docker image bundle)
 
-The existing GitHub Release job MUST remain unchanged in trigger, content, and behavior: a `v*` tag push MUST produce a GitHub Release containing the two raw binaries with generated release notes. The public channel and the intranet channel MUST coexist, and a failure of the intranet publish job MUST NOT affect the published GitHub Release.
+The `v*` tag push trigger, the gating behavior, and the generated release notes of the existing GitHub Release job MUST remain unchanged. A successful `v*` tag push MUST produce a GitHub Release containing the two raw binaries with generated release notes, plus the loadable Docker image archive and its SHA-256 sidecar (see the downloadable Docker image artifact requirement). The public channel and the intranet channel MUST coexist, and a failure of the intranet publish job MUST NOT affect the published GitHub Release.
 
 #### Scenario: GitHub Release output is preserved
 
-- GIVEN a `v*` tag push that completes the existing jobs successfully
+- GIVEN a `v*` tag push that completes the existing jobs and the image artifact job successfully
 - WHEN the pipeline concludes
-- THEN a GitHub Release MUST exist containing the two raw binaries and generated notes, identical in content to the pre-change release output
+- THEN a GitHub Release MUST exist containing the two raw binaries, generated notes, and the Docker image archive with its SHA-256 sidecar, identical in content to the pre-change release output extended only by those two image files
 
 #### Scenario: ProGet failure does not affect the public channel
 
@@ -224,3 +224,44 @@ The repository MUST document intranet installation for ACTSIS collaborators: Win
 - THEN Windows installation steps via the installer and Linux installation steps via the `.deb` MUST be present
 - AND the credential-configuration guidance for installed paths (MCP-client `env` block or Vault) MUST be present
 - AND the do-not-rename constraint on the installed executable MUST be present
+
+### Requirement: Downloadable Docker Image Artifact (GitHub-only channel)
+
+The release pipeline MUST produce a loadable Docker image archive for linux/amd64 as a GitHub Release artifact, and ONLY there: the pipeline MUST NOT push the image to any container registry and MUST NOT request registry write permissions or consume any new secrets. The image MUST be built by the dedicated `docker-image` job from the committed Dockerfile at the exact release ref, tagged with the validated release version and the `local` tag referenced by the Compose configurations, gated behind the build, validation, and secret-scan jobs, and uploaded under the unique Actions artifact name `docker-image` (which must never match the `artifact-*` or `installer-*` wildcards the ProGet provenance and publish jobs download). The release job MUST wait for the image job, verify the archive against its SHA-256 sidecar, and attach both files to the GitHub Release. The ProGet `SHA256SUMS` payload and the `latest-stable.json` manifest assets MUST stay byte-identical to the pre-change four-asset set.
+
+#### Scenario: Tag-bound loadable image
+
+- GIVEN a `v*` tag push that passes build, validation, and secret scan
+- WHEN the `docker-image` job runs
+- THEN it MUST check out the exact release ref, build the committed Dockerfile on linux/amd64, and tag the image `outlook-mcp-http:<version>` (tag version equal to `package.json` version) and `outlook-mcp-http:local` before anything is uploaded
+- AND a tag that does not match the package version MUST fail the job closed
+
+#### Scenario: Loadable archive with checksums
+
+- GIVEN a successfully built image
+- WHEN the image is packaged
+- THEN it MUST be archived with `docker image save` (never `docker export`) into a gzipped archive named `outlook-mcp-docker-image.tar.gz` with a `outlook-mcp-docker-image.tar.gz.sha256` sidecar
+- AND a build, save, gzip, or checksum failure MUST fail the upload job closed
+- AND `docker load` of the archive MUST restore both tags
+
+#### Scenario: Release attachment is gated and verified
+
+- GIVEN the `docker-image` job uploaded its bundle
+- WHEN the release job runs
+- THEN it MUST download the bundle under its exact artifact name, verify the SHA-256 sidecar, and attach the archive and the sidecar to the GitHub Release alongside the two original binaries
+
+#### Scenario: GitHub-only distribution is preserved
+
+- GIVEN the release workflow file
+- WHEN its jobs and permissions are inspected
+- THEN no job MUST push to a container registry or request `packages:write`
+- AND the `docker-image` Actions artifact name MUST NOT match the `artifact-*` or `installer-*` download wildcards of the ProGet provenance and publish jobs
+- AND the ProGet `SHA256SUMS` payload and manifest assets MUST remain the original four-asset set
+
+#### Scenario: End users can load and run the image
+
+- GIVEN the repository documentation
+- WHEN a user reads the Docker artifact section
+- THEN it MUST state the archive and sidecar names, the linux/amd64 platform, checksum verification from the download directory, the load command (`gzip -dc outlook-mcp-docker-image.tar.gz | docker load`), starting Compose with `--no-build --pull never` against the loaded `local` tag
+- AND it MUST state that no runtime configuration is baked into the image and that persistence lives on the named volume
+- AND it MUST state that the artifact appears only after a tagged Release run and is not distributed through any registry pull channel
