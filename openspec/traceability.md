@@ -12,6 +12,7 @@ This document maps current canonical specifications to the archived changes that
 | SharePoint site tools | [`specs/sharepoint/spec.md`](specs/sharepoint/spec.md)                       | `sites/` handlers (`list-sites`, `list-site-files`, `download-site-file`)   |
 | OneDrive file tools   | [`specs/onedrive/spec.md`](specs/onedrive/spec.md)                           | `onedrive/` handlers (`upload`, `upload-large`, `download`)                 |
 | Remote HTTP auth      | [`specs/remote-auth/spec.md`](specs/remote-auth/spec.md)                     | `remote/http-server.js`, `remote/entra-auth.js`, `remote/oauth-provider.js` |
+| Distribution          | [`specs/distribution/spec.md`](specs/distribution/spec.md)                   | `.github/workflows/release.yml`, `build/release-manifest.js`                |
 
 ## Archived Change Lineage
 
@@ -58,6 +59,10 @@ The intranet HTTP listener (delegated Entra identity on `remote/http-server.js`)
 ### The intranet ProGet distribution was replaced by GitHub-only publication
 
 The `2026-09-07-add-intranet-distribution` archive documents publishing installer assets, `SHA256SUMS`, an SBOM, and `latest-stable.json` to the ACTSIS ProGet Asset Directory over NetBird with the `NETBIRD_SETUP_KEY` and `PROGET_API_KEY` secrets. The user later directed GitHub-only distribution; canonical `specs/distribution/spec.md` now owns the GitHub Release publisher (`publish-artifacts`), the repository-parameterized `build/release-manifest.js` generator, and the secrets-free publication contract. The archives remain unmodified.
+
+### The first GHCR correction superseded the artifact-only Docker assumption
+
+The v2.4.5 GitHub-only delivery was interpreted as covering the Docker image, but the repository's Packages page was empty while the Release carried only a tar.gz archive: an asset, not a registry package. The artifact-only no-registry assumption in `specs/distribution/spec.md` was therefore wrong for the container channel, and the user later selected «Pública — docker pull sin login». Canonical `specs/distribution/spec.md` now owns the container publication: OCI provenance labels with a `git rev-parse HEAD` revision at the original build, a `publish-container` job that loads the exact tested `docker-image` artifact, scoped `packages: write` on that job plus the reusable caller job in the version workflow, an isolated stdin-only ghcr.io login, the immutable version-tag preflight, the trusted latest-release guard, per-repository serialization, and honest first-package-private visibility guidance. This is a canonical-spec correction, not an archive edit; no ProGet/NetBird return, no new secrets or PAT, and no package-visibility mutation.
 
 ## Known Implementation Gaps
 

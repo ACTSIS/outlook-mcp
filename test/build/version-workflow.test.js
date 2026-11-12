@@ -72,9 +72,23 @@ describe('semantic version workflow', () => {
 
   it('uses the built-in GitHub token and never requests a personal token', () => {
     expect(doc.permissions).toEqual({ contents: 'write', actions: 'write' });
-    expect(doc.jobs.release.permissions).toEqual({ contents: 'write', actions: 'write' });
+    // T28 (S15/S16): the reusable caller job adds packages: write so the
+    // release pipeline's publish-container job can push to GHCR — a called
+    // workflow can never exceed its caller. The workflow default and the
+    // version-bump job stay without it.
+    expect(doc.jobs.release.permissions).toEqual({
+      contents: 'write',
+      actions: 'write',
+      packages: 'write',
+    });
     expect(doc.jobs.version.permissions).toEqual({ contents: 'write', actions: 'write' });
     expect(fs.readFileSync(WORKFLOW_PATH, 'utf8')).not.toMatch(/secrets\.[A-Z0-9_]*TOKEN/);
     expect(fs.readFileSync(WORKFLOW_PATH, 'utf8')).not.toMatch(/NETBIRD_SETUP_KEY|PROGET_API_KEY/i);
+  });
+
+  it('does not grant packages write at the workflow default or to the version job (T28)', () => {
+    expect(doc.permissions.packages).toBeUndefined();
+    expect(doc.jobs.version.permissions.packages).toBeUndefined();
+    expect(doc.jobs.release.secrets).toBeUndefined();
   });
 });

@@ -270,7 +270,29 @@ Windows file Properties identify the executable as **M365 Assistant MCP Server**
 
 Maintainers can publish a semantic release from GitHub Actions by running **Semantic version** on `main` and selecting `patch`, `minor`, or `major`. The workflow dispatches CI for the current `main` commit and waits for success before updating package metadata, pushing the matching version tag, and invoking the release pipeline. It uses the repository's built-in `GITHUB_TOKEN`; no personal access token is required.
 
-#### Docker image artifact
+#### Container image on GitHub Packages (GHCR)
+
+Every **tagged Release run** also publishes the tested **linux/amd64** container image to this repository's GitHub Packages container registry. The container image and the Release downloads are two different channels: the image lives in **Packages** (GHCR); the loadable archive and every other artifact live under **Releases**.
+
+1. Pull the published image (primary channel):
+
+   ```bash
+   docker pull ghcr.io/actsis/outlook-mcp:<version>
+   # or, when this tag is the repository's current latest release:
+   docker pull ghcr.io/actsis/outlook-mcp:latest
+   ```
+
+2. Start the production Compose deployment from the pulled image without rebuilding:
+
+   ```bash
+   MCP_HTTP_IMAGE=ghcr.io/actsis/outlook-mcp:<version> docker compose -f compose.yaml up -d --no-build --pull always
+   ```
+
+   `MCP_HTTP_IMAGE` is an optional Compose interpolation override: Compose resolves it from the shell environment, the Compose project `.env` file, or an explicit `--env-file`. The service-level `env_file` (`.env.docker`) does NOT participate in Compose `${...}` substitution and can never inject the image. Omit the override to keep the local default `outlook-mcp-http:local` (see the archive fallback below); `compose.local.yaml` stays pinned to the local build for development.
+
+**Public visibility is not automatic.** GitHub starts the first package of a repository as PRIVATE even when the repository itself is public, and this pipeline never changes package visibility. After the first publication, a package owner must flip the package to Public once under the package's "Package settings" on GitHub if anonymous `docker pull` is desired. Until that provider-side confirmation is proven with a credential-free pull from a fresh Docker configuration, the pull may require registry authentication. The repository never hard-codes an Entra application registration per agent and never needs GHCR credentials inside the client MCP JSON: registry authentication, when it is still needed, is a standard `docker login` on the host, not a client configuration key.
+
+#### Docker image artifact (archive fallback)
 
 Every **tagged Release run** also publishes a loadable Docker image archive for **linux/amd64**: `outlook-mcp-docker-image.tar.gz` with a SHA-256 sidecar `outlook-mcp-docker-image.tar.gz.sha256`. The artifact appears on the GitHub Release once that tagged run finishes; branches and pull requests never produce it.
 
@@ -288,11 +310,11 @@ Every **tagged Release run** also publishes a loadable Docker image archive for 
 
 3. Start the Compose deployment from the already-loaded image without rebuilding or pulling: `docker compose up -d --no-build --pull never` (or `docker compose -f compose.local.yaml up -d --no-build --pull never` for the explicit local HTTP mode).
 
-No runtime configuration is baked into the image: credentials, tokens, and every other runtime setting still arrive only through your git-ignored `.env.docker` at container start, and `/app/data/oauth` lives on its named volume, so the load never touches sign-in state. The image is distributed only through GitHub Releases; there is no registry pull channel, and this artifact is always linux/amd64.
+No runtime configuration is baked into the image: credentials, tokens, and every other runtime setting still arrive only through your git-ignored `.env.docker` at container start, and `/app/data/oauth` lives on its named volume, so the load never touches sign-in state. The archive fallback exists for hosts that cannot pull from a registry; the primary pull channel is the GHCR image above, and this artifact is always linux/amd64.
 
 ### Installation from GitHub Releases
 
-All release artifacts are distributed through this repository's GitHub Releases. Every tagged release carries the raw binaries, the installers, checksums, provenance data, and the `latest-stable.json` version manifest:
+All release artifacts are distributed through this repository's GitHub Releases. Every tagged release carries the raw binaries, the installers, checksums, provenance data, and the `latest-stable.json` version manifest. The container image for the HTTP mode is a separate channel and is published to this repository's GitHub Packages (GHCR), not among the Release assets; see "Container image on GitHub Packages (GHCR)" above. Releases and Packages stay distinct on GitHub.
 
 - Versioned assets: `https://github.com/ACTSIS/outlook-mcp/releases/download/v<version>/<file>`
 - `latest-stable.json` manifest for the newest release: `https://github.com/ACTSIS/outlook-mcp/releases/latest/download/latest-stable.json`

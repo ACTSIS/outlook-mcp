@@ -18,7 +18,14 @@
 services:
   mcp-http:
     build: .
-    image: outlook-mcp-http:local
+    # Default image: the locally built outlook-mcp-http:local tag (loaded
+    # from the release archive or built by this `build:` key). MCP_HTTP_IMAGE
+    # is an OPTIONAL Compose interpolation override for the published GHCR
+    # image; Compose resolves it from the shell environment, the Compose
+    # project .env file, or an explicit --env-file. The service env_file
+    # (.env.docker) does NOT participate in Compose ${...} substitution and
+    # can never choose the image.
+    image: ${MCP_HTTP_IMAGE:-outlook-mcp-http:local}
     command: ['node', 'bin/m365-mcp.js', 'http']
     restart: unless-stopped
     # Exactly one replica is required: the encrypted bridge store is a

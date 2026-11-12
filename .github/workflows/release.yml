@@ -155,13 +155,15 @@ jobs:
           set -euo pipefail
           node -e "const { scanDirectory, canPublish, report } = require('./build/secret-scan'); const findings = scanDirectory('dist'); console.log(report(findings)); if (!canPublish(findings)) process.exit(1);"
 
-  # T21 (S12): downloadable loadable Docker image for the GitHub Releases
-  # channel. Builds the committed Dockerfile at the exact release ref and
-  # uploads it as a loadable archive with a checksum sidecar. GitHub-only:
-  # this job never pushes to a registry and gets no registry permission; the
-  # `docker-image` artifact name deliberately does not match the `artifact-*`
-  # and `installer-*` wildcards that the provenance and publisher jobs
-  # download, so the publisher payload stays byte-identical.
+  # T21 (S12), extended by T28 (S15): downloadable loadable Docker image for
+  # the GitHub Releases channel AND the provenance source for the GHCR
+  # publication. Builds the committed Dockerfile at the exact release ref
+  # with OCI provenance labels and uploads it as a checksummed loadable
+  # archive. This job stays registry-free: the later `publish-container` job
+  # does the ONLY registry work, from this exact artifact. The `docker-image`
+  # artifact name deliberately does not match the `artifact-*` and
+  # `installer-*` wildcards that the provenance, publisher, and container
+  # jobs download, so the publisher payload stays byte-identical.
   docker-image:
     name: Build Docker image artifact
     runs-on: ubuntu-latest
@@ -198,7 +200,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # OCI provenance labels are added at the ORIGINAL build, before the
+          # archive exists and before any registry publication. The caller's
+          # github.sha in a reusable workflow can point at its pre-bump
+          # commit, so the revision label MUST come from this exact release
+          # checkout via git rev-parse HEAD instead.
+          REVISION="$(git rev-parse HEAD)"
+          SOURCE="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
           docker build --platform linux/amd64 \
+            --label "org.opencontainers.image.source=${SOURCE}" \
+            --label "org.opencontainers.image.version=${RELEASE_TAG#v}" \
+            --label "org.opencontainers.image.revision=${REVISION}" \
             -t "outlook-mcp-http:${RELEASE_TAG#v}" \
             -t outlook-mcp-http:local \
             .
@@ -610,6 +622,180 @@ jobs:
             < dist/provenance/SHA256SUMS > latest-stable.json
           gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" latest-stable.json
 
+  # T28 (S15/S16): publish the already-tested image to the repository-linked
+  # GHCR namespace. This job alone carries `packages:write`; it never
+  # rebuilds the image (it loads the exact `docker-image` artifact verified
+  # by the sidecar), never falls back to another namespace or credential,
+  # never replaces an existing version tag built from a different image, and
+  # never advances `latest` unless this tag is the repository's current
+  # GitHub latest release. The first package of a repository starts PRIVATE
+  # regardless of repository visibility and the workflow never mutates
+  # visibility — the job summary says so honestly instead of claiming
+  # anonymous pulls.
+  publish-container:
+    name: Publish the tested image to GHCR
+    runs-on: ubuntu-latest
+    needs: [release, publish-artifacts, docker-image]
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 15
+    concurrency:
+      group: publish-container-${{ github.repository }}
+      cancel-in-progress: false
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # Isolated credential directory: docker never touches the runner's own
+      # ~/.docker and the token is written only here (umask 077 in the login
+      # step), never to the repository or the persisted workspace.
+      DOCKER_CONFIG: ${{ runner.temp }}/.docker-config
+
+    steps:
+      - name: Download the exact tested Docker image bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: docker-image-bundle
+
+      - name: Verify the bundle checksum before loading or logging in
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd docker-image-bundle
+          sha256sum -c outlook-mcp-docker-image.tar.gz.sha256
+
+      - name: Load the tested image without rebuilding it
+        shell: bash
+        run: |
+          set -euo pipefail
+          # docker load accepts the already-gzipped archive directly.
+          docker load --input docker-image-bundle/outlook-mcp-docker-image.tar.gz
+          docker image inspect "outlook-mcp-http:${RELEASE_TAG#v}" outlook-mcp-http:local
+
+      - name: Verify the loaded image ships the HTTP command and provenance labels
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE_REF="outlook-mcp-http:${RELEASE_TAG#v}"
+          EXPECTED_SOURCE="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          CMD="$(docker image inspect --format '{{json .Config.Cmd}}' "$IMAGE_REF")"
+          if [ "$CMD" != '["node","bin/m365-mcp.js","http"]' ]; then
+            echo "::error::refusing to publish: image command is $CMD, expected node bin/m365-mcp.js http (HTTP, never stdio)"
+            exit 1
+          fi
+          SOURCE="$(docker image inspect "$IMAGE_REF" --format '{{index .Config.Labels "org.opencontainers.image.source"}}')"
+          if [ "$SOURCE" != "$EXPECTED_SOURCE" ]; then
+            echo "::error::refusing to publish: image source label is '$SOURCE', expected '$EXPECTED_SOURCE'"
+            exit 1
+          fi
+          VERSION="$(docker image inspect "$IMAGE_REF" --format '{{index .Config.Labels "org.opencontainers.image.version"}}')"
+          if [ "$VERSION" != "${RELEASE_TAG#v}" ]; then
+            echo "::error::refusing to publish: image version label is '$VERSION', expected ${RELEASE_TAG#v}"
+            exit 1
+          fi
+
+      - name: Log in to ghcr.io only, with the built-in token through stdin
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$DOCKER_CONFIG"
+          # The token travels exclusively through stdin; it is never a
+          # command argument and is never echoed or logged.
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Guard the version tag against replacing a different published image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          VERSION="${RELEASE_TAG#v}"
+          FULL_TAG="${IMAGE}:${VERSION}"
+          LOCAL_ID="$(docker image inspect --format '{{.Id}}' "outlook-mcp-http:${VERSION}")"
+          if MANIFEST_OUTPUT="$(docker manifest inspect "$FULL_TAG" 2>&1)"; then
+            MANIFEST_STATUS=0
+          else
+            MANIFEST_STATUS=$?
+          fi
+          if [ "$MANIFEST_STATUS" -eq 0 ]; then
+            REMOTE_DIGEST="$(printf '%s\n' "$MANIFEST_OUTPUT" | node -e 'let s="";process.stdin.on("data",(c)=>{s+=c});process.stdin.on("end",()=>{try{process.stdout.write(JSON.parse(s).config.digest||"")}catch{}})')"
+            if [ -z "$REMOTE_DIGEST" ]; then
+              echo "::error::$FULL_TAG already exists as a manifest of unknown schema; refusing to treat it as replaceable"
+              exit 1
+            fi
+            if [ "$REMOTE_DIGEST" != "$LOCAL_ID" ]; then
+              echo "::error::$FULL_TAG is already published as $REMOTE_DIGEST but this built image is $LOCAL_ID; version tags are immutable for different images"
+              exit 1
+            fi
+            echo "Version tag $FULL_TAG already matches this image; publication is idempotent and the version push is skipped."
+            exit 0
+          fi
+          # ONLY a proven manifest-not-found means a new version; permission,
+          # auth, denial, and network errors are never classified as absent.
+          case "$MANIFEST_OUTPUT" in
+            *"manifest unknown"*|*"not found"*|*"Not Found"*|*"NOT_FOUND"*)
+              echo "Version tag $FULL_TAG is absent; a first publication of this version is required."
+              printf 'push\n' > "${RUNNER_TEMP}/publish-version-required"
+              ;;
+            *)
+              echo "::error::could not inspect $FULL_TAG (exit $MANIFEST_STATUS); auth, denial, and network errors are never classified as an absent version" >&2
+              printf '%s\n' "$MANIFEST_OUTPUT" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Tag and push the version tag first
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          VERSION="${RELEASE_TAG#v}"
+          docker tag "outlook-mcp-http:${VERSION}" "${IMAGE}:${VERSION}"
+          # The push happens only when the guard proved the version absent; an
+          # already-identical registry manifest never gets a redundant push.
+          if [ -f "${RUNNER_TEMP}/publish-version-required" ]; then
+            docker push "${IMAGE}:${VERSION}"
+          else
+            echo "Skipping the registry push: ${IMAGE}:${VERSION} already equals this image."
+          fi
+
+      - name: Advance latest only for the repository's current latest release
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          # The trusted source of truth for `latest` is the repository's own
+          # latest release, never this run's ref: an old version tag may
+          # re-publish its versioned ref but must never move latest.
+          CURRENT_LATEST="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          if [ "$CURRENT_LATEST" != "$RELEASE_TAG" ]; then
+            echo "Not advancing latest: $RELEASE_TAG is not the current GitHub latest release ($CURRENT_LATEST is)."
+            exit 0
+          fi
+          docker tag "outlook-mcp-http:${RELEASE_TAG#v}" "${IMAGE}:latest"
+          docker push "${IMAGE}:latest"
+
+      - name: Log out of ghcr.io
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker logout ghcr.io
+
+      - name: Record the honest visibility status
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          {
+            echo '### Container publication'
+            echo ''
+            echo "- Image ${IMAGE}:${RELEASE_TAG#v} was published from the verified Docker image archive."
+            echo '- Package visibility is NOT proven: this workflow does not change package visibility, and a GitHub package may be private even when the repository is public.'
+            echo '- If public anonymous pulls were selected, a package owner must set the package to Public once under Package settings on GitHub.'
+            echo "- Before advertising public pulls, prove them with a fresh credential-free Docker configuration: docker pull ${IMAGE}:${RELEASE_TAG#v} must work without docker login. Until then, do not claim anonymous access."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   cleanup:
     name: Cleanup workflow artifacts
     runs-on: ubuntu-latest
@@ -622,6 +808,7 @@ jobs:
         provenance,
         publish-artifacts,
         docker-image,
+        publish-container,
       ]
     if: always()
     permissions:

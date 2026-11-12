@@ -155,6 +155,23 @@ MCP_HTTP_EXTERNAL_BASE_URL=https://localhost:8443
 # local flow (Microsoft permits plain HTTP redirect URIs only for loopback
 # addresses).
 #
+# -- Optional production image override (compose.yaml only) -------------------
+# compose.yaml defaults its service image to the locally built
+# outlook-mcp-http:local tag (built with --build, or loaded from the release
+# archive; see README.md). To run the published container image instead,
+# override MCP_HTTP_IMAGE through the shell environment, the Compose project
+# .env file, or an explicit --env-file, for example:
+#
+#   MCP_HTTP_IMAGE=ghcr.io/actsis/outlook-mcp:<version> \
+#     docker compose -f compose.yaml up -d --no-build --pull always
+#
+#MCP_HTTP_IMAGE=ghcr.io/<owner>/<repository>:<tag>
+#
+# Compose interpolation of ${MCP_HTTP_IMAGE} is resolved by Compose itself
+# from those sources only. The service-level env_file (.env.docker) does NOT participate
+# in Compose ${...} substitution and cannot set this variable
+# before the image is chosen; never rely on .env.docker injecting the image.
+
 # -- Not applicable here -----------------------------------------------------
 # USE_TEST_MODE is a local-only setting and must stay unset (or false):
 # the HTTP mode refuses to start when USE_TEST_MODE=true.

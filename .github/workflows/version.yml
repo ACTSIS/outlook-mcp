@@ -111,8 +111,13 @@ jobs:
     name: Run release pipeline
     needs: [version]
     uses: ./.github/workflows/release.yml
+    # T28 (S15/S16): the release pipeline's publish-container job pushes the
+    # tested image to GHCR. A called workflow can never exceed its caller,
+    # so packages: write MUST be granted at THIS job level. The workflow
+    # default and the version job stay without it.
     permissions:
       contents: write
       actions: write
+      packages: write
     with:
       tag: ${{ needs.version.outputs.tag }}

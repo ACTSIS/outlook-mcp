@@ -113,6 +113,21 @@ describe('MCP HTTP docker-compose deployment', () => {
       expect(service.privileged).toBeFalsy();
       expect(Object.values(compose.services || {})).toHaveLength(1);
     });
+
+    /**
+     * T28 (S12, S15): the service image stays the locally built
+     * outlook-mcp-http:local tag by default (the offline release-archive
+     * flow) and becomes overridable only through an explicit
+     * MCP_HTTP_IMAGE Compose interpolation variable pointing at the
+     * published GHCR image.
+     */
+    test('defaults the service image to the local tag and allows only an explicit MCP_HTTP_IMAGE override (T28)', () => {
+      const compose = parse(composeFile);
+      const [service] = Object.values(compose.services);
+      expect(service.image).toBe('${MCP_HTTP_IMAGE:-outlook-mcp-http:local}');
+      expect(service.build).toBeDefined();
+      expect(composeFile).toMatch(/MCP_HTTP_IMAGE/);
+    });
   });
 
   /**
@@ -136,6 +151,15 @@ describe('MCP HTTP docker-compose deployment', () => {
       const [, service] = services[0];
       expect(service.command).toEqual(['node', 'bin/m365-mcp.js', 'http']);
       expect(service.build).toBeDefined();
+    });
+
+    // T28 (S12, S15): the build/dev default stays pinned to the local
+    // image; no MCP_HTTP_IMAGE interpolation exists in the local config.
+    test('keeps the local build/dev image hard-pinned with no MCP_HTTP_IMAGE override (T28)', () => {
+      const compose = parse(localComposeFile);
+      const [service] = Object.values(compose.services);
+      expect(service.image).toBe('outlook-mcp-http:local');
+      expect(localComposeFile).not.toMatch(/MCP_HTTP_IMAGE/);
     });
 
     test('pins the published host port exactly to 127.0.0.1 with no wildcard or configurable host', () => {
@@ -277,6 +301,20 @@ describe('MCP HTTP docker-compose deployment', () => {
       test('is documented as git-ignored and docker-ignored runtime-only configuration', () => {
         expect(envExample).toMatch(/git-ignored|never be committed/i);
         expect(envExample).toMatch(/docker-ignored/i);
+      });
+
+      /**
+       * T28 (S15): the sample documents the optional MCP_HTTP_IMAGE override
+       * for the published GHCR image, and is explicit that Compose resolves
+       * that interpolation from the shell environment, the Compose project
+       * .env, or --env-file — never from the service env_file.
+       */
+      test('documents the MCP_HTTP_IMAGE image override as a Compose substitution outside the service env_file (T28)', () => {
+        expect(envExample).toMatch(/^#MCP_HTTP_IMAGE=/m);
+        expect(envExample).not.toMatch(/^MCP_HTTP_IMAGE=/m);
+        expect(envExample).toMatch(/--env-file/);
+        expect(envExample).toMatch(/does NOT participate/i);
+        expect(envExample).toMatch(/ghcr\.io\//);
       });
 
       // T8 correction, updated by T12: v2 access tokens carry the API app's

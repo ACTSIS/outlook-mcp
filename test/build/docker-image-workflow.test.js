@@ -6,11 +6,11 @@
  * - A dedicated `docker-image` job builds the committed Dockerfile at the
  *   EXACT release ref on linux/amd64 and tags it `outlook-mcp-http:<version>`
  *   plus `outlook-mcp-http:local` (the tag the Compose files reference).
- * - The distribution stays GitHub-only: never pushed to a registry, no
- *   `packages:write`, no new secrets, and the artifact name `docker-image`
- *   must NOT match the `artifact-*` and `installer-*` wildcards that the
- *   provenance and publisher jobs download, so the publisher payload stays
- *   byte-identical.
+ * - The original docker-image job stays registry-free: it still never pushes
+ *   and gets no registry permission. T28 (S15/S16) later supersedes the
+ *   artifact-only channel: a separate publish-container job publishes the
+ *   SAME tested archive to the repository GHCR with scoped `packages:write`;
+ *   see test/build/ghcr-workflow.test.js for that contract.
  * - The archive is produced with `docker image save` (a loadable image
  *   archive, never `docker export`), gzipped as
  *   `outlook-mcp-docker-image.tar.gz` with a SHA-256 sidecar.
@@ -56,10 +56,13 @@ describe('docker-image release workflow (T21)', () => {
       expect(doc.jobs['docker-image']['runs-on']).toBe('ubuntu-latest');
     });
 
-    it('holds contents read only and never requests package write permissions', () => {
+    it('holds contents read only; packages write lives in publish-container exclusively (T28)', () => {
       const permissions = doc.jobs['docker-image'].permissions;
       expect(permissions).toEqual({ contents: 'read' });
-      expect(raw).not.toMatch(/packages:\s*write/);
+      const packagesJobs = Object.entries(doc.jobs)
+        .filter(([, job]) => job.permissions && job.permissions.packages)
+        .map(([name]) => name);
+      expect(packagesJobs).toEqual(['publish-container']);
     });
 
     it('checks out the exact release ref, matching every other job', () => {
@@ -133,8 +136,10 @@ describe('docker-image release workflow (T21)', () => {
       expect(upload.with['compression-level']).toBe(0);
     });
 
-    it('never pushes the image to any registry', () => {
-      expect(raw).not.toMatch(/docker push|ghcr|docker\.io/i);
+    it('keeps the docker-image job registry-free; only the publish-container job touches the registry (T28)', () => {
+      const script = stepsScript(doc, 'docker-image');
+      expect(script).not.toMatch(/docker push|ghcr|docker\.io/i);
+      expect(stepsScript(doc, 'publish-container')).toMatch(/ghcr\.io/);
     });
 
     it('embeds no secrets in the docker-image job', () => {
@@ -216,9 +221,14 @@ describe('docker-image release workflow (T21)', () => {
       expect(raw).not.toMatch(/proget|netbird/i);
     });
 
-    it('never requests registry package permissions', () => {
-      expect(raw).not.toMatch(/packages:\s*write/);
-      expect(raw).not.toMatch(/docker push|ghcr|docker\.io/i);
+    it('never requests registry package permissions outside the publish-container job (T28)', () => {
+      const packagesJobs = Object.entries(doc.jobs)
+        .filter(([, job]) => job.permissions && job.permissions.packages)
+        .map(([name]) => name);
+      expect(packagesJobs).toEqual(['publish-container']);
+      for (const name of ['provenance', 'publish-artifacts', 'docker-image']) {
+        expect(stepsScript(doc, name)).not.toMatch(/docker push|ghcr|docker\.io/i);
+      }
     });
   });
 
@@ -250,11 +260,15 @@ describe('README Docker image artifact documentation (T21)', () => {
     expect(readme).toMatch(/--pull never/);
   });
 
-  test('documents checksum verification from the download directory and the tagged-release-only availability', () => {
+  test('documents checksum verification from the download directory, the tagged-release-only availability, and the GHCR primary channel with honest visibility (T28)', () => {
     expect(readme).toMatch(/download directory/i);
     expect(readme).toMatch(/tagged [Rr]elease run/);
-    // This repository change is not dispatched by this task; no run happened.
-    expect(readme).not.toMatch(/GHCR|ghcr\.io|docker hub/i);
+    expect(readme).toMatch(/ghcr\.io\/actsis\/outlook-mcp/);
+    expect(readme).toMatch(/docker pull ghcr\.io\/actsis\/outlook-mcp:<version>/);
+    expect(readme).toMatch(/MCP_HTTP_IMAGE=ghcr\.io\/actsis\/outlook-mcp:<version>/);
+    expect(readme).toMatch(/PRIVATE/i);
+    expect(readme).toMatch(/Package settings/i);
+    expect(readme).not.toMatch(/docker hub/i);
   });
 
   test('states that the image contains no runtime configuration and the volume keeps persistence', () => {

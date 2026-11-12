@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define how outlook-mcp is packaged into native installers (`.deb` for Linux, NSIS for Windows), published to the same GitHub Releases channel as the raw binaries and Docker bundle, advertised through the `latest-stable.json` manifest, and documented for end users. Distribution is GitHub-only: there is no artifact server, tunnel, or registry channel, and publication consumes no credentials beyond the built-in `github.token`. This spec covers product-true distribution behavior; tool-acquisition mechanisms, runner choices, and other implementation selections are design-phase concerns.
+Define how outlook-mcp is packaged into native installers (`.deb` for Linux, NSIS for Windows), published to the same GitHub Releases channel as the raw binaries and Docker image archive, advertised through the `latest-stable.json` manifest, and documented for end users, and how the tested container image is published to the repository's GitHub Packages container registry (GHCR) so `docker pull` is the primary image channel. Publication consumes no credentials beyond the built-in `github.token`; there is no artifact server, tunnel, ProGet, or third-party registry. This spec covers product-true distribution behavior; tool-acquisition mechanisms, runner choices, and other implementation selections are design-phase concerns.
 
 ## Requirements
 
@@ -80,7 +80,7 @@ Because single-executable dispatch relies on a case-sensitive probe of `process.
 
 ### Requirement: GitHub Release Publication of Installers and Provenance
 
-The release pipeline MUST append the Windows installer, the Linux `.deb`, `SHA256SUMS`, the release SBOM, and `latest-stable.json` to the SAME GitHub Release that already carries the raw binaries and the Docker image bundle. The publishing job MUST keep the generic job id `publish-artifacts`, MUST depend on the GitHub release, both installer, and the provenance jobs (the provenance job itself follows the installer smoke gate), and MUST serialize same-version publications through a ref-keyed concurrency group with `cancel-in-progress: false`. `contents: write` MUST be granted to exactly the GitHub release job and this publisher; every other job MUST stay `contents: read`, and no registry or package permission may be requested. The publisher MUST use no custom secrets: `GH_TOKEN` MUST be the built-in `github.token`, the reusable release workflow MUST declare no `secrets` inputs, and the version workflow caller MUST pass none. The target repository MUST come from the trusted `GITHUB_REPOSITORY` context and be passed explicitly (for example with `--repo` on every `gh` command) so publication can never fall back to a wrong remote or fork default. The publisher MUST read the target release version before uploading, MUST verify that every required asset exists and that the provenance checksum file matches the collected assets before uploading, and MUST NOT overwrite assets that already exist on the release (no `--clobber`).
+The release pipeline MUST append the Windows installer, the Linux `.deb`, `SHA256SUMS`, the release SBOM, and `latest-stable.json` to the SAME GitHub Release that already carries the raw binaries and the Docker image bundle. The publishing job MUST keep the generic job id `publish-artifacts`, MUST depend on the GitHub release, both installer, and the provenance jobs (the provenance job itself follows the installer smoke gate), and MUST serialize same-version publications through a ref-keyed concurrency group with `cancel-in-progress: false`. `contents: write` MUST be granted to exactly the GitHub release job and this publisher; every other job inside this workflow MUST stay `contents: read`. `packages: write` MUST be granted exclusively to the GHCR container publication job (and, at job level only, the reusable-caller job in the version workflow, because a called workflow can never exceed its caller); no workflow-level default and no other job may request it. The publisher MUST use no custom secrets: `GH_TOKEN` MUST be the built-in `github.token`, the reusable release workflow MUST declare no `secrets` inputs, and the version workflow caller MUST pass none. The target repository MUST come from the trusted `GITHUB_REPOSITORY` context and be passed explicitly (for example with `--repo` on every `gh` command) so publication can never fall back to a wrong remote or fork default. The publisher MUST read the target release version before uploading, MUST verify that every required asset exists and that the provenance checksum file matches the collected assets before uploading, and MUST NOT overwrite assets that already exist on the release (no `--clobber`).
 
 #### Scenario: Tag push appends the missing assets
 
@@ -234,9 +234,9 @@ The automated workflow tests MUST forbid ALL custom secrets in the release workf
 - WHEN the workflow structure tests run
 - THEN its value MUST be `${{ github.token }}`
 
-### Requirement: End-User Installation Documentation (GitHub Releases)
+### Requirement: End-User Installation Documentation (GitHub Releases and GHCR)
 
-The repository MUST document installation from this repository's GitHub Releases for Windows (NSIS installer) and Linux (`.deb`), including the versioned release download URL, the `latest-stable.json` manifest URL that always resolves to the newest release, the release notes URL, and the presence of `SHA256SUMS` and the SBOM among the release assets. The documentation MUST NOT require any artifact server request or NetBird connectivity from the user, and it MUST state that credential configuration for installed binaries uses the MCP-client `env` block or Vault because a `.env` file beside the installed executable is not user-writable, plus the do-not-rename constraint on the installed executable.
+The repository MUST document installation from this repository's GitHub Releases for Windows (NSIS installer) and Linux (`.deb`), including the versioned release download URL, the `latest-stable.json` manifest URL that always resolves to the newest release, the release notes URL, and the presence of `SHA256SUMS` and the SBOM among the release assets. The documentation MUST present the container image pull (`docker pull ghcr.io/actsis/outlook-mcp:<version>` or `:latest`) as the primary image channel, distinguish the GitHub Packages channel from the Release-asset channel, document the `MCP_HTTP_IMAGE` production Compose override (`MCP_HTTP_IMAGE=ghcr.io/actsis/outlook-mcp:<version> docker compose -f compose.yaml up -d --no-build --pull always`) and the preserved local `outlook-mcp-http:local` default plus loadable archive fallback, and state honestly that a first GHCR package may be PRIVATE even for a public repository until a package owner confirms Public under the package's Package settings. The documentation MUST NOT require any artifact server request or NetBird connectivity from the user, and it MUST state that credential configuration for installed binaries uses the MCP-client `env` block or Vault because a `.env` file beside the installed executable is not user-writable, plus the do-not-rename constraint on the installed executable. It MUST NOT advertise GHCR or other registry credentials inside a client MCP JSON configuration, and it MUST NOT claim a per-agent Entra application registration.
 
 #### Scenario: GitHub Releases install steps are documented
 
@@ -258,9 +258,16 @@ The repository MUST document installation from this repository's GitHub Releases
 - THEN the MCP-client `env` block / Vault guidance and the do-not-rename constraint MUST be present
 - AND neither section MUST require an artifact server or NetBird
 
-### Requirement: Downloadable Docker Image Artifact (GitHub-only channel)
+#### Scenario: Container image pull and honest public visibility are documented
 
-The release pipeline MUST produce a loadable Docker image archive for linux/amd64 as a GitHub Release artifact, and ONLY there: the pipeline MUST NOT push the image to any container registry and MUST NOT request registry write permissions or consume any new secrets. The image MUST be built by the dedicated `docker-image` job from the committed Dockerfile at the exact release ref, tagged with the validated release version and the `local` tag referenced by the Compose configurations, gated behind the build, validation, and secret-scan jobs (the shared `build/secret-scan.js` detector MUST stay fail-closed on embedded credential patterns, suppressing only a bare PEM header that appears verbatim and alone inside quotes as the sole argument of an `indexOf` format comparison, while plain, assigned, truncated, split, and full private-key markers and any secret assignment elsewhere on the same line remain flagged), and uploaded under the unique Actions artifact name `docker-image` (which must never match the `artifact-*` or `installer-*` wildcards the provenance and publisher jobs download). The release job MUST wait for the image job, verify the archive against its SHA-256 sidecar, and attach both files to the GitHub Release. The `SHA256SUMS` payload and the `latest-stable.json` manifest MUST list exactly the pre-established four product assets, and the publisher MUST NOT re-upload the Docker bundle.
+- GIVEN the repository documentation
+- WHEN a user reads the container image sections
+- THEN the GHCR pull commands for a version tag and `latest`, the `MCP_HTTP_IMAGE` production Compose override with `--no-build --pull always`, and the preserved local/archive fallback MUST be present
+- AND the Packages-versus-Releases channel distinction and the first-package-may-be-private Package settings confirmation MUST be stated without claiming anonymous pulls are proven
+
+### Requirement: Docker Image Build and Release Archive
+
+The release pipeline MUST produce a loadable Docker image archive for linux/amd64 as a GitHub Release artifact. The image MUST be built by the dedicated `docker-image` job from the committed Dockerfile at the exact release ref, tagged with the validated release version and the `local` tag referenced by the Compose configurations, labeled with `org.opencontainers.image.source` (from the trusted `GITHUB_SERVER_URL`/`GITHUB_REPOSITORY` context), `org.opencontainers.image.version`, and `org.opencontainers.image.revision` (from `git rev-parse HEAD` of the exact release checkout — never a caller-provided `github.sha`) at the ORIGINAL build, before any archive or registry publication exists, gated behind the build, validation, and secret-scan jobs (the shared `build/secret-scan.js` detector MUST stay fail-closed on embedded credential patterns, suppressing only a bare PEM header that appears verbatim and alone inside quotes as the sole argument of an `indexOf` format comparison, while plain, assigned, truncated, split, and full private-key markers and any secret assignment elsewhere on the same line remain flagged), and uploaded under the unique Actions artifact name `docker-image` (which must never match the `artifact-*` or `installer-*` wildcards the provenance, publisher, and container publication jobs download). The release job MUST wait for the image job, verify the archive against its SHA-256 sidecar, and attach both files to the GitHub Release. The `SHA256SUMS` payload and the `latest-stable.json` manifest MUST list exactly the pre-established four product assets, and the publisher MUST NOT re-upload the Docker bundle. The archive REMAINS attached to the Release as the fallback for hosts that cannot pull from a registry; the primary image channel is the GHCR publication defined below.
 
 #### Scenario: Tag-bound loadable image
 
@@ -283,13 +290,20 @@ The release pipeline MUST produce a loadable Docker image archive for linux/amd6
 - WHEN the release job runs
 - THEN it MUST download the bundle under its exact artifact name, verify the SHA-256 sidecar, and attach the archive and the sidecar to the GitHub Release alongside the two original binaries
 
-#### Scenario: GitHub-only distribution is preserved
+#### Scenario: Registry publication starts only from the container publication job
 
 - GIVEN the release workflow file
-- WHEN its jobs and permissions are inspected
-- THEN no job MUST push to a container registry or request `packages:write`
-- AND the `docker-image` Actions artifact name MUST NOT match the `artifact-*` or `installer-*` download wildcards of the provenance and publisher jobs
+- WHEN its jobs, permissions, and scripts are inspected
+- THEN the `docker-image` job MUST NOT push the image to any container registry or request `packages: write`
+- AND only the GHCR container publication job defined below may push, and the `docker-image` Actions artifact name MUST NOT match the `artifact-*` or `installer-*` download wildcards of the provenance, publisher, and container publication jobs
 - AND the `SHA256SUMS` payload and manifest assets MUST remain the original four-asset set without the image
+
+#### Scenario: Provenance labels are built in and verified before publication
+
+- GIVEN a `v*` tag push that passes build, validation, and secret scan
+- WHEN the image is built
+- THEN the OCI `source`, `version`, and `revision` labels MUST exist on the built image before the archive is saved, with the revision label taken from the checked-out release ref via `git rev-parse HEAD`
+- AND the publication job MUST verify the image command is exactly `node bin/m365-mcp.js http` and that the source and version labels match the trusted repository context and release version before any login or push
 
 #### Scenario: End users can load and run the image
 
@@ -297,4 +311,61 @@ The release pipeline MUST produce a loadable Docker image archive for linux/amd6
 - WHEN a user reads the Docker artifact section
 - THEN it MUST state the archive and sidecar names, the linux/amd64 platform, checksum verification from the download directory, the load command (`gzip -dc outlook-mcp-docker-image.tar.gz | docker load`), starting Compose with `--no-build --pull never` against the loaded `local` tag
 - AND it MUST state that no runtime configuration is baked into the image and that persistence lives on the named volume
-- AND it MUST state that the artifact appears only after a tagged Release run and is not distributed through any registry pull channel
+- AND it MUST state that the archive appears only after a tagged Release run, that the primary pull channel is the GHCR image, and that the GHCR package lives in Packages rather than among Release assets
+
+### Requirement: GHCR Container Publication (GitHub Packages)
+
+A dedicated `publish-container` job MUST publish the tested image to the repository-linked GHCR namespace after the full publication chain (release, installers publisher, provenance) succeeds. It MUST hold exactly `contents: read` plus `packages: write`, and — because a called workflow can never exceed its caller — the reusable release-caller job in the version workflow MUST also declare `packages: write` at job level only; no workflow-level default, no version-bump job, and no CI or pull-request job MAY carry it. The job MUST depend on the exact `docker-image` artifact, MUST verify its SHA-256 sidecar before any load or login, MUST load the archive without rebuilding (the SAME tested image, never a registry-job rebuild), and MUST refuse publication when the loaded image command is not exactly `node bin/m365-mcp.js http` or when the source or version OCI labels do not match the trusted repository context and release version. It MUST log in ONLY to `ghcr.io` with the built-in `github.token` passed through `--password-stdin` for the `GITHUB_ACTOR` username (never as a command argument or in logs) from an isolated `DOCKER_CONFIG` directory under `RUNNER_TEMP` created with `umask 077`, with no namespace or credential fallback when access is denied. The version tag MUST be pushed first on the canonical `ghcr.io/<lowercase GITHUB_REPOSITORY>` image after an immutability preflight: an existing version manifest whose config digest matches the local image id is an idempotent skip, a different digest or an unknown manifest schema MUST fail the job, and ONLY a proven manifest-not-found is a new publication; authentication, permission, and network errors MUST NOT be classified as absent. `latest` MUST be pushed only when the pushed `RELEASE_TAG` equals the trusted `gh api repos/$GITHUB_REPOSITORY/releases/latest --jq .tag_name`, so an old version may re-publish its version tag without advancing latest. Publication MUST be serialized through a concurrency group keyed by the repository (not the ref) with `cancel-in-progress: false`. Because GitHub starts a first package PRIVATE even for a public repository and no documented visibility mutation exists, the job MUST record a step summary stating that visibility is NOT proven and pointing a package owner at the package's Package settings for the one-time Public confirmation, and MUST NOT claim anonymous pulls work before they are proven.
+
+#### Scenario: Permission allowlist
+
+- GIVEN the release workflow, the version workflow, and the CI workflow
+- WHEN their permissions are inspected
+- THEN `packages: write` MUST appear on exactly the `publish-container` job and the reusable caller job
+- AND the workflow-level defaults, the version job, and every CI/pull-request job MUST stay free of `packages: write`
+
+#### Scenario: The registry job consumes the exact tested archive
+
+- GIVEN a successful docker-image job
+- WHEN the container publication job runs
+- THEN it MUST download the `docker-image` artifact, verify its sidecar checksum before loading or logging in, load the gzipped archive with `docker load`, and never run a build, commit, or import in the registry job
+
+#### Scenario: Command and provenance verification precedes login
+
+- GIVEN a loaded image
+- WHEN the publication job verifies it
+- THEN a image command other than `[["node","bin/m365-mcp.js","http"]]`, a foreign source label, or a mismatched version label MUST fail the job before login and before any push
+
+#### Scenario: Login isolation
+
+- GIVEN the publication job
+- WHEN it authenticates
+- THEN the login MUST target ghcr.io only, pass the built-in token exclusively through stdin (`--password-stdin`), write credentials under an isolated `DOCKER_CONFIG` in `RUNNER_TEMP` with umask 077, and never echo the token or fall back to another namespace or credential on denial
+
+#### Scenario: Version tags are immutable for different images
+
+- GIVEN a version tag already present in the registry
+- WHEN the preflight inspect finds a config digest that matches the local image id
+- THEN the version push MUST be skipped as idempotent
+- AND a different digest or an unknown manifest schema MUST fail the job without pushing
+- AND only a proven manifest-not-found response MUST be treated as a new publication; auth, denial, and network failures MUST fail the job instead
+
+#### Scenario: Latest advances only for the current latest release
+
+- GIVEN an old release re-publishing its versioned tag
+- WHEN the trusted latest-release lookup returns a different tag
+- THEN the version tag MUST still publish and `latest` MUST NOT be pushed
+- AND a latest-lookup failure MUST fail the job closed instead of silently skipping or pushing
+
+#### Scenario: Publication serializes per repository
+
+- GIVEN concurrent publication runs in one repository
+- WHEN the container publication jobs start
+- THEN the concurrency group keyed by the repository MUST serialize them with `cancel-in-progress: false`
+
+#### Scenario: Visibility honesty
+
+- GIVEN any successful publication
+- WHEN the job concludes
+- THEN its step summary MUST state that package visibility is NOT proven and MUST point the package owner at the package's Package settings for the provider-owned Public confirmation
+- AND the workflow MUST NOT claim anonymous pull access is guaranteed and MUST NOT attempt any package-visibility mutation
