@@ -116,6 +116,3 @@ jobs:
       actions: write
     with:
       tag: ${{ needs.version.outputs.tag }}
-    secrets:
-      NETBIRD_SETUP_KEY: ${{ secrets.NETBIRD_SETUP_KEY }}
-      PROGET_API_KEY: ${{ secrets.PROGET_API_KEY }}

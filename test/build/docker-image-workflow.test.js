@@ -8,14 +8,16 @@
  *   plus `outlook-mcp-http:local` (the tag the Compose files reference).
  * - The distribution stays GitHub-only: never pushed to a registry, no
  *   `packages:write`, no new secrets, and the artifact name `docker-image`
- *   must NOT match the `artifact-*` wildcard that the ProGet provenance and
- *   publish jobs download, so the intranet ProGet payload stays byte-identical.
+ *   must NOT match the `artifact-*` and `installer-*` wildcards that the
+ *   provenance and publisher jobs download, so the publisher payload stays
+ *   byte-identical.
  * - The archive is produced with `docker image save` (a loadable image
  *   archive, never `docker export`), gzipped as
  *   `outlook-mcp-docker-image.tar.gz` with a SHA-256 sidecar.
  * - The release job waits for the image, verifies the sidecar checksum, and
  *   attaches the archive and checksum to the GitHub Release next to the two
- *   original binaries. The original ProGet SHA256SUMS payload is untouched.
+ *   original binaries. The provenance `SHA256SUMS` payload keeps listing
+ *   exactly the four product assets.
  * - Untrusted tags flow into scripts only through env vars (never `${{ }}`
  *   expression interpolation inside `run:`), scripts are fail-closed, and the
  *   temp directory is the runner's own temp, not a real runtime path.
@@ -169,15 +171,15 @@ describe('docker-image release workflow (T21)', () => {
       expect(script).toContain('$RELEASE_TAG');
     });
 
-    it('keeps the release job permissions, trigger, and secret policy unchanged', () => {
+    it('keeps the release job permissions and secret policy unchanged', () => {
       expect(doc.jobs.release.permissions).toEqual({ contents: 'write' });
       expect(raw).not.toMatch(/OUTLOOK_CLIENT_SECRET|MS_CLIENT_SECRET/);
-      expect(raw).not.toMatch(/\bsecrets\.(?!NETBIRD_SETUP_KEY|PROGET_API_KEY)\w/);
+      expect(raw).not.toMatch(/\bsecrets\./);
     });
   });
 
-  describe('ProGet payload and manifest stay byte-identical', () => {
-    it('keeps the intranet wildcard downloads exactly artifact-* and installer-*, which cannot absorb docker-image', () => {
+  describe('provenance and publisher payloads stay the four product assets (image isolated)', () => {
+    it('keeps the wildcard downloads exactly artifact-* and installer-*, which cannot absorb docker-image', () => {
       const jobs = ['provenance', 'publish-artifacts'];
       const patterns = [];
       for (const name of jobs) {
@@ -199,7 +201,7 @@ describe('docker-image release workflow (T21)', () => {
       expect('docker-image').toEqual(expect.not.stringMatching(/^artifact-|^installer-/));
     });
 
-    it('keeps the provenance SHA256SUMS exactly the original ProGet payload without the image', () => {
+    it('keeps the provenance SHA256SUMS exactly the four product assets without the image', () => {
       const script = stepsScript(doc, 'provenance');
       expect(script).toMatch(
         /sha256sum outlook-mcp-win-x64\.exe outlook-mcp-linux-x64 outlook-mcp-setup\.exe "outlook-mcp_\$\{VERSION\}_amd64\.deb" > SHA256SUMS/
@@ -207,10 +209,16 @@ describe('docker-image release workflow (T21)', () => {
       expect(script).not.toMatch(/docker-image/);
     });
 
-    it('keeps the ProGet upload list and manifest assets exactly the four product assets', () => {
+    it('keeps the GitHub-only publisher free of registry secrets and free of the Docker bundle', () => {
       const script = stepsScript(doc, 'publish-artifacts');
-      expect(script).not.toMatch(/docker-image/);
       expect(script).toMatch(/outlook-mcp-setup\.exe,outlook-mcp_\$\{VERSION\}_amd64\.deb/);
+      expect(script).not.toMatch(/docker-image|outlook-mcp-docker-image/);
+      expect(raw).not.toMatch(/proget|netbird/i);
+    });
+
+    it('never requests registry package permissions', () => {
+      expect(raw).not.toMatch(/packages:\s*write/);
+      expect(raw).not.toMatch(/docker push|ghcr|docker\.io/i);
     });
   });
 

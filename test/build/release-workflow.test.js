@@ -169,29 +169,32 @@ describe('release workflow', () => {
     });
   });
 
-  describe('secret policy for intranet publication', () => {
-    it('forbids OAuth client secrets and any unlisted secrets', () => {
+  describe('secret policy (GitHub-only publication)', () => {
+    it('declares no custom secrets and receives none from callers', () => {
+      expect(doc.on.workflow_call.secrets).toBeUndefined();
+      expect(raw).not.toMatch(/NETBIRD_SETUP_KEY|PROGET_API_KEY/i);
+    });
+
+    it('contains no secrets references at all; OAuth client secrets stay forbidden', () => {
       expect(raw).not.toMatch(/OUTLOOK_CLIENT_SECRET/);
       expect(raw).not.toMatch(/MS_CLIENT_SECRET/);
-      expect(raw).not.toMatch(/\bsecrets\.(?!NETBIRD_SETUP_KEY|PROGET_API_KEY)\w/);
+      expect(raw).not.toMatch(/\bsecrets\./);
     });
 
-    it('allows and consumes the two infrastructure secrets in publish-artifacts', () => {
-      expect(doc.jobs['publish-artifacts']).toBeDefined();
-      const paEnv = doc.jobs['publish-artifacts'].steps
-        .map((step) =>
-          Object.entries(step.env || {})
-            .map(([k, v]) => `${k}=${v}`)
-            .join('\n')
-        )
-        .join('\n');
-      expect(paEnv).toMatch(/\bsecrets\.NETBIRD_SETUP_KEY\b/);
-      expect(paEnv).toMatch(/\bsecrets\.PROGET_API_KEY\b/);
+    it('uses only the built-in github token wherever GH_TOKEN is set', () => {
+      const tokens = Object.values(doc.jobs)
+        .flatMap((job) => (job.steps || []).map((step) => step.env || {}))
+        .filter((env) => env.GH_TOKEN)
+        .map((env) => env.GH_TOKEN);
+      expect(tokens.length).toBeGreaterThan(0);
+      for (const token of tokens) {
+        expect(token).toBe('${{ github.token }}');
+      }
     });
 
-    it('declares contents write only on the release job', () => {
+    it('grants contents write only to the release and publish-artifacts jobs', () => {
       for (const [name, job] of Object.entries(doc.jobs)) {
-        if (name === 'release') {
+        if (name === 'release' || name === 'publish-artifacts') {
           expect(job.permissions.contents).toBe('write');
         } else {
           expect(job.permissions.contents).toBe('read');
@@ -200,7 +203,7 @@ describe('release workflow', () => {
     });
   });
 
-  describe('intranet distribution jobs', () => {
+  describe('github release distribution jobs', () => {
     it('installer jobs depend on build', () => {
       expect(doc.jobs['installer-windows'].needs).toEqual(['build']);
       expect(doc.jobs['installer-linux'].needs).toEqual(['build']);
@@ -222,31 +225,23 @@ describe('release workflow', () => {
       expect(needs).toHaveLength(4);
     });
 
-    it('publish-artifacts runs only in the ACTSIS repository and is skipped elsewhere', () => {
-      expect(doc.jobs['publish-artifacts']['if']).toBe("github.repository == 'ACTSIS/outlook-mcp'");
+    it('publish-artifacts is the repository-agnostic GitHub-only publisher', () => {
+      expect(doc.jobs['publish-artifacts']['if']).toBeUndefined();
+      const script = stepsScript(doc, 'publish-artifacts');
+      expect(script.toLowerCase()).not.toMatch(/proget|netbird|curl/);
     });
 
     it('publish-artifacts serializes same-version publications with a ref-keyed concurrency group', () => {
-      expect(doc.jobs['publish-artifacts'].concurrency.group).toMatch(/proget-publish/);
       expect(doc.jobs['publish-artifacts'].concurrency.group).toMatch(
         /\$\{\{\s*github\.ref\s*\}\}/
       );
       expect(doc.jobs['publish-artifacts'].concurrency['cancel-in-progress']).toBe(false);
     });
 
-    it('publish-artifacts has a pre-upload secret guard and an always() netbird teardown', () => {
-      const paSteps = doc.jobs['publish-artifacts'].steps;
-      const guard = paSteps.find((step) => step.name && step.name.toLowerCase().includes('guard'));
-      expect(guard).toBeDefined();
-      const teardown = paSteps.find((step) => step.run && step.run.includes('netbird down'));
-      expect(teardown).toBeDefined();
-      expect(teardown.if).toBe('always()');
-    });
-
-    it('manifest is generated after asset uploads and references the four product assets', () => {
+    it('publish-artifacts builds the manifest with build/release-manifest.js for the four product assets', () => {
       const paSteps = doc.jobs['publish-artifacts'].steps;
       const manifestStep = paSteps.find(
-        (step) => step.run && step.run.includes('build/proget-manifest.js')
+        (step) => step.run && step.run.includes('build/release-manifest.js')
       );
       expect(manifestStep).toBeDefined();
       const manifestRun = manifestStep.run;

@@ -16,15 +16,21 @@ describe('README distribution documentation', () => {
     expect(readme).not.toMatch(/glibc\s*2\.28\s*\+/);
   });
 
-  test('has an intranet installation section for ACTSIS ProGet', () => {
-    expect(readme).toMatch(/###\s+Intranet installation\s*\(ACTSIS ProGet\)/);
+  test('documents the GitHub Releases installation channel without any artifact server', () => {
+    expect(readme).toMatch(/###\s+Installation from GitHub Releases/);
+    expect(readme).not.toMatch(/proget|artifacts\.actsis\.com|netbird/i);
+    expect(readme).toContain(
+      'https://github.com/ACTSIS/outlook-mcp/releases/download/v<version>/<file>'
+    );
+    expect(readme).toContain(
+      'https://github.com/ACTSIS/outlook-mcp/releases/latest/download/latest-stable.json'
+    );
   });
 
-  test('documents where ProGet assets and the manifest live', () => {
-    expect(readme).toContain('https://artifacts.actsis.com');
-    expect(readme).toContain('endpoints/outlook-mcp/content/releases/');
-    expect(readme).toContain('releases/<version>/');
-    expect(readme).toContain('releases/latest-stable.json');
+  test('documents the versioned assets, checksums, SBOM, and release notes', () => {
+    expect(readme).toContain('SHA256SUMS');
+    expect(readme).toMatch(/sbom\.spdx\.json/i);
+    expect(readme).toContain('/releases/tag/v<version>');
   });
 
   test('documents Windows NSIS installer steps', () => {

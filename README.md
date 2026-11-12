@@ -290,18 +290,19 @@ Every **tagged Release run** also publishes a loadable Docker image archive for 
 
 No runtime configuration is baked into the image: credentials, tokens, and every other runtime setting still arrive only through your git-ignored `.env.docker` at container start, and `/app/data/oauth` lives on its named volume, so the load never touches sign-in state. The image is distributed only through GitHub Releases; there is no registry pull channel, and this artifact is always linux/amd64.
 
-### Intranet installation (ACTSIS ProGet)
+### Installation from GitHub Releases
 
-ACTSIS collaborators can install releases from the corporate ProGet Asset Directory at `https://artifacts.actsis.com`. Assets live in the dedicated `outlook-mcp` asset directory, under the `releases/` prefix:
+All release artifacts are distributed through this repository's GitHub Releases. Every tagged release carries the raw binaries, the installers, checksums, provenance data, and the `latest-stable.json` version manifest:
 
-- Versioned assets: `https://artifacts.actsis.com/endpoints/outlook-mcp/content/releases/<version>/<file>`
-- `latest-stable.json` manifest: `https://artifacts.actsis.com/endpoints/outlook-mcp/content/releases/latest-stable.json`
+- Versioned assets: `https://github.com/ACTSIS/outlook-mcp/releases/download/v<version>/<file>`
+- `latest-stable.json` manifest for the newest release: `https://github.com/ACTSIS/outlook-mcp/releases/latest/download/latest-stable.json`
+- Release notes: `https://github.com/ACTSIS/outlook-mcp/releases/tag/v<version>`
 
-The public GitHub Releases channel remains available; use whichever channel your environment can reach. Both the raw Linux binary and the `.deb` require **glibc ≥ 2.39 (Ubuntu 24.04+)**.
+Checksums for the four product assets live in `SHA256SUMS`, the software bill of materials in `outlook-mcp-<version>-sbom.spdx.json`, and the loadable Docker bundle in `outlook-mcp-docker-image.tar.gz` with its `.sha256` sidecar. Both the raw Linux binary and the `.deb` require **glibc ≥ 2.39 (Ubuntu 24.04+)**.
 
 #### Windows
 
-1. Download `outlook-mcp-setup.exe` for the desired version from ProGet.
+1. Download `outlook-mcp-setup.exe` for the desired version from GitHub Releases.
 2. Run the installer (administrator rights are required). It installs `outlook-mcp.exe` under `C:\Program Files\outlook-mcp`, appends that directory to the machine `PATH`, and registers an uninstall entry.
 3. Restart your terminal so the new `PATH` is available.
 4. Launch MCP mode:
@@ -318,7 +319,7 @@ The public GitHub Releases channel remains available; use whichever channel your
 
 #### Linux
 
-1. Download `outlook-mcp_<version>_amd64.deb` from ProGet.
+1. Download `outlook-mcp_<version>_amd64.deb` from GitHub Releases.
 2. Install it. `dpkg` is enough for a first install; `apt` resolves dependencies automatically if they are missing:
 
    ```bash
@@ -369,7 +370,7 @@ The server can start without credentials, but the first Graph or Power Automate 
 
 #### HashiCorp Vault for intranet developers
 
-Vault mode keeps OAuth values outside the public executable and outside developer MCP configuration. It is **intranet-only**: the developer machine must be able to reach `VAULT_ADDR` through the corporate network, VPN, or NetBird as required by the local environment. GitHub Actions does not connect to Vault, ProGet, or NetBird for the public release.
+Vault mode keeps OAuth values outside the public executable and outside developer MCP configuration. It is **intranet-only**: the developer machine must be able to reach `VAULT_ADDR` through the corporate network or VPN as required by the local environment. GitHub Actions does not connect to Vault for the public release.
 
 Set `VAULT_ADDR` to enable Vault mode. The other settings are optional:
 

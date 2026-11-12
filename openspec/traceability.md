@@ -55,6 +55,10 @@ The intranet HTTP listener (delegated Entra identity on `remote/http-server.js`)
 
 **Resolution:** `specs/remote-auth/spec.md` now owns remote HTTP authentication (the `MCP_HTTP_AUTH_MODE=entra|bridge` selector semantics, direct-Entra discovery/challenge metadata with resource-qualified scopes, legacy bridge metadata preservation, and the stateless bearer boundary). The local `auth` spec keeps owning stdio acquisition and refresh only.
 
+### The intranet ProGet distribution was replaced by GitHub-only publication
+
+The `2026-09-07-add-intranet-distribution` archive documents publishing installer assets, `SHA256SUMS`, an SBOM, and `latest-stable.json` to the ACTSIS ProGet Asset Directory over NetBird with the `NETBIRD_SETUP_KEY` and `PROGET_API_KEY` secrets. The user later directed GitHub-only distribution; canonical `specs/distribution/spec.md` now owns the GitHub Release publisher (`publish-artifacts`), the repository-parameterized `build/release-manifest.js` generator, and the secrets-free publication contract. The archives remain unmodified.
+
 ## Known Implementation Gaps
 
 These gaps are tracked here to keep the canonical requirements honest without converting defects into required behavior:

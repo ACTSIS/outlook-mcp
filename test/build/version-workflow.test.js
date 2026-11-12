@@ -65,10 +65,9 @@ describe('semantic version workflow', () => {
     expect(doc.jobs.release.uses).toBe('./.github/workflows/release.yml');
     expect(doc.jobs.release.needs).toEqual(['version']);
     expect(doc.jobs.release.with.tag).toBe('${{ needs.version.outputs.tag }}');
-    expect(doc.jobs.release.secrets).toEqual({
-      NETBIRD_SETUP_KEY: '${{ secrets.NETBIRD_SETUP_KEY }}',
-      PROGET_API_KEY: '${{ secrets.PROGET_API_KEY }}',
-    });
+    // GitHub-only publication (S14): the caller passes no secrets and the
+    // callee declares none.
+    expect(doc.jobs.release.secrets).toBeUndefined();
   });
 
   it('uses the built-in GitHub token and never requests a personal token', () => {
@@ -76,5 +75,6 @@ describe('semantic version workflow', () => {
     expect(doc.jobs.release.permissions).toEqual({ contents: 'write', actions: 'write' });
     expect(doc.jobs.version.permissions).toEqual({ contents: 'write', actions: 'write' });
     expect(fs.readFileSync(WORKFLOW_PATH, 'utf8')).not.toMatch(/secrets\.[A-Z0-9_]*TOKEN/);
+    expect(fs.readFileSync(WORKFLOW_PATH, 'utf8')).not.toMatch(/NETBIRD_SETUP_KEY|PROGET_API_KEY/i);
   });
 });
