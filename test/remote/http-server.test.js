@@ -476,6 +476,10 @@ describe('remote HTTP startup and configuration', () => {
       const bridge = resolveRemoteMcpConfig(bridgeEnv);
       expect(bridge.authMode).toBe('bridge');
       expect(bridge.oauth).not.toBeNull();
+      // ODD bridge-discovery-scopes T1: the default bridge scope namespace is
+      // the plain `mcp` scope, so PRM-first discovery clients need no manual
+      // scope override to authorize at the bridge.
+      expect(bridge.oauth.supportedScopes).toEqual(['mcp']);
     });
 
     it('derives the fully resource-qualified direct-Entra request scopes with the T12 helpers', () => {

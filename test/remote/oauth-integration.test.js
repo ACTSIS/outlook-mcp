@@ -469,7 +469,76 @@ describe('I1 discovery metadata for the service OAuth flow', () => {
       const metadata = await response.json();
       expect(metadata.authorization_servers).toEqual([base, ENTRA_ISSUER]);
       expect(metadata.resource).toBe(base);
-      expect(metadata.scopes_supported).toContain(REQUIRED_SCOPE);
+      // The bridge advertises its own MCP scope namespace; the upstream Entra
+      // required scp scope stays a token-verification requirement only.
+      expect(metadata.scopes_supported).toContain(MCP_SCOPE);
+      expect(metadata.scopes_supported).not.toContain(REQUIRED_SCOPE);
+    });
+  });
+
+  /**
+   * ODD bridge-discovery-scopes T1 (S2,S3): the protected-resource document
+   * must advertise exactly the effective scopes of its first advertised
+   * bridge authorization server. PRM-first clients (LibreChat) select scopes
+   * from this document before consulting the authorization server, so the
+   * merged upstream Entra scp scopes previously made those clients request
+   * them at /authorize and fail with invalid_scope.
+   */
+  it('advertises only the bridge authorization-server scopes and authorizes a PRM-derived scope request', async () => {
+    await withServer({}, async ({ base }) => {
+      const protectedResource = await fetch(`${base}/.well-known/oauth-protected-resource`).then(
+        (r) => r.json()
+      );
+      const asMetadata = await fetch(`${base}/.well-known/oauth-authorization-server`).then((r) =>
+        r.json()
+      );
+      expect(protectedResource.authorization_servers).toEqual([base, ENTRA_ISSUER]);
+      expect(protectedResource.resource).toBe(base);
+      expect(asMetadata.scopes_supported).toEqual([MCP_SCOPE]);
+      expect(protectedResource.scopes_supported).toEqual(asMetadata.scopes_supported);
+      expect(protectedResource.scopes_supported).not.toContain(REQUIRED_SCOPE);
+      // A standards client selects the scopes from the protected-resource
+      // document (LibreChat behavior) and then runs the standards /authorize
+      // request: the result must be the sign-in redirect, never invalid_scope.
+      const authorizeResponse = await fetch(
+        `${base}/authorize?${new URLSearchParams(
+          authorizeQuery({ scope: protectedResource.scopes_supported.join(' ') })
+        )}`,
+        { redirect: 'manual' }
+      );
+      LEAK_SCANNER.push(await authorizeResponse.text(), authorizeResponse.headers.get('location'));
+      expect(authorizeResponse.status).toBe(302);
+      const redirect = new URL(authorizeResponse.headers.get('location'));
+      expect(redirect.pathname).toBe('/login');
+      expect(redirect.searchParams.get('error')).toBeNull();
+    });
+  });
+
+  it('mirrors the explicitly configured bridge scopes exactly when the deployment overrides the defaults', async () => {
+    await withServer({ oauth: { supportedScopes: ['mcp', 'bridge.extra'] } }, async ({ base }) => {
+      const protectedResource = await fetch(`${base}/.well-known/oauth-protected-resource`).then(
+        (r) => r.json()
+      );
+      const asMetadata = await fetch(`${base}/.well-known/oauth-authorization-server`).then((r) =>
+        r.json()
+      );
+      expect(protectedResource.scopes_supported).toEqual(['mcp', 'bridge.extra']);
+      expect(protectedResource.scopes_supported).toEqual(asMetadata.scopes_supported);
+      expect(protectedResource.scopes_supported).not.toContain(REQUIRED_SCOPE);
+    });
+  });
+
+  it('keeps refusing an explicitly requested upstream Entra scope at the bridge /authorize', async () => {
+    await withServer({}, async ({ base }) => {
+      const response = await fetch(
+        `${base}/authorize?${new URLSearchParams(authorizeQuery({ scope: REQUIRED_SCOPE }))}`,
+        { redirect: 'manual' }
+      );
+      LEAK_SCANNER.push(await response.text(), response.headers.get('location'));
+      expect(response.status).toBe(302);
+      const redirect = new URL(response.headers.get('location'));
+      expect(redirect.searchParams.get('error')).toBe('invalid_scope');
+      expect(redirect.searchParams.get('mcp_authorization')).toBeNull();
     });
   });
 

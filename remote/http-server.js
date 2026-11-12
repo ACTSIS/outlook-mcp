@@ -1859,11 +1859,21 @@ function createRemoteMcpHttpServer(config) {
     // With the standards MCP OAuth flow (bridge mode) enabled, this service is
     // itself the first advertised authorization server (S1/S5); the configured
     // tenant Entra issuer stays advertised second for deployments that also
-    // hand out raw delegated tokens. Metadata stays unchanged for existing
-    // clients.
-    const scopesSupported = [
-      ...new Set([...requiredScopes, ...(oauthStack && oauth ? oauth.supportedScopes || [] : [])]),
-    ];
+    // hand out raw delegated tokens. Advertised scopes are exactly the
+    // effective scopes of that first bridge authorization server, taken from
+    // the metadata document the provider already built from its validated
+    // configuration: the upstream Entra scp requirement (requiredScopes) stays
+    // a token-verification namespace and is never advertised here, so a
+    // PRM-first client (LibreChat) selects a scope /authorize accepts instead
+    // of failing with invalid_scope (ODD bridge-discovery-scopes T1).
+    if (!oauthStack || !Array.isArray(oauthStack.metadata.scopes_supported)) {
+      // Unreachable while the bridge configuration owns the listener (the
+      // provider stack is built before any request is served); fail closed
+      // instead of advertising a guessed scope namespace.
+      respondJson(res, 500, { error: 'oauth-metadata-unavailable' });
+      return;
+    }
+    const scopesSupported = [...oauthStack.metadata.scopes_supported];
     respondJson(res, 200, {
       resource: resolveExternalBaseUrl(),
       authorization_servers: oauthStack

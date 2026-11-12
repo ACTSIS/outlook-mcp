@@ -50,14 +50,17 @@ In direct Entra mode, the protected-resource discovery document MUST advertise t
 
 ### Requirement: Bridge Metadata
 
-In bridge mode, the protected-resource discovery document and the `WWW-Authenticate` challenge MUST stay exactly as previously advertised (the service issuer first, the tenant Entra issuer second, the merged short-and-client scopes), so pre-existing clients keep their behavior. The service authorization-server metadata MUST additionally advertise the rotating refresh-token grant the provider implements (authorization-code plus refresh-token), while revocation stays unimplemented and unadvertised.
+In bridge mode, the protected-resource discovery document and the `WWW-Authenticate` challenge MUST stay exactly as previously advertised for the `authorization_servers` ordering (the service issuer first, the tenant Entra issuer second) and bearer behavior, so pre-existing clients keep their behavior. The protected-resource `scopes_supported` MUST list exactly the effective scopes of the first advertised bridge authorization server, taken from the metadata the provider already built from its validated configuration (default `mcp`, matching `MCP_HTTP_OAUTH_SUPPORTED_SCOPES`): the upstream Entra required short scp scopes (`MCP_HTTP_REQUIRED_SCOPES`) are a token-verification namespace and MUST NOT be merged into it, standards PRM-first clients (LibreChat) otherwise request upstream Entra scopes at `/authorize` and fail with `invalid_scope`. Requesting any scope outside the bridge supported set at `/authorize` MUST still fail with `invalid_scope` (no permissive acceptance of upstream Entra scopes), and `scopes_supported` MUST NOT leak resource-qualified Entra API scope URIs. The service authorization-server metadata MUST additionally advertise the rotating refresh-token grant the provider implements (authorization-code plus refresh-token), while revocation stays unimplemented and unadvertised.
 
-#### Scenario: Bridge discovery is unchanged
+#### Scenario: Bridge discovery advertises the bridge scope namespace
 
-- GIVEN a bridge deployment with configured external clients
+- GIVEN a bridge deployment whose required short scp scopes differ from the bridge supported scopes
 - WHEN a client fetches `/.well-known/oauth-protected-resource`
 - THEN `authorization_servers` is the service OAuth issuer followed by the tenant Entra issuer
-- AND `scopes_supported` merges the required short scp scopes with the client scopes as before
+- AND `resource` is the canonical deployment URL
+- AND `scopes_supported` equals the `scopes_supported` of `/.well-known/oauth-authorization-server` (the bridge scope, default `mcp`), without the upstream Entra required short scp scopes and without any resource-qualified Entra scope
+- AND a standards client requesting the advertised scopes at `/authorize` reaches the sign-in redirect
+- AND a client explicitly requesting an upstream Entra scope at `/authorize` still receives `error=invalid_scope`
 
 ### Requirement: Persistent Bridge Runtime Renewal and Durable Store
 
