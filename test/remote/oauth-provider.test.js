@@ -1042,6 +1042,43 @@ describe('R14 dynamic client registration is bounded', () => {
     expect(issued.body.refresh_token).toBeUndefined();
   });
 
+  it('does not issue tokens to a dynamically registered client before user authorization', async () => {
+    const bundle = createMCPOAuthProvider(defaultOptions({ allowDynamicRegistration: true }));
+    const app = createApp(bundle);
+    const redirectUri = 'http://localhost:49153/callback';
+    const registration = await request(app)
+      .post('/register')
+      .send({
+        redirect_uris: [redirectUri],
+        grant_types: ['authorization_code', 'refresh_token'],
+        response_types: ['code'],
+        token_endpoint_auth_method: 'none',
+      })
+      .expect(201);
+    const rejectedCode = await exchangeCode(app, {
+      code: 'not-authorized',
+      clientId: registration.body.client_id,
+      clientSecret: undefined,
+      redirectUri,
+    });
+    expect(rejectedCode.status).toBe(400);
+    expect(rejectedCode.body.error).toBe('invalid_grant');
+    expect(rejectedCode.body.access_token).toBeUndefined();
+    expect(rejectedCode.body.refresh_token).toBeUndefined();
+    const rejectedRefresh = await request(app)
+      .post('/token')
+      .type('form')
+      .send({
+        grant_type: 'refresh_token',
+        refresh_token: 'not-authorized',
+        client_id: registration.body.client_id,
+      })
+      .expect(400);
+    expect(rejectedRefresh.body.error).toBe('invalid_grant');
+    expect(rejectedRefresh.body.access_token).toBeUndefined();
+    expect(rejectedRefresh.body.refresh_token).toBeUndefined();
+  });
+
   it('registers the exact installed Pi 1.5.2 metadata shape and completes a refresh-capable flow', async () => {
     const bundle = createMCPOAuthProvider(defaultOptions({ allowDynamicRegistration: true }));
     const app = createApp(bundle);
