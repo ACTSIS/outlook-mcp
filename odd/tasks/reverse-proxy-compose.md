@@ -15,14 +15,15 @@ Scope: explicit reverse-proxy HTTP transport; preserve delegated authentication 
 
 ## Tasks
 
-- T1 [S1-S5] done — Implement minimal production Compose and explicit reverse-proxy HTTP mode with regression tests/help/docs/specs; route: worker mwczq63n-u-ivd7 after runtime context backstop; explorer mwczlaez-t-9mgr map; commit: b0105a0; reopened for user correction of S2 port mapping. Risk: items 2,3,5 (transport guard, shared configuration, deployment). Review slice: baseline 3c95fa6, one bounded behavior; unrelated historical branch work excluded.
-- T2 [S1-S5] done — Independently verify the new mode and production deployment with synthetic configuration; route: gentle-ai-verify, one correction batch if findings; commit: T1 unit.
+- T1 [S1-S5] done — Implement minimal production Compose and explicit reverse-proxy HTTP mode with regression tests/help/docs/specs; route: worker mwczq63n-u-ivd7 after runtime context backstop; explorer mwczlaez-t-9mgr map; commits: b0105a0 + 86aa4c5; S2 correction completed. Risk: items 2,3,5 (transport guard, shared configuration, deployment). Review slice: baseline 3c95fa6, one bounded behavior; unrelated historical branch work excluded.
+- T2 [S1-S5] done — Independently verify the new mode and production deployment with synthetic configuration; route: gentle-ai-verify mwd0ftd2-v-6isd; no blockers; commit: b0105a0 plus port-only correction 86aa4c5 validated by parent.
 - T3 [S1-S5] in_progress — Publish a new immutable patch release and verify GHCR latest actually supports the production Compose; route: parent delivery; commit: pending. Previous GHCR correction allowance remains exhausted and is not reset; new publisher defects require a human decision.
 
 - T4 [S6] pending — Update and start ACT-TWC-11:/home/ubuntu/docker/outlook-mcp using the published image, preserve env/volume and unrelated services; report live discovery/401 and Nginx Proxy Manager fields. Route: parent SSH; commit: T1/T3 release. Risk: items 2,5.
 
 ## Log
 
+- L10: Authorized SSH preflight ACT-TWC-11 (172.145.74.11), exact directory /home/ubuntu/docker/outlook-mcp has compose.yml (not a Git checkout), .env.docker exists and was not read. Existing container outlook-mcp-mcp-http-1 restarts; volume outlook-mcp_bridge_oauth_prod mounts /app/data/oauth; preserve exact Compose project/volume. Existing TLS bind will be removed from Compose only (no certificate file deletion). Existing compose SHA256 97794aa7064f1c083870ca94089feae0600380cd40f8fb46e4dc94c8b5019d48; backup before replace. Host8444 available. New release planned 2.4.8; publisher workflow unchanged.
 - L8: User extension verbatim: «vale, y entra al server act-twc-11 y en la ruta /home/ubuntu/docker/outlook-mcp actualiza y levanta el despliegue y dime que ir a poner en el npm». Authorized remote deployment only at this host/path, no destructive volume reset, no env/secret dumps.
 - L9: Port correction worker mwd0si21-w-t065 RED1/GREEN50 and parent 50/50 + Compose config/diff pass. Only Compose/test/docs port references changed; transport logic unchanged after independent review. Fixed host8444→standardcontainer8443. Review slice for this correction is b0105a0..next, distinct from original feature history.
 - L6: User correction verbatim: «jaja pero wey, cambiaste el puertoooo, osea, es un estandar, no tenias que cambiar logica ni nada, yo puse 8444 porque el 8443 estaba ocupado, pero si se da cuenta, estaba el extenro y no el interno». Only S2/T1 reopened: host8444 → container8443, not matched8444. No code change to port selection required.
