@@ -241,6 +241,16 @@ async function exchangeCode(
   return response;
 }
 
+async function rotateRefreshToken(app, { clientId, refreshToken }) {
+  const response = await request(app).post('/token').type('form').send({
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+    client_id: clientId,
+  });
+  scannerCapture(response.body, response.text);
+  return response;
+}
+
 async function requestRefreshGrant(app) {
   const response = await request(app).post('/token').type('form').send({
     grant_type: 'refresh_token',
@@ -1013,6 +1023,7 @@ describe('R14 dynamic client registration is bounded', () => {
     expect(registration.body.client_id).toBeDefined();
     expect(registration.body.client_secret).toBeDefined();
     expect(registration.body.client_secret_expires_at).toBeGreaterThan(Date.now() / 1000);
+    expect(registration.body.grant_types).toEqual(['authorization_code']);
     const flow = await runAuthorization(app, bundle, {
       clientId: registration.body.client_id,
       redirectUri: 'https://new-client.example/callback',
@@ -1026,13 +1037,68 @@ describe('R14 dynamic client registration is bounded', () => {
     });
     expect(issued.status).toBe(200);
     expect(issued.body.access_token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    // An authorization_code-only registration never receives a refresh
+    // token: the previous non-refresh behavior is preserved.
+    expect(issued.body.refresh_token).toBeUndefined();
+  });
+
+  it('registers the exact installed Pi 1.5.2 metadata shape and completes a refresh-capable flow', async () => {
+    const bundle = createMCPOAuthProvider(defaultOptions({ allowDynamicRegistration: true }));
+    const app = createApp(bundle);
+    // Installed Pi 1.5.2 (pi-mcp oauth provider defaults): both grants, a
+    // code response type, public authentication, and a loopback callback.
+    const registration = await request(app)
+      .post('/register')
+      .send({
+        redirect_uris: ['http://localhost:49153/callback'],
+        grant_types: ['authorization_code', 'refresh_token'],
+        response_types: ['code'],
+        token_endpoint_auth_method: 'none',
+        application_type: 'native',
+        scope: 'mcp',
+      })
+      .expect(201);
+    expect(registration.body.client_id).toBeDefined();
+    expect(registration.body.grant_types).toEqual(['authorization_code', 'refresh_token']);
+    expect(registration.body.token_endpoint_auth_method).toBe('none');
+    expect(registration.body.client_secret).toBeUndefined();
+    expect(registration.body.client_id_issued_at).toBeGreaterThan(0);
+    const flow = await runAuthorization(app, bundle, {
+      clientId: registration.body.client_id,
+      redirectUri: 'http://localhost:49153/callback',
+      clientSecret: undefined,
+    });
+    const issued = await exchangeCode(app, {
+      code: flow.code,
+      clientId: registration.body.client_id,
+      clientSecret: undefined,
+      redirectUri: 'http://localhost:49153/callback',
+    });
+    expect(issued.status).toBe(200);
+    expect(issued.body.access_token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(issued.body.refresh_token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    // The dual-grant registration actually renews: one rotation, and the
+    // consumed token can never mint again.
+    const rotated = await rotateRefreshToken(app, {
+      clientId: registration.body.client_id,
+      refreshToken: issued.body.refresh_token,
+    });
+    expect(rotated.status).toBe(200);
+    expect(rotated.body.refresh_token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(rotated.body.refresh_token).not.toBe(issued.body.refresh_token);
+    const replay = await rotateRefreshToken(app, {
+      clientId: registration.body.client_id,
+      refreshToken: issued.body.refresh_token,
+    });
+    expect(replay.status).toBe(400);
+    expect(replay.body.error).toBe('invalid_grant');
   });
 
   it('rejects registrations that violate the deployment safety rules', async () => {
     const bundle = createMCPOAuthProvider(
       defaultOptions({
         allowDynamicRegistration: true,
-        maxRegisteredClients: 1,
+        maxRegisteredClients: 2,
       })
     );
     const app = createApp(bundle);
@@ -1041,14 +1107,33 @@ describe('R14 dynamic client registration is bounded', () => {
       .send({ redirect_uris: ['http://untrusted.example/callback'] })
       .expect(400);
     expect(plainHttp.body.error).toBe('invalid_client_metadata');
-    const refreshGrant = await request(app)
+    const unsupportedGrant = await request(app)
+      .post('/register')
+      .send({
+        redirect_uris: ['https://fine.example/callback'],
+        grant_types: ['client_credentials'],
+      })
+      .expect(400);
+    expect(unsupportedGrant.body.error).toBe('invalid_client_metadata');
+    // A refresh-only registration is inconsistent with the supported code
+    // flow: the authorization_code grant is always required.
+    const refreshOnlyGrant = await request(app)
+      .post('/register')
+      .send({
+        redirect_uris: ['https://fine.example/callback'],
+        grant_types: ['refresh_token'],
+      })
+      .expect(400);
+    expect(refreshOnlyGrant.body.error).toBe('invalid_client_metadata');
+    // Rejected registrations never consume the client cap.
+    const dualGrant = await request(app)
       .post('/register')
       .send({
         redirect_uris: ['https://fine.example/callback'],
         grant_types: ['authorization_code', 'refresh_token'],
       })
-      .expect(400);
-    expect(refreshGrant.body.error).toBe('invalid_client_metadata');
+      .expect(201);
+    expect(dualGrant.body.client_id).toBeDefined();
     const first = await request(app)
       .post('/register')
       .send({ redirect_uris: ['https://fine.example/callback'] })

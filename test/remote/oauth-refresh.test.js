@@ -827,6 +827,61 @@ describe('R5 persistence across restart through the encrypted bridge store', () 
     ).toThrow(/dynamic/i);
   });
 
+  it('persists dual-grant dynamic clients and renews their refresh families after restart', async () => {
+    const dir = makeStoreDir('dynamic-dual-grant');
+    const first = createBundle({
+      persistentStore: makeStore(dir),
+      allowDynamicRegistration: true,
+    });
+    const firstApp = appFor(first);
+    const registration = await request(firstApp)
+      .post('/register')
+      .send({
+        redirect_uris: ['https://new-dual.example/callback'],
+        token_endpoint_auth_method: 'client_secret_post',
+        grant_types: ['authorization_code', 'refresh_token'],
+        response_types: ['code'],
+      })
+      .expect(201);
+    expect(registration.body.client_id).toBeDefined();
+    expect(registration.body.grant_types).toEqual(['authorization_code', 'refresh_token']);
+    // The registered dual-grant client mints a rotating refresh token
+    // through the public routes only.
+    const { tokenResponse } = await runPublicFlow(firstApp, first, {
+      clientId: registration.body.client_id,
+      redirectUri: 'https://new-dual.example/callback',
+      clientSecret: registration.body.client_secret,
+    });
+    expect(tokenResponse.status).toBe(200);
+    expect(tokenResponse.body.refresh_token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const preRestartRefresh = tokenResponse.body.refresh_token;
+    first.close();
+
+    // A fresh process loads the same store: the persisted client and its
+    // secret complete another public flow (authorize would refuse an
+    // unknown client), and the pre-restart refresh token still rotates.
+    const second = createBundle({
+      persistentStore: makeStore(dir),
+      allowDynamicRegistration: true,
+    });
+    const secondApp = appFor(second);
+    const reissued = await runPublicFlow(secondApp, second, {
+      clientId: registration.body.client_id,
+      redirectUri: 'https://new-dual.example/callback',
+      clientSecret: registration.body.client_secret,
+    });
+    expect(reissued.tokenResponse.status).toBe(200);
+    const rotated = await postRefresh(secondApp, {
+      refreshToken: preRestartRefresh,
+      clientId: registration.body.client_id,
+      clientSecret: registration.body.client_secret,
+    });
+    expect(rotated.status).toBe(200);
+    expect(rotated.body.refresh_token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(rotated.body.refresh_token).not.toBe(preRestartRefresh);
+    second.close();
+  });
+
   it('returns no tokens and leaves no partially changed state when persistence fails', async () => {
     const dir = makeStoreDir('exchange-failure');
     const inner = makeStore(dir);

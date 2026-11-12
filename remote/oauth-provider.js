@@ -293,6 +293,35 @@ function validateSupportedScopes(supportedScopes) {
   return [...new Set(supportedScopes.map((scope) => scope.trim()))];
 }
 
+/**
+ * Validates one dynamic-registration or persisted grant_types array: it
+ * must include the authorization_code grant and may only add the
+ * refresh_token grant (the two grants the token endpoint implements).
+ * Absent or empty input falls back to the authorization-code grant, which
+ * preserves the previous non-refresh behavior for registrations without a
+ * grant_types array. Returns the canonical SUPPORTED_CLIENT_GRANTS order,
+ * or undefined when the array is invalid; call sites throw their own
+ * error shapes.
+ * @param {unknown} grants
+ * @returns {string[] | undefined}
+ */
+function normalizeClientGrantTypes(grants) {
+  const list = Array.isArray(grants) ? grants : [];
+  if (list.length === 0) {
+    return ['authorization_code'];
+  }
+  if (
+    list.some((grant) => !SUPPORTED_CLIENT_GRANTS.includes(grant)) ||
+    !list.includes('authorization_code') ||
+    new Set(list).size !== list.length
+  ) {
+    return undefined;
+  }
+  return [...list].sort(
+    (a, b) => SUPPORTED_CLIENT_GRANTS.indexOf(a) - SUPPORTED_CLIENT_GRANTS.indexOf(b)
+  );
+}
+
 function validateRegisteredClients(clients) {
   if (clients === undefined) {
     return [];
@@ -547,11 +576,11 @@ function createClientsStore(
       if (new Set(validatedRedirectUris).size !== validatedRedirectUris.length) {
         throw new InvalidClientMetadataError('redirect_uris must be unique');
       }
-      if (
-        Array.isArray(clientInfo.grant_types) &&
-        clientInfo.grant_types.some((grant) => grant !== 'authorization_code')
-      ) {
-        throw new InvalidClientMetadataError('Only the authorization_code grant is supported');
+      const registeredGrants = normalizeClientGrantTypes(clientInfo.grant_types);
+      if (!registeredGrants) {
+        throw new InvalidClientMetadataError(
+          `grants, when set, must include 'authorization_code' and may only add 'refresh_token'`
+        );
       }
       if (
         Array.isArray(clientInfo.response_types) &&
@@ -575,7 +604,7 @@ function createClientsStore(
       const stored = {
         ...clientInfo,
         redirect_uris: validatedRedirectUris,
-        grant_types: ['authorization_code'],
+        grant_types: registeredGrants,
         token_endpoint_auth_method: clientInfo.token_endpoint_auth_method || 'client_secret_post',
       };
       // T18: persist the validated registration BEFORE it exists in memory,
@@ -589,7 +618,7 @@ function createClientsStore(
             ? { client_secret_expires_at: clientInfo.client_secret_expires_at }
             : {}),
           redirect_uris: validatedRedirectUris,
-          grant_types: ['authorization_code'],
+          grant_types: registeredGrants,
           token_endpoint_auth_method: stored.token_endpoint_auth_method,
         };
         seeds.persistDynamicClient(persisted);
@@ -892,9 +921,13 @@ function validatePersistedDynamicClient(entry) {
   ) {
     throw persistedStateError('a persisted dynamic client carries invalid redirect URIs');
   }
-  if (JSON.stringify(entry.grant_types || null) !== JSON.stringify(['authorization_code'])) {
+  const persistedGrants = normalizeClientGrantTypes(entry.grant_types);
+  if (
+    !Array.isArray(entry.grant_types) ||
+    JSON.stringify(persistedGrants) !== JSON.stringify(entry.grant_types)
+  ) {
     throw persistedStateError(
-      'a persisted dynamic client carries grants other than the authorization-code grant'
+      'a persisted dynamic client carries grants other than authorization_code, optionally with refresh_token, in canonical order'
     );
   }
   if (
@@ -906,7 +939,7 @@ function validatePersistedDynamicClient(entry) {
   if (entry.client_secret_expires_at !== undefined) {
     validateSnapshotTime(entry.client_secret_expires_at, 'dynamic client secret expiry');
   }
-  return { ...entry };
+  return { ...entry, grant_types: persistedGrants };
 }
 
 /**

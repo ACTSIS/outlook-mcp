@@ -115,6 +115,28 @@ In bridge mode, the authorization server MUST issue one-time rotating refresh to
 - WHEN a fresh provider instance loads the same snapshot
 - THEN the same MCP access token verifies and the same refresh token continues its rotating family, while no plaintext MCP token or pending authorization code or browser state is recoverable from the snapshot
 
+### Requirement: Bounded Dynamic Client Registration
+
+In bridge mode, dynamic client registration MUST stay disabled by default (no registration endpoint in discovery, `/register` answering 404) and enabled only by the explicit bridge-only selector. When enabled, the registration endpoint MUST accept standards OAuth client metadata whose grant types include the `authorization_code` grant and optionally add the `refresh_token` grant, MUST refuse every other grant type and any refresh-only registration, and MUST treat an absent or empty grant list as the authorization-code grant. The accepted grants MUST be preserved canonically in the registration response, the client store, and the persisted snapshot, so a dynamically registered dual-grant client keeps mints and rotations of its refresh family across restarts exactly as a pre-registered client does, while an authorization-code-only dynamic registration MUST never receive a refresh token. Every rejected registration MUST NOT consume the deployment's client cap or persist any snapshot generation, and a completed registration MUST NOT by itself grant access to any protected endpoint: each MCP request still requires a verified token.
+
+#### Scenario: A standards client registers once and renews
+
+- GIVEN dynamic registration is enabled and a client sends the installed Pi 1.5.2 metadata shape (`authorization_code` + `refresh_token`, `code` response type, public client authentication, an HTTP loopback redirect)
+- WHEN it registers and completes one browser sign-in flow through the public authorize and token endpoints
+- THEN the registration answers 201 carrying the same dual grants, the code exchange mints a rotating refresh token, a refresh rotation consumes the stale token and mints a fresh one, and after a restart on the same store the persisted client completes another flow and the pre-restart refresh token still rotates
+
+#### Scenario: Unsupported grants are refused without consuming the cap
+
+- GIVEN dynamic registration is enabled with a bounded client cap
+- WHEN a registration names `client_credentials` or only `refresh_token`
+- THEN it answers `invalid_client_metadata` without persisting a snapshot generation, and as many successful registrations as the cap allows still complete afterwards
+
+#### Scenario: A registration alone grants nothing
+
+- GIVEN a dynamically registered client
+- WHEN a protected `/mcp` request arrives without a token
+- THEN it answers 401 before any dispatch, exactly as for unregistered clients
+
 ### Requirement: Reverse-Proxy HTTP Transport Opt-In (S3-S5)
 
 The listener MUST accept an explicit `MCP_HTTP_REVERSE_PROXY_HTTP` selector with exactly the value `true` — any other value MUST refuse startup — that opts into a plaintext HTTP upstream listener for an operator-managed external HTTPS reverse proxy, typically on a different server, without changing delegated bearer validation, scope requirements, identity binding, the stateless boundary, or the previously specified discovery, challenge, OAuth, or configuration-gate behavior. While the opt-in is active, the listener MUST require the canonical `MCP_HTTP_EXTERNAL_BASE_URL` to be an absolute `https://` URL — plaintext, path-bearing, or missing base URLs MUST refuse startup — whether the flag arrives through the environment resolver or the programmatic configuration (a string or otherwise non-boolean programmatic value MUST never enable or bypass the mode), MUST allow the plaintext listener to bind non-loopback addresses only under the opt-in, and MUST keep the wildcard-bind discovery fail-closed rule unchanged. Forwarded Host/proto headers MUST stay untrusted: discovery metadata and challenges keep advertising only the trusted canonical configuration. The local-development semantics of `MCP_HTTP_ALLOW_LOCAL_HTTP` and the TLS configuration rules stay unchanged, and protecting the plaintext upstream hop explicitly rests with the operator.
