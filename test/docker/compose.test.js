@@ -87,13 +87,13 @@ describe('MCP HTTP docker-compose deployment', () => {
       expect(lines.length).toBeGreaterThanOrEqual(20);
     });
 
-    test('runs the plaintext HTTP listener on the fixed 8444:8444 mapping under the explicit reverse-proxy opt-in (S2, S3, S5)', () => {
+    test('runs the plaintext listener with host port 8444 mapped to the standard internal 8443 under the explicit reverse-proxy opt-in (S2, S3, S5)', () => {
       const compose = parse(productionFile);
       const [service] = Object.values(compose.services);
       expect(service.environment.MCP_HTTP_HOST).toBe('0.0.0.0');
-      expect(String(service.environment.MCP_HTTP_PORT)).toBe('8444');
+      expect(String(service.environment.MCP_HTTP_PORT)).toBe('8443');
       expect(service.environment.MCP_HTTP_REVERSE_PROXY_HTTP).toBe('true');
-      expect(service.ports).toEqual(['8444:8444']);
+      expect(service.ports).toEqual(['8444:8443']);
       // No accidental TLS from a stale env-file value: the explicit empty
       // overrides win over env_file in the Compose merge.
       expect(service.environment.MCP_HTTP_TLS_CERT).toBe('');

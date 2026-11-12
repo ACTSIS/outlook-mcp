@@ -7,7 +7,7 @@ services:
       replicas: 1
     environment:
       MCP_HTTP_HOST: 0.0.0.0
-      MCP_HTTP_PORT: 8444
+      MCP_HTTP_PORT: 8443
       MCP_HTTP_REVERSE_PROXY_HTTP: 'true'
       MCP_HTTP_AUTH_MODE: bridge
       MCP_HTTP_EXTERNAL_BASE_URL: https://outlook-mcp.actsis.internal
@@ -16,7 +16,7 @@ services:
       MCP_HTTP_TLS_CERT: ''
       MCP_HTTP_TLS_KEY: ''
     ports:
-      - '8444:8444'
+      - '8444:8443'
     env_file:
       - path: .env.docker
         required: false
