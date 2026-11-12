@@ -1,0 +1,89 @@
+# =====================================================================
+# PRODUCTION — pull-only Compose for the authenticated MCP HTTP server
+# =====================================================================
+#
+# This file is identical in security posture to compose.yaml (direct-TLS
+# listener, durable encrypted bridge store on a named volume, rootless
+# read-only container, loopback-only host publication by default) except
+# that it NEVER BUILDS: it pulls the tested image published to
+# GitHub Packages (ghcr.io/actsis/outlook-mcp) by the release pipeline
+# (T28/T29, S15/S16). The GHCR image is the same binary the pipeline
+# verified: `CMD node bin/m365-mcp.js http`, uid 1000, HTTP listener.
+#
+# Image selection:
+#   - Default: the pinned release version below — pinned so an operator
+#     upgrade is an explicit decision (bump the tag), not silent drift.
+#   - `${MCP_HTTP_IMAGE:-...}` must be set at Compose interpolation time:
+#     pass it in the shell, a Compose `.env` next to this file, or
+#     `--env-file`. The service-level `env_file: .env.docker` does NOT
+#     participate in `${...}` interpolation (docker-env.example explains).
+#   - `:latest` also exists and follows each repo's current latest
+#     release, but pinning is preferable in production.
+#
+# One required runtime file: `./tls/cert.pem` + `./tls/key.pem` (the
+# production listener refuses to start without TLS; see compose.yaml and
+# README "Intranet MCP HTTP mode"). Runtime Entra configuration comes
+# exclusively from the optional .env.docker runtime-only file.
+#
+# Launch (pull-only, never build):
+#   docker compose -f compose.production.yaml up -d --no-build --pull always
+#
+services:
+  mcp-http:
+    image: ${MCP_HTTP_IMAGE:-ghcr.io/actsis/outlook-mcp:2.4.7}
+    command: ['node', 'bin/m365-mcp.js', 'http']
+    restart: unless-stopped
+    # Exactly one replica: the encrypted bridge store is a single-node
+    # directory guarded by a generation counter, not a distributed lock.
+    # Two live writers on one store directory conflict fail-closed or
+    # (across hosts) are documented as unsupported; never scale up.
+    deploy:
+      replicas: 1
+    environment:
+      # Inside a Docker bridge network the listener must bind all container
+      # interfaces; TLS (required for this deployment shape) secures it.
+      MCP_HTTP_HOST: 0.0.0.0
+      MCP_HTTP_PORT: 8443
+      # Durable, encrypted bridge credential store on the named volume
+      # below: MCP refresh-token families and upstream Entra refresh
+      # credentials survive container recreation (T20). NOTE: this
+      # Compose file deliberately does NOT set MCP_HTTP_AUTH_MODE so the
+      # operator's runtime .env.docker decides bridge vs direct mode.
+      MCP_HTTP_BRIDGE_STORE_DIR: /app/data/oauth
+      # Container-side PEM paths backed by the read-only certificate mount.
+      MCP_HTTP_TLS_CERT: /run/tls/cert.pem
+      MCP_HTTP_TLS_KEY: /run/tls/key.pem
+    ports:
+      # Default: publish only on the host loopback address. Administrators
+      # opt into an intranet bind by setting MCP_HTTP_PUBLISHED_HOST and
+      # MCP_HTTP_PUBLISHED_PORT; see README.md.
+      - '${MCP_HTTP_PUBLISHED_HOST:-127.0.0.1}:${MCP_HTTP_PUBLISHED_PORT:-8443}:8443'
+    env_file:
+      # Optional at Compose level: an absent file means the container starts
+      # and then fails closed with a clear missing-configuration error
+      # instead of serving anything unauthenticated.
+      - path: .env.docker
+        required: false
+    volumes:
+      - '${MCP_HTTP_TLS_DIR:-./tls}:/run/tls:ro'
+      # Durable encrypted bridge credential store (bridge-store.bin plus its
+      # private key live inside the volume). Project-scoped named volume;
+      # never external, never shared across Compose projects. Removing it
+      # deletes every signed-in user's stored grant together with its key.
+      - 'bridge_oauth_prod:/app/data/oauth'
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+
+volumes:
+  # Project-scoped durable volume for the encrypted bridge credential
+  # store. No `name:` override: the Compose project prefix keeps the volume
+  # unique per deployment, so separate deployments never share one store.
+  # Running `docker compose -f compose.production.yaml down -v` (or
+  # removing this volume) is destructive for signed-in users: the store and
+  # its key are inside the volume. See docs/oauth-persistence.md.
+  bridge_oauth_prod:

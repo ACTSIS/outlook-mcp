@@ -23,6 +23,7 @@ const { parse } = require('yaml');
 
 const repoRoot = path.join(__dirname, '..', '..');
 const COMPOSE_PATH = path.join(repoRoot, 'compose.yaml');
+const PRODUCTION_COMPOSE_PATH = path.join(repoRoot, 'compose.production.yaml');
 const DOCKERFILE_PATH = path.join(repoRoot, 'Dockerfile');
 const DOCKERIGNORE_PATH = path.join(repoRoot, '.dockerignore');
 const ENV_EXAMPLE_PATH = path.join(repoRoot, 'docker-env.example');
@@ -54,6 +55,47 @@ describe('MCP HTTP docker-compose deployment', () => {
     COMPOSE_PATH,
     'the Compose deployment contract must ship with the tests'
   );
+
+  describe('compose.production.yaml (pull-only, GHCR)', () => {
+    const productionFile = readRequiredDeploymentFile(
+      PRODUCTION_COMPOSE_PATH,
+      'the pull-only production Compose contract must ship with the tests'
+    );
+
+    test('pulls the published GHCR image by default and never builds', () => {
+      const compose = parse(productionFile);
+      const [service] = Object.values(compose.services);
+      expect(service.command).toEqual(['node', 'bin/m365-mcp.js', 'http']);
+      expect(service.build).toBeUndefined();
+      expect(service.image).toBe('${MCP_HTTP_IMAGE:-ghcr.io/actsis/outlook-mcp:2.4.7}');
+    });
+
+    test('keeps the production security posture of compose.yaml (TLS, store volume, lockbox isolation)', () => {
+      const compose = parse(productionFile);
+      const [service] = Object.values(compose.services);
+      expect(service.environment.MCP_HTTP_HOST).toBe('0.0.0.0');
+      expect(service.environment.MCP_HTTP_TLS_CERT).toContain('/run/tls/');
+      expect(service.environment.MCP_HTTP_TLS_KEY).toContain('/run/tls/');
+      expect(service.environment.MCP_HTTP_BRIDGE_STORE_DIR).toBe('/app/data/oauth');
+      expect(service.environment.MCP_HTTP_AUTH_MODE).toBeUndefined();
+      const volumes = (service.volumes || []).map((volume) =>
+        typeof volume === 'string' ? JSON.stringify(volume) : volume
+      );
+      const tlsMount = volumes.find((volume) => volume.includes('/run/tls'));
+      expect(tlsMount.replace(/["']/g, '')).toMatch(/:ro'?$/);
+      expect(volumes.find((volume) => volume.includes('/app/data/oauth'))).toBeDefined();
+      expect(volumes.find((volume) => volume.includes('.env.docker'))).toBeUndefined();
+      expect(service.security_opt).toContain('no-new-privileges:true');
+      expect(service.cap_drop).toContain('ALL');
+      expect(service.read_only).toBe(true);
+      expect(Object.keys(compose.volumes)).toContain('bridge_oauth_prod');
+      const ports = service.ports || [];
+      expect(ports).toHaveLength(1);
+      const mapping = typeof ports[0] === 'string' ? ports[0] : JSON.stringify(ports[0]);
+      expect(mapping).toContain('${MCP_HTTP_PUBLISHED_HOST:-127.0.0.1}');
+      expect(mapping).toContain('${MCP_HTTP_PUBLISHED_PORT:-8443}');
+    });
+  });
 
   describe('compose.yaml', () => {
     test('parses as YAML and defines exactly one HTTP MCP service running the http entry point', () => {
