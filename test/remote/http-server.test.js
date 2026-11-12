@@ -707,6 +707,112 @@ describe('remote HTTP startup and configuration', () => {
       }
     });
   });
+
+  /**
+   * T-reverse-proxy (S3-S5): the explicitly opted-in reverse-proxy HTTP
+   * transport. Exactly `true` releases the plaintext non-loopback listener
+   * for an operator-managed HTTPS reverse proxy on another server, while
+   * requiring a canonical HTTPS external base URL. The trusted-URL rules
+   * above are never touched and forwarded headers stay untrusted.
+   */
+  describe('explicit reverse-proxy HTTP transport opt-in', () => {
+    const proxyEnv = {
+      ...baseEnv,
+      MCP_HTTP_HOST: '0.0.0.0',
+      MCP_HTTP_REVERSE_PROXY_HTTP: 'true',
+      MCP_HTTP_EXTERNAL_BASE_URL: 'https://outlook-mcp.actsis.internal',
+    };
+
+    it('releases the plaintext wildcard listener only under the exact flag with an HTTPS base URL', () => {
+      const config = resolveRemoteMcpConfig(proxyEnv);
+      expect(config.reverseProxyHttp).toBe(true);
+      expect(config.tls).toBeNull();
+      expect(config.externalBaseUrl).toBe('https://outlook-mcp.actsis.internal');
+    });
+
+    it('requires a canonical HTTPS external base URL whenever the flag is enabled (including loopback binds)', () => {
+      const loopbackProxyEnv = { ...proxyEnv, MCP_HTTP_HOST: '127.0.0.1' };
+      const withoutBase = { ...loopbackProxyEnv };
+      delete withoutBase.MCP_HTTP_EXTERNAL_BASE_URL;
+      expect(() => resolveRemoteMcpConfig(withoutBase)).toThrow(/MCP_HTTP_REVERSE_PROXY_HTTP/i);
+      expect(() =>
+        resolveRemoteMcpConfig({
+          ...loopbackProxyEnv,
+          MCP_HTTP_EXTERNAL_BASE_URL: 'http://localhost:8443',
+        })
+      ).toThrow(/MCP_HTTP_REVERSE_PROXY_HTTP/i);
+    });
+
+    it('accepts only the exact opt-in value so a typo can never enable the mode', () => {
+      for (const bad of ['True', '1', 'false', 'False', 'yes', '0']) {
+        expect(() =>
+          resolveRemoteMcpConfig({
+            ...baseEnv,
+            MCP_HTTP_REVERSE_PROXY_HTTP: bad,
+          })
+        ).toThrow(/MCP_HTTP_REVERSE_PROXY_HTTP/i);
+      }
+    });
+
+    it('requires the same canonical HTTPS base URL on the programmatic constructor and refuses non-boolean values', () => {
+      for (const bad of ['true', 'false', 1]) {
+        expect(() => createRemoteMcpHttpServer(serverConfig({ reverseProxyHttp: bad }))).toThrow(
+          /reverseProxyHttp/i
+        );
+      }
+      expect(() =>
+        createRemoteMcpHttpServer(
+          serverConfig({ reverseProxyHttp: true, externalBaseUrl: undefined })
+        )
+      ).toThrow(/reverseProxyHttp/i);
+      expect(() =>
+        createRemoteMcpHttpServer(
+          serverConfig({ reverseProxyHttp: true, externalBaseUrl: 'http://localhost:8443' })
+        )
+      ).toThrow(/reverseProxyHttp/i);
+    });
+
+    it('serves canonical HTTPS discovery and 401 challenges over the plaintext listener, ignoring forwarded headers', async () => {
+      const instance = createRemoteMcpHttpServer(
+        serverConfig({
+          host: '0.0.0.0',
+          reverseProxyHttp: true,
+          externalBaseUrl: 'https://outlook-mcp.actsis.internal',
+        })
+      );
+      const started = await instance.start();
+      try {
+        expect(started.tls).toBe(false);
+        const forwarded = {
+          host: 'attacker.example:8443',
+          'x-forwarded-proto': 'https',
+          'x-forwarded-host': 'evil.example',
+          'x-forwarded-for': '203.0.113.9',
+        };
+        const discovery = await rawRequest(started.port, {
+          path: '/.well-known/oauth-protected-resource',
+          headers: forwarded,
+        }).then((res) => {
+          expect(res.status).toBe(200);
+          return res.json;
+        });
+        expect(discovery.resource).toBe('https://outlook-mcp.actsis.internal');
+        const challenge = await rawRequest(started.port, {
+          method: 'POST',
+          body: JSON.stringify(rpcRequest(1, 'tools/list', {})),
+          headers: forwarded,
+        });
+        expect(challenge.status).toBe(401);
+        expect(challenge.headers['www-authenticate']).toContain(
+          'resource_metadata="https://outlook-mcp.actsis.internal/.well-known/oauth-protected-resource"'
+        );
+        expect(challenge.text).not.toContain('attacker.example');
+        expect(challenge.text).not.toContain('evil.example');
+      } finally {
+        await instance.stop();
+      }
+    });
+  });
 });
 
 describe('standards sign-in flow fail-closed configuration', () => {

@@ -51,7 +51,13 @@
  *     loopback Entra callback (http://localhost:<port>/login/callback, per
  *     Microsoft's loopback-only plain HTTP redirect rule) and a plaintext
  *     wildcard container listener published strictly on the host loopback;
- *     it never accepts plain HTTP for intranet or public addresses.
+ *     it never accepts plain HTTP for intranet or public addresses. A second
+ *     explicitly opted-in mode (MCP_HTTP_REVERSE_PROXY_HTTP=true) accepts the
+ *     plaintext HTTP upstream listener for an operator-managed HTTPS reverse
+ *     proxy, typically on another server, but only with a canonical https://
+ *     external base URL; forwarded Host/proto headers stay untrusted, every
+ *     other plaintext guard is untouched, and protecting the plaintext
+ *     upstream hop is the operator's explicitly accepted responsibility.
  *
  * Every HTTP request gets its own MCP protocol server and stateless transport
  * and runs entirely inside one `AsyncLocalStorage` token-store scope, so
@@ -413,6 +419,21 @@ function resolveRemoteMcpConfig(env) {
   }
   const allowLocalHttp = rawAllowLocalHttp === 'true';
 
+  // The reverse-proxy HTTP transport opt-in is value-exact like the local
+  // development allowance: any other value (a typo, "true ", "True", or a
+  // string boolean) fails closed instead of silently enabling plaintext
+  // listening. The programmatic constructor enforces the same policy with a
+  // strict boolean field.
+  const rawReverseProxyHttp = isNonEmptyString(env.MCP_HTTP_REVERSE_PROXY_HTTP)
+    ? env.MCP_HTTP_REVERSE_PROXY_HTTP.trim()
+    : undefined;
+  if (rawReverseProxyHttp !== undefined && rawReverseProxyHttp !== 'true') {
+    throw configError(
+      'MCP_HTTP_REVERSE_PROXY_HTTP must be exactly "true" when set: it opts into a plaintext HTTP upstream listener behind an operator-managed HTTPS reverse proxy and is never for direct public exposure.'
+    );
+  }
+  const reverseProxyHttp = rawReverseProxyHttp === 'true';
+
   const missing = REQUIRED_ENV_KEYS.filter((key) => !isNonEmptyString(env[key]));
   if (missing.length > 0) {
     throw configError(`Missing required remote MCP HTTP configuration: ${missing.join(', ')}.`);
@@ -576,6 +597,16 @@ function resolveRemoteMcpConfig(env) {
     }
   }
 
+  // A reverse-proxy transport explicitly requires the canonical HTTPS base
+  // URL even when the bind itself would be a loopback address: without TLS on
+  // this listener, discovery can only ever advertise the exact HTTPS address
+  // the external reverse proxy serves, never a plaintext or derived URL.
+  if (reverseProxyHttp && (!externalBaseUrl || new URL(externalBaseUrl).protocol !== 'https:')) {
+    throw configError(
+      'MCP_HTTP_REVERSE_PROXY_HTTP=true requires the canonical MCP_HTTP_EXTERNAL_BASE_URL to be an absolute https:// URL of the address the external reverse proxy serves; plaintext discovery URLs are never accepted in this mode.'
+    );
+  }
+
   // TLS is configured through optional PEM certificate/key file paths. Even on
   // this loopback listener, misconfigured paths must fail startup, not listen.
   let tls = null;
@@ -597,10 +628,15 @@ function resolveRemoteMcpConfig(env) {
     // entirely on Docker publishing the port to the host loopback (the local
     // Compose config pins 127.0.0.1); container-network traffic stays
     // unencrypted and is visible to other local Docker workloads.
-    !(allowLocalHttp && isUnspecifiedBindHost(unbracketedHost))
+    !(allowLocalHttp && isUnspecifiedBindHost(unbracketedHost)) &&
+    // The explicitly opted-in reverse-proxy transport: the operator's HTTPS
+    // reverse proxy terminates client TLS on its own server and forwards to
+    // this plaintext upstream; its protection is the operator's
+    // responsibility, and the canonical HTTPS base URL remains mandatory.
+    !reverseProxyHttp
   ) {
     throw configError(
-      'Insecure listener refused: bind MCP_HTTP_HOST to a loopback address (behind an HTTPS reverse proxy) or configure MCP_HTTP_TLS_CERT and MCP_HTTP_TLS_KEY. The only plaintext exception is the explicitly opted-in local development mode (MCP_HTTP_ALLOW_LOCAL_HTTP=true) for a container published strictly on the host loopback; unencrypted container-network traffic is visible to other local Docker workloads.'
+      "Insecure listener refused: bind MCP_HTTP_HOST to a loopback address (behind an HTTPS reverse proxy) or configure MCP_HTTP_TLS_CERT and MCP_HTTP_TLS_KEY. The only plaintext exceptions are the explicitly opted-in local development mode (MCP_HTTP_ALLOW_LOCAL_HTTP=true) for a container published strictly on the host loopback and the explicitly opted-in reverse-proxy transport (MCP_HTTP_REVERSE_PROXY_HTTP=true) with a canonical https:// MCP_HTTP_EXTERNAL_BASE_URL, whose plaintext HTTP upstream protection is the operator's responsibility."
     );
   }
 
@@ -742,6 +778,8 @@ function resolveRemoteMcpConfig(env) {
     loopback: isLoopbackHost(unbracketedHost),
     /** T9 (S4-S6): explicit local development plaintext HTTP opt-in. */
     allowLocalHttp,
+    /** Explicit reverse-proxy HTTP transport opt-in; requires the canonical HTTPS base URL. */
+    reverseProxyHttp,
     tenantId,
     audience,
     requiredScopes,
@@ -823,6 +861,10 @@ function createRemoteMcpHttpServer(config) {
     entraLogin = null,
     // T9 (S4-S6): explicit local development plaintext HTTP opt-in.
     allowLocalHttp = false,
+    // Explicit reverse-proxy HTTP transport opt-in: a strict boolean field,
+    // and the canonical HTTPS external base URL is mandatory exactly as the
+    // environment resolver enforces it. A string value never enables it.
+    reverseProxyHttp = false,
     // T16 (S5,S10): explicit authentication mode plus the fully
     // resource-qualified Entra request scopes for direct-mode discovery.
     authMode = undefined,
@@ -854,11 +896,37 @@ function createRemoteMcpHttpServer(config) {
     // run this plaintext wildcard container listener; its exposure depends
     // on Docker publishing the port to the host loopback, and it fails
     // closed unless discovery still has a usable canonical base URL.
-    !(allowLocalHttp && isUnspecifiedBindHost(host))
+    !(allowLocalHttp && isUnspecifiedBindHost(host)) &&
+    // Same policy as the environment resolver: the opted-in reverse-proxy
+    // transport is the only other plaintext exception, and it always
+    // requires the canonical HTTPS external base URL below.
+    !reverseProxyHttp
   ) {
     throw configError(
-      'Insecure listener refused: non-loopback bindings require TLS configuration (the only plaintext exception is the explicitly opted-in local development mode for a container published strictly on the host loopback).'
+      'Insecure listener refused: non-loopback bindings require TLS configuration (the only plaintext exceptions are the explicitly opted-in local development mode for a container published strictly on the host loopback and the explicitly opted-in reverse-proxy transport with a canonical https:// externalBaseUrl).'
     );
+  }
+  if (reverseProxyHttp !== undefined && typeof reverseProxyHttp !== 'boolean') {
+    throw configError(
+      'reverseProxyHttp must be the exact boolean true to opt into the plaintext reverse-proxy HTTP upstream transport; a string never enables it.'
+    );
+  }
+  if (reverseProxyHttp) {
+    let proxyBaseUrl = null;
+    try {
+      proxyBaseUrl = new URL(externalBaseUrl);
+    } catch {
+      proxyBaseUrl = null;
+    }
+    if (
+      !proxyBaseUrl ||
+      proxyBaseUrl.protocol !== 'https:' ||
+      `${proxyBaseUrl.pathname}${proxyBaseUrl.search}${proxyBaseUrl.hash}` !== '/'
+    ) {
+      throw configError(
+        'reverseProxyHttp requires a canonical absolute https:// externalBaseUrl (origin only, no path, query, or fragment) of the address the external reverse proxy serves; the plaintext upstream must never advertise a plaintext, derived, or forwarded discovery URL.'
+      );
+    }
   }
   if (oauth !== null && oauth !== undefined) {
     if (typeof oauth !== 'object' || Array.isArray(oauth)) {

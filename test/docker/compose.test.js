@@ -56,44 +56,95 @@ describe('MCP HTTP docker-compose deployment', () => {
     'the Compose deployment contract must ship with the tests'
   );
 
-  describe('compose.production.yaml (pull-only, GHCR)', () => {
+  /**
+   * T-reverse-proxy (S1-S5): the generic, public-repo-minimal pull-only
+   * production config: the literal latest GHCR image, a plain HTTP listener
+   * on the fixed 8444:8444 mapping under the explicit reverse-proxy opt-in,
+   * the fixed public HTTPS origin and Entra Web callback for the central
+   * bridge login, no TLS mount or Compose interpolation, and the same
+   * hardened posture and durable bridge store as the other Compose configs.
+   */
+  describe('compose.production.yaml (pull-only, minimal reverse-proxy HTTP)', () => {
     const productionFile = readRequiredDeploymentFile(
       PRODUCTION_COMPOSE_PATH,
       'the pull-only production Compose contract must ship with the tests'
     );
 
-    test('pulls the published GHCR image by default and never builds', () => {
+    test('pulls the literal latest GHCR image and never builds (S4)', () => {
       const compose = parse(productionFile);
       const [service] = Object.values(compose.services);
       expect(service.command).toEqual(['node', 'bin/m365-mcp.js', 'http']);
       expect(service.build).toBeUndefined();
-      expect(service.image).toBe('${MCP_HTTP_IMAGE:-ghcr.io/actsis/outlook-mcp:2.4.7}');
+      expect(service.image).toBe('ghcr.io/actsis/outlook-mcp:latest');
     });
 
-    test('keeps the production security posture of compose.yaml (TLS, store volume, lockbox isolation)', () => {
+    test('stays minimal: no comments, no interpolation variables, about thirty-five lines (S1, S2)', () => {
+      const lines = productionFile.split('\n');
+      expect(lines.filter((line) => line.trim().startsWith('#'))).toEqual([]);
+      expect(productionFile).not.toMatch(/\$\{/);
+      expect(productionFile).not.toMatch(/MCP_HTTP_IMAGE|TLS_CERT:\s*\/|TLS_KEY:\s*\//);
+      expect(lines.length).toBeLessThanOrEqual(40);
+      expect(lines.length).toBeGreaterThanOrEqual(20);
+    });
+
+    test('runs the plaintext HTTP listener on the fixed 8444:8444 mapping under the explicit reverse-proxy opt-in (S2, S3, S5)', () => {
       const compose = parse(productionFile);
       const [service] = Object.values(compose.services);
       expect(service.environment.MCP_HTTP_HOST).toBe('0.0.0.0');
-      expect(service.environment.MCP_HTTP_TLS_CERT).toContain('/run/tls/');
-      expect(service.environment.MCP_HTTP_TLS_KEY).toContain('/run/tls/');
-      expect(service.environment.MCP_HTTP_BRIDGE_STORE_DIR).toBe('/app/data/oauth');
-      expect(service.environment.MCP_HTTP_AUTH_MODE).toBeUndefined();
+      expect(String(service.environment.MCP_HTTP_PORT)).toBe('8444');
+      expect(service.environment.MCP_HTTP_REVERSE_PROXY_HTTP).toBe('true');
+      expect(service.ports).toEqual(['8444:8444']);
+      // No accidental TLS from a stale env-file value: the explicit empty
+      // overrides win over env_file in the Compose merge.
+      expect(service.environment.MCP_HTTP_TLS_CERT).toBe('');
+      expect(service.environment.MCP_HTTP_TLS_KEY).toBe('');
       const volumes = (service.volumes || []).map((volume) =>
-        typeof volume === 'string' ? JSON.stringify(volume) : volume
+        typeof volume === 'string' ? volume : JSON.stringify(volume)
       );
-      const tlsMount = volumes.find((volume) => volume.includes('/run/tls'));
-      expect(tlsMount.replace(/["']/g, '')).toMatch(/:ro'?$/);
-      expect(volumes.find((volume) => volume.includes('/app/data/oauth'))).toBeDefined();
-      expect(volumes.find((volume) => volume.includes('.env.docker'))).toBeUndefined();
+      expect(volumes.find((volume) => volume.includes('/run/tls'))).toBeUndefined();
+    });
+
+    test('forces the central bridge login against the fixed public HTTPS origin and Web callback (S3, S4)', () => {
+      const compose = parse(productionFile);
+      const [service] = Object.values(compose.services);
+      expect(service.environment.MCP_HTTP_AUTH_MODE).toBe('bridge');
+      expect(service.environment.MCP_HTTP_EXTERNAL_BASE_URL).toBe(
+        'https://outlook-mcp.actsis.internal'
+      );
+      expect(service.environment.MCP_HTTP_LOGIN_REDIRECT_URI).toBe(
+        'https://outlook-mcp.actsis.internal/login/callback'
+      );
+      // Runtime Entra configuration and OAuth client registrations stay in
+      // the optional .env.docker file; the config itself bakes no credentials.
+      const envFile = [].concat(service.env_file || []);
+      const dockerEnv = envFile.find((entry) =>
+        typeof entry === 'string' ? entry === '.env.docker' : entry.path === '.env.docker'
+      );
+      expect(dockerEnv).toBeDefined();
+      if (typeof dockerEnv === 'object') {
+        expect(dockerEnv.required).toBe(false);
+      }
+      expect(
+        Object.keys(service.environment || {}).filter((key) => /ENTRA_|SECRET|TOKEN/i.test(key))
+      ).toEqual([]);
+    });
+
+    test('keeps the hardened posture and the same durable bridge_oauth_prod store mount, path, and single replica', () => {
+      const compose = parse(productionFile);
+      const [service] = Object.values(compose.services);
       expect(service.security_opt).toContain('no-new-privileges:true');
       expect(service.cap_drop).toContain('ALL');
       expect(service.read_only).toBe(true);
+      expect(service.tmpfs).toContain('/tmp');
+      expect(service.deploy.replicas).toBe(1);
+      expect(service.environment.MCP_HTTP_BRIDGE_STORE_DIR).toBe('/app/data/oauth');
+      const volumes = (service.volumes || []).map((volume) =>
+        typeof volume === 'string' ? volume : JSON.stringify(volume)
+      );
+      const mount = volumes.find((volume) => volume.split(':')[1] === '/app/data/oauth');
+      expect(mount).toBeDefined();
+      expect(mount.split(':')[0]).toBe('bridge_oauth_prod');
       expect(Object.keys(compose.volumes)).toContain('bridge_oauth_prod');
-      const ports = service.ports || [];
-      expect(ports).toHaveLength(1);
-      const mapping = typeof ports[0] === 'string' ? ports[0] : JSON.stringify(ports[0]);
-      expect(mapping).toContain('${MCP_HTTP_PUBLISHED_HOST:-127.0.0.1}');
-      expect(mapping).toContain('${MCP_HTTP_PUBLISHED_PORT:-8443}');
     });
   });
 

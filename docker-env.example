@@ -172,6 +172,18 @@ MCP_HTTP_EXTERNAL_BASE_URL=https://localhost:8443
 # in Compose ${...} substitution and cannot set this variable
 # before the image is chosen; never rely on .env.docker injecting the image.
 
+# -- Reverse-proxy production deployment (compose.production.yaml) ------------
+# For the generic public-repo production deployment behind an external HTTPS
+# reverse proxy, compose.production.yaml itself runs the published GHCR image
+# as plain HTTP on the fixed 8444:8444 mapping and sets
+# MCP_HTTP_REVERSE_PROXY_HTTP=true, MCP_HTTP_AUTH_MODE=bridge, the public
+# https:// origin, and the matching /login/callback Entra Web redirect. It
+# never relies on these runtime values; the plaintext HTTP upstream hop is
+# between your reverse proxy and this container, and protecting it is the
+# operator's responsibility. Do not set MCP_HTTP_REVERSE_PROXY_HTTP here:
+# the flag belongs to the Compose config, and the empty MCP_HTTP_TLS_CERT /
+# MCP_HTTP_TLS_KEY overrides it sets win over any stale env-file value.
+#
 # -- Not applicable here -----------------------------------------------------
 # USE_TEST_MODE is a local-only setting and must stay unset (or false):
 # the HTTP mode refuses to start when USE_TEST_MODE=true.

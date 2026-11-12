@@ -115,6 +115,30 @@ In bridge mode, the authorization server MUST issue one-time rotating refresh to
 - WHEN a fresh provider instance loads the same snapshot
 - THEN the same MCP access token verifies and the same refresh token continues its rotating family, while no plaintext MCP token or pending authorization code or browser state is recoverable from the snapshot
 
+### Requirement: Reverse-Proxy HTTP Transport Opt-In (S3-S5)
+
+The listener MUST accept an explicit `MCP_HTTP_REVERSE_PROXY_HTTP` selector with exactly the value `true` — any other value MUST refuse startup — that opts into a plaintext HTTP upstream listener for an operator-managed external HTTPS reverse proxy, typically on a different server, without changing delegated bearer validation, scope requirements, identity binding, the stateless boundary, or the previously specified discovery, challenge, OAuth, or configuration-gate behavior. While the opt-in is active, the listener MUST require the canonical `MCP_HTTP_EXTERNAL_BASE_URL` to be an absolute `https://` URL — plaintext, path-bearing, or missing base URLs MUST refuse startup — whether the flag arrives through the environment resolver or the programmatic configuration (a string or otherwise non-boolean programmatic value MUST never enable or bypass the mode), MUST allow the plaintext listener to bind non-loopback addresses only under the opt-in, and MUST keep the wildcard-bind discovery fail-closed rule unchanged. Forwarded Host/proto headers MUST stay untrusted: discovery metadata and challenges keep advertising only the trusted canonical configuration. The local-development semantics of `MCP_HTTP_ALLOW_LOCAL_HTTP` and the TLS configuration rules stay unchanged, and protecting the plaintext upstream hop explicitly rests with the operator.
+
+#### Scenario: Exact value releases the plaintext non-loopback listener
+
+- GIVEN `MCP_HTTP_REVERSE_PROXY_HTTP=true` with a canonical `https://` external base URL
+- WHEN the configuration resolves and the listener starts
+- THEN a non-loopback or wildcard bind without TLS is accepted as the reverse-proxy HTTP upstream
+- AND token verification and the OAuth mode rules are unchanged
+
+#### Scenario: Value-exactness and the canonical HTTPS base are enforced on both configuration paths
+
+- GIVEN any other `MCP_HTTP_REVERSE_PROXY_HTTP` value, a programmatic non-boolean `reverseProxyHttp`, or the opt-in active with a missing, plaintext, or path-bearing base URL
+- WHEN the configuration resolves
+- THEN startup is refused naming the flag and the required canonical HTTPS base URL
+
+#### Scenario: Forwarded headers stay untrusted in the reverse-proxy mode
+
+- GIVEN a reverse-proxy deployment advertising `https://<canonical domain>`
+- WHEN requests arrive with forged forwarded host/proto headers and a hostile Host header
+- THEN discovery advertises exactly the configured canonical base URL
+- AND an unauthenticated `/mcp` request answers 401 with the canonical challenge URL and never a forwarded value
+
 ### Requirement: Stateless Bearer Validation Boundary
 
 The listener MUST validate one delegated Entra bearer token per request (signature, issuer, audience, tenant, expiry, delegated identity, required short scp scopes) with no server-side session or persisted user refresh tokens, and a still-valid token MUST be accepted by a recreated server process. Unauthenticated, expired, wrong-audience, wrong-tenant, and insufficient-scope requests MUST get `401` with the discovery metadata before any dispatch, and tokens for two distinct users MUST stay isolated per request.

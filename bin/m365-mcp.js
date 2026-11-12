@@ -104,7 +104,7 @@ async function run(args, deps = {}) {
     stderr.write(`  ${MODES[1]}       start the authentication callback server (port 3333)\n`);
     stderr.write(`  ${MODES[2]}  perform explicit Vault setup\n`);
     stderr.write(
-      `  ${MODES[3]}        start the authenticated remote MCP HTTP server (intranet; Entra bearer tokens)\n`
+      `  ${MODES[3]}        start the authenticated remote MCP HTTP server (intranet; Entra bearer tokens; optional plaintext HTTP upstream behind an external HTTPS reverse proxy via MCP_HTTP_REVERSE_PROXY_HTTP=true)\n`
     );
     return 2;
   }
