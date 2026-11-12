@@ -155,9 +155,13 @@ describe('release.yml publish-container job (T28)', () => {
     expect(verifyScript).toMatch(/std-io|stdio|HTTP, not stdio/i);
   });
 
-  it('logs in only to ghcr.io with the built-in token through stdin from an isolated umask-077 DOCKER_CONFIG', () => {
+  it('logs in only to ghcr.io with the built-in token through stdin from an isolated runtime DOCKER_CONFIG', () => {
     const job = doc.jobs['publish-container'];
-    expect(job.env.DOCKER_CONFIG).toBe('${{ runner.temp }}/.docker-config');
+    // jobs.<job>.env may not use the runner context (GitHub run 43138241080
+    // rejected the workflow for exactly that), so the isolated directory is
+    // exported at runtime by the setup step instead of a job-level
+    // expression.
+    expect(job.env.DOCKER_CONFIG).toBeUndefined();
     expect(job.env.GH_TOKEN).toBe('${{ github.token }}');
     const login = job.steps.find((step) => (step.run || '').includes('docker login'));
     expect(login.run).toContain('umask 077');
@@ -166,6 +170,43 @@ describe('release.yml publish-container job (T28)', () => {
     expect(login.run).not.toMatch(/docker login[^\n]*GH_TOKEN/);
     expect(login.run).not.toMatch(/--password=/);
     expect(login.run).not.toMatch(/secrets\./);
+  });
+
+  it('never uses the unsupported runner context in any job-level env of the changed workflow (round-2 correction)', () => {
+    for (const [name, job] of Object.entries(doc.jobs)) {
+      for (const [key, value] of Object.entries(job.env || {})) {
+        expect({ job: name, key, value }).not.toMatchObject({
+          value: expect.stringMatching(/\$\{\{\s*runner\./),
+        });
+      }
+    }
+  });
+
+  it('exports the isolated DOCKER_CONFIG through GITHUB_ENV before any docker command (round-2 correction)', () => {
+    const steps = doc.jobs['publish-container'].steps;
+    const setup = steps.find(
+      (step) =>
+        (step.run || '').includes('GITHUB_ENV') && (step.run || '').includes('DOCKER_CONFIG')
+    );
+    expect(setup).toBeDefined();
+    const setupIndex = steps.indexOf(setup);
+    const loadIndex = steps.findIndex((step) => (step.run || '').includes('docker load'));
+    const loginIndex = steps.findIndex((step) => (step.run || '').includes('docker login'));
+    expect(setupIndex).toBeGreaterThanOrEqual(0);
+    expect(setupIndex).toBeLessThan(loadIndex);
+    expect(setupIndex).toBeLessThan(loginIndex);
+    const script = setup.run;
+    expect(script).toMatch(/umask 077/);
+    expect(script).toContain('chmod 700');
+    expect(script).toContain('${RUNNER_TEMP}/.docker-config');
+    expect(script).toContain('>> "$GITHUB_ENV"');
+    // Isolation: only runtime lines (comments excluded) must derive the
+    // directory from RUNNER_TEMP — never a fixed global or repository path.
+    const runtimeLines = script
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('#'))
+      .join('\n');
+    expect(runtimeLines).not.toMatch(/HOME|~\/|\.github|workspace/i);
   });
 
   it('targets only the canonical lowercase-repository GHCR image for version and latest tags', () => {
@@ -320,7 +361,9 @@ describe('publish-container shell simulation (fake docker/gh only, isolated scra
       GITHUB_ACTOR: 'octocat',
       GH_TOKEN: 'synthetic-ghcr-token-not-a-real-value',
       RUNNER_TEMP: path.join(scratch, 'runner-temp'),
-      DOCKER_CONFIG: path.join(scratch, 'runner-temp', '.docker-config'),
+      // No pre-seeded DOCKER_CONFIG: the runtime setup step must export it
+      // through GITHUB_ENV exactly like the runner does (round-2 contract).
+      GITHUB_ENV: path.join(scratch, 'github-env.txt'),
       GITHUB_STEP_SUMMARY: path.join(scratch, 'step-summary.md'),
       FAKE_MANIFEST_MODE: 'missing',
       FAKE_LOCAL_ID: LOCAL_ID,
@@ -463,26 +506,65 @@ describe('publish-container shell simulation (fake docker/gh only, isolated scra
   }
 
   /** Runs the publish-container run blocks under the fake clients. */
-  function runSteps(scratch, env, { prepare, prependFakes } = {}) {
+  /**
+   * Emulates the runner's GITHUB_ENV primitive: `KEY=value` lines appended by
+   * a completed step become environment for every following step. Returns the
+   * merged overlay so the harness can assert the propagated values.
+   */
+  function githubEnvOverlay(envBase) {
+    if (!envBase.GITHUB_ENV || !fs.existsSync(envBase.GITHUB_ENV)) {
+      return {};
+    }
+    const overlay = {};
+    for (const line of fs.readFileSync(envBase.GITHUB_ENV, 'utf8').split('\n')) {
+      const index = line.indexOf('=');
+      if (index > 0) {
+        overlay[line.slice(0, index).trim()] = line.slice(index + 1).trim();
+      }
+    }
+    return overlay;
+  }
+
+  function runSteps(scratch, env, { prepare, prependFakes = true } = {}) {
     const stateFile = path.join(scratch, 'registry-state.log');
     if (prepare) {
       prepareScratch(scratch);
       fs.writeFileSync(path.join(scratch, 'runner-temp', '.keep'), '');
+      if (env.GITHUB_ENV && fs.existsSync(env.GITHUB_ENV)) {
+        fs.unlinkSync(env.GITHUB_ENV);
+      }
     }
     if (!fs.existsSync(stateFile)) {
       fs.writeFileSync(stateFile, '');
     }
-    const stepEnvironment = stepEnv(scratch, env, stateFile, { prependFakes });
-    assertSimulatedClientsResolveToFakes(scratch, stepEnvironment);
+    const preflightEnvironment = stepEnv(scratch, env, stateFile, { prependFakes });
+    assertSimulatedClientsResolveToFakes(scratch, preflightEnvironment);
     const job = doc.jobs['publish-container'];
     let failedAt = null;
     let failedOutput = '';
+    // Environment actually applied to each executed step, with the runner's
+    // GITHUB_ENV exports propagated step to step like in Actions.
+    const envByStep = {};
+    const procEnv = { ...process.env };
+    delete procEnv.DOCKER_CONFIG; // never implicit: only the setup step provides it
     for (const step of job.steps) {
       if (step.uses) continue; // download-artifact is satisfied by the fixture bundle
+      const mergedEnv = {
+        ...procEnv,
+        ...env,
+        ...githubEnvOverlay(env),
+        FAKE_STATE_FILE: stateFile,
+        FAKE_DOCKER_SENTINEL,
+        FAKE_GH_SENTINEL,
+        PATH: prependFakes
+          ? `${path.join(scratch, 'bin')}${path.delimiter}${process.env.PATH}`
+          : process.env.PATH,
+      };
+      envByStep[step.name] = { DOCKER_CONFIG: mergedEnv.DOCKER_CONFIG };
       const result = spawnSync('bash', ['-c', step.run], {
         cwd: scratch,
         encoding: 'utf8',
-        env: stepEnv(scratch, env, stateFile, { prependFakes }),
+        env: mergedEnv,
       });
       if (result.status !== 0) {
         failedAt = step.name;
@@ -495,6 +577,7 @@ describe('publish-container shell simulation (fake docker/gh only, isolated scra
       failedAt,
       failedOutput,
       state,
+      envByStep,
       pushes: state.filter((line) => line.startsWith('docker push')),
       logins: state.filter((line) => line.startsWith('docker login')),
       ghCalls: state.filter((line) => line.startsWith('gh ')),
@@ -530,6 +613,41 @@ describe('publish-container shell simulation (fake docker/gh only, isolated scra
           (line) => line === 'docker tag outlook-mcp-http:2.4.5 ghcr.io/actsis/outlook-mcp:latest'
         )
       ).toBe(true);
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * Round-2 contract: the isolated credential directory is NOT pre-seeded;
+   * the setup step exports it through GITHUB_ENV and the runner primitive
+   * propagates it to every following step (login, guards, pushes).
+   */
+  it('propagates the isolated DOCKER_CONFIG from the setup step through GITHUB_ENV to the login step', () => {
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ghcr-sim-'));
+    try {
+      const result = runPublishContainer(scratch, baseEnv(scratch));
+      expect(result.failedAt).toBeNull();
+      const setupStep = doc.jobs['publish-container'].steps.find((step) =>
+        (step.run || '').includes('GITHUB_ENV')
+      );
+      const loginStep = doc.jobs['publish-container'].steps.find((step) =>
+        (step.run || '').includes('docker login')
+      );
+      // Before the setup step no DOCKER_CONFIG exists anywhere.
+      expect(result.envByStep[setupStep.name].DOCKER_CONFIG).toBeUndefined();
+      // After it, the login step receives exactly the exported private path
+      // under RUNNER_TEMP (GITHUB_ENV propagation, never a job-level env).
+      // The shell script always writes the forward-slash form.
+      expect(result.envByStep[loginStep.name].DOCKER_CONFIG).toBe(
+        `${path.join(scratch, 'runner-temp')}/.docker-config`
+      );
+      expect(fs.existsSync(path.join(scratch, 'runner-temp', '.docker-config'))).toBe(true);
+      // The exported environment carries only the directory; the synthetic
+      // token never enters GITHUB_ENV, args, or logs.
+      const exported = fs.readFileSync(baseEnv(scratch).GITHUB_ENV, 'utf8');
+      expect(exported).toContain('DOCKER_CONFIG=');
+      expect(exported).not.toContain('synthetic-ghcr-token');
     } finally {
       fs.rmSync(scratch, { recursive: true, force: true });
     }

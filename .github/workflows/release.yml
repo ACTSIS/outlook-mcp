@@ -646,10 +646,6 @@ jobs:
 
     env:
       GH_TOKEN: ${{ github.token }}
-      # Isolated credential directory: docker never touches the runner's own
-      # ~/.docker and the token is written only here (umask 077 in the login
-      # step), never to the repository or the persisted workspace.
-      DOCKER_CONFIG: ${{ runner.temp }}/.docker-config
 
     steps:
       - name: Download the exact tested Docker image bundle
@@ -658,6 +654,23 @@ jobs:
           name: docker-image
           path: docker-image-bundle
 
+      - name: Prepare the isolated registry credential directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          # jobs.<job>.env cannot use the runner context (GitHub rejected the
+          # workflow for that expression), so the isolated credential
+          # directory is exported here as RUNTIME configuration for every
+          # following step through the GITHUB_ENV primitive, before ANY
+          # docker command runs. The directory lives under RUNNER_TEMP only:
+          # never inside the repository or workspace, never a fixed global
+          # location, and the token is never written there until the login
+          # step below (umask 077).
+          umask 077
+          DOCKER_CONFIG_PRIVATE="${RUNNER_TEMP}/.docker-config"
+          mkdir -p "$DOCKER_CONFIG_PRIVATE"
+          chmod 700 "$DOCKER_CONFIG_PRIVATE"
+          echo "DOCKER_CONFIG=$DOCKER_CONFIG_PRIVATE" >> "$GITHUB_ENV"
       - name: Verify the bundle checksum before loading or logging in
         shell: bash
         run: |
